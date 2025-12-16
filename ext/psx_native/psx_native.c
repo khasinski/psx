@@ -127,11 +127,17 @@ static inline void jump(CPUState *cpu, uint32_t target) {
 
 // Exception handling
 static void raise_exception(CPUState *cpu, uint32_t cause) {
-    rb_funcall(cpu->cop0, rb_intern("enter_exception"), 3,
-               UINT2NUM(cpu->current_pc),
-               UINT2NUM(cause),
-               cpu->in_delay_slot ? Qtrue : Qfalse);
-    cpu->pc = 0x80000080;
+    // Build kwargs hash for in_delay_slot
+    VALUE kwargs = rb_hash_new();
+    rb_hash_aset(kwargs, ID2SYM(rb_intern("in_delay_slot")), cpu->in_delay_slot ? Qtrue : Qfalse);
+
+    // Call with correct argument order: (code, pc, **kwargs)
+    // Ruby signature: enter_exception(code, pc, in_delay_slot: false, bad_addr: nil)
+    VALUE argv[3] = { UINT2NUM(cause), UINT2NUM(cpu->current_pc), kwargs };
+    VALUE exception_vector = rb_funcallv_kw(cpu->cop0, rb_intern("enter_exception"), 3, argv, RB_PASS_KEYWORDS);
+
+    // Use the returned exception vector (depends on BEV bit in status register)
+    cpu->pc = NUM2UINT(exception_vector);
     cpu->next_pc = cpu->pc + 4;
     cpu->branch_pending = false;
 }
@@ -151,6 +157,11 @@ static void execute_cop0(CPUState *cpu, uint32_t instruction) {
             break;
         case 0x04: // MTC0 - Move to COP0
             rb_funcall(cpu->cop0, rb_intern("write"), 2, UINT2NUM(rd), UINT2NUM(cpu->regs[rt]));
+            // Sync cache isolation flag to memory when writing to SR (register 12)
+            if (rd == 12) {
+                VALUE cache_isolated = rb_funcall(cpu->cop0, rb_intern("cache_isolated?"), 0);
+                rb_funcall(cpu->memory, rb_intern("cache_isolated="), 1, cache_isolated);
+            }
             break;
         case 0x10: // RFE - Return from exception
             if ((instruction & 0x3F) == 0x10) {
@@ -195,10 +206,10 @@ static void execute_special(CPUState *cpu, uint32_t instruction) {
             jump(cpu, cpu->regs[rs]);
             break;
         case 0x0C: // SYSCALL
-            raise_exception(cpu, 0x20);
+            raise_exception(cpu, 0x08);  // Exception code 8, Ruby shifts << 2
             break;
         case 0x0D: // BREAK
-            raise_exception(cpu, 0x24);
+            raise_exception(cpu, 0x09);  // Exception code 9, Ruby shifts << 2
             break;
         case 0x10: // MFHI
             set_reg(cpu, rd, cpu->hi);

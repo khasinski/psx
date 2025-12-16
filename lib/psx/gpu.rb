@@ -102,6 +102,7 @@ module PSX
       # VRAM transfer state
       @vram_transfer_x = 0
       @vram_transfer_y = 0
+      @vram_transfer_start_x = 0  # Starting X for line wrap detection
       @vram_transfer_width = 0
       @vram_transfer_height = 0
       @vram_transfer_count = 0
@@ -434,11 +435,36 @@ module PSX
       end
 
       # Draw triangles
-      if quad
-        draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud)
-        draw_triangle(points[1], points[2], points[3], colors[1], colors[2], colors[3], gouraud)
+      if textured
+        # Get CLUT from first texcoord (bits 16-31)
+        clut = texcoords[0][:clut]
+
+        # Get texture page from second texcoord (bits 16-31)
+        # This overrides the global texture page settings for this primitive
+        tpage = texcoords[1][:clut]  # Reusing :clut field, it's actually tpage for vertex 1
+        tex_page_x = (tpage & 0x0F) * 64
+        tex_page_y = ((tpage >> 4) & 0x01) * 256
+        tex_depth = (tpage >> 7) & 0x03
+
+        if quad
+          draw_textured_triangle(points[0], points[1], points[2],
+                                 texcoords[0], texcoords[1], texcoords[2],
+                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+          draw_textured_triangle(points[1], points[2], points[3],
+                                 texcoords[1], texcoords[2], texcoords[3],
+                                 colors[1], clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+        else
+          draw_textured_triangle(points[0], points[1], points[2],
+                                 texcoords[0], texcoords[1], texcoords[2],
+                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+        end
       else
-        draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud)
+        if quad
+          draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud)
+          draw_triangle(points[1], points[2], points[3], colors[1], colors[2], colors[3], gouraud)
+        else
+          draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud)
+        end
       end
     end
 
@@ -479,6 +505,7 @@ module PSX
     def gp0_rectangle
       cmd = @current_cmd
       textured = (cmd & 0x04) != 0
+      raw_texture = (cmd & 0x01) != 0
       size_mode = (cmd >> 3) & 0x3
 
       c = @cmd_buffer[0]
@@ -493,8 +520,19 @@ module PSX
       y += @draw_offset_y
 
       idx = 2
+      tex_u = 0
+      tex_v = 0
+      clut_x = 0
+      clut_y = 0
+
       if textured
-        idx += 1  # Skip texcoord for now
+        tc = @cmd_buffer[idx]
+        tex_u = tc & 0xFF
+        tex_v = (tc >> 8) & 0xFF
+        clut = (tc >> 16) & 0xFFFF
+        clut_x = (clut & 0x3F) * 16
+        clut_y = (clut >> 6) & 0x1FF
+        idx += 1
       end
 
       case size_mode
@@ -513,7 +551,11 @@ module PSX
         h = 16
       end
 
-      draw_rect(x, y, w, h, color)
+      if textured
+        draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, color, raw_texture)
+      else
+        draw_rect(x, y, w, h, color)
+      end
     end
 
     def gp0_copy_vram_vram
@@ -545,6 +587,7 @@ module PSX
 
       @vram_transfer_x = pos & 0x3FF
       @vram_transfer_y = (pos >> 16) & 0x1FF
+      @vram_transfer_start_x = @vram_transfer_x  # Remember starting X for line wrap
       w = (((size & 0xFFFF) - 1) & 0x3FF) + 1
       h = ((((size >> 16) & 0xFFFF) - 1) & 0x1FF) + 1
       @vram_transfer_width = w
@@ -585,26 +628,23 @@ module PSX
     def vram_write_data(value)
       return if @vram_transfer_count <= 0
 
-      x = @vram_transfer_x
-      y = @vram_transfer_y
-
       # Write two pixels per word
       p0 = value & 0xFFFF
       p1 = (value >> 16) & 0xFFFF
 
-      @vram[y * VRAM_WIDTH + x] = p0
+      # Write first pixel
+      @vram[@vram_transfer_y * VRAM_WIDTH + (@vram_transfer_x % VRAM_WIDTH)] = p0
       @vram_transfer_x += 1
-      if @vram_transfer_x >= @vram_transfer_x % VRAM_WIDTH + @vram_transfer_width
-        @vram_transfer_x -= @vram_transfer_width
+      if @vram_transfer_x >= @vram_transfer_start_x + @vram_transfer_width
+        @vram_transfer_x = @vram_transfer_start_x
         @vram_transfer_y = (@vram_transfer_y + 1) % VRAM_HEIGHT
       end
 
-      x = @vram_transfer_x
-      y = @vram_transfer_y
-      @vram[y * VRAM_WIDTH + x] = p1
+      # Write second pixel
+      @vram[@vram_transfer_y * VRAM_WIDTH + (@vram_transfer_x % VRAM_WIDTH)] = p1
       @vram_transfer_x += 1
-      if @vram_transfer_x >= @vram_transfer_x % VRAM_WIDTH + @vram_transfer_width
-        @vram_transfer_x -= @vram_transfer_width
+      if @vram_transfer_x >= @vram_transfer_start_x + @vram_transfer_width
+        @vram_transfer_x = @vram_transfer_start_x
         @vram_transfer_y = (@vram_transfer_y + 1) % VRAM_HEIGHT
       end
 
@@ -628,10 +668,11 @@ module PSX
     end
 
     def gp0_texture_window(value)
-      @texture_window_mask_x = (value & 0x1F) * 8
-      @texture_window_mask_y = ((value >> 5) & 0x1F) * 8
-      @texture_window_offset_x = ((value >> 10) & 0x1F) * 8
-      @texture_window_offset_y = ((value >> 15) & 0x1F) * 8
+      # Store raw values (in 8-texel units), don't pre-multiply
+      @texture_window_mask_x = value & 0x1F
+      @texture_window_mask_y = (value >> 5) & 0x1F
+      @texture_window_offset_x = (value >> 10) & 0x1F
+      @texture_window_offset_y = (value >> 15) & 0x1F
     end
 
     def gp0_draw_area_top_left(value)
@@ -777,6 +818,36 @@ module PSX
       end
     end
 
+    def draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, base_color, raw_texture)
+      h.times do |dy|
+        w.times do |dx|
+          # Calculate texture coordinates
+          u = (tex_u + dx) & 0xFF
+          v = (tex_v + dy) & 0xFF
+
+          # Sample texture
+          texel = sample_texture(u, v, clut_x, clut_y, @texture_page_x, @texture_page_y, @texture_depth)
+
+          # Skip transparent texels
+          next if texel_transparent?(texel)
+
+          # Convert to RGB
+          tex_color = vram_to_rgb(texel)
+
+          if raw_texture
+            # Raw texture - use texture color directly
+            draw_pixel(x + dx, y + dy, tex_color[:r], tex_color[:g], tex_color[:b])
+          else
+            # Modulate with base color
+            r = ((tex_color[:r] * base_color[:r]) >> 7).clamp(0, 255)
+            g = ((tex_color[:g] * base_color[:g]) >> 7).clamp(0, 255)
+            b = ((tex_color[:b] * base_color[:b]) >> 7).clamp(0, 255)
+            draw_pixel(x + dx, y + dy, r, g, b)
+          end
+        end
+      end
+    end
+
     def draw_line(x0, y0, x1, y1, c0, c1, gouraud)
       # Bresenham's line algorithm with optional color interpolation
       dx = (x1 - x0).abs
@@ -882,6 +953,146 @@ module PSX
         g: (c0[:g] + (c1[:g] - c0[:g]) * t).to_i.clamp(0, 255),
         b: (c0[:b] + (c1[:b] - c0[:b]) * t).to_i.clamp(0, 255)
       }
+    end
+
+    # Sample a texel from VRAM
+    # Returns 15-bit color value or nil if transparent
+    def sample_texture(u, v, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth)
+      # Apply texture window wrapping
+      # Formula: texcoord = (texcoord AND NOT(Mask*8)) OR ((Offset AND Mask)*8)
+      u = (u & ~(@texture_window_mask_x * 8)) | ((@texture_window_offset_x & @texture_window_mask_x) * 8)
+      v = (v & ~(@texture_window_mask_y * 8)) | ((@texture_window_offset_y & @texture_window_mask_y) * 8)
+
+      case tex_depth
+      when 0  # 4-bit CLUT
+        # Each 16-bit VRAM word holds 4 texels
+        texel_x = tex_page_x + (u / 4)
+        texel_y = tex_page_y + v
+        word = @vram[(texel_y % VRAM_HEIGHT) * VRAM_WIDTH + (texel_x % VRAM_WIDTH)] || 0
+
+        # Extract 4-bit index based on u position
+        shift = (u & 3) * 4
+        index = (word >> shift) & 0x0F
+
+        # Look up in CLUT
+        clut_addr = clut_y * VRAM_WIDTH + clut_x + index
+        @vram[clut_addr] || 0
+
+      when 1  # 8-bit CLUT
+        # Each 16-bit VRAM word holds 2 texels
+        texel_x = tex_page_x + (u / 2)
+        texel_y = tex_page_y + v
+        word = @vram[(texel_y % VRAM_HEIGHT) * VRAM_WIDTH + (texel_x % VRAM_WIDTH)] || 0
+
+        # Extract 8-bit index
+        shift = (u & 1) * 8
+        index = (word >> shift) & 0xFF
+
+        # Look up in CLUT
+        clut_addr = clut_y * VRAM_WIDTH + clut_x + index
+        @vram[clut_addr] || 0
+
+      when 2  # 15-bit direct
+        texel_x = tex_page_x + u
+        texel_y = tex_page_y + v
+        @vram[(texel_y % VRAM_HEIGHT) * VRAM_WIDTH + (texel_x % VRAM_WIDTH)] || 0
+
+      else
+        0
+      end
+    end
+
+    # Convert 15-bit VRAM color to RGB hash
+    def vram_to_rgb(color16)
+      {
+        r: (color16 & 0x001F) << 3,
+        g: (color16 & 0x03E0) >> 2,
+        b: (color16 & 0x7C00) >> 7
+      }
+    end
+
+    # Check if texel is transparent (bit 15 = 0 and color = 0)
+    def texel_transparent?(color16)
+      color16 == 0
+    end
+
+    # Draw textured triangle with UV interpolation
+    def draw_textured_triangle(p0, p1, p2, t0, t1, t2, base_color, clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+      # Extract CLUT position
+      clut_x = (clut & 0x3F) * 16
+      clut_y = (clut >> 6) & 0x1FF
+
+      # Sort vertices by Y, keeping UVs in sync
+      verts = [[p0, t0], [p1, t1], [p2, t2]].sort_by { |v, _| v[:y] }
+      v0, uv0 = verts[0]
+      v1, uv1 = verts[1]
+      v2, uv2 = verts[2]
+
+      return if v2[:y] == v0[:y]  # Degenerate triangle
+
+      # Rasterize with UV interpolation
+      (v0[:y].to_i..v2[:y].to_i).each do |y|
+        next if y < @draw_area_top || y > @draw_area_bottom
+
+        # Find X bounds and interpolate UVs for this scanline
+        if y < v1[:y]
+          next if v1[:y] == v0[:y]
+          t1_interp = (y - v0[:y]).to_f / (v1[:y] - v0[:y])
+          x1 = v0[:x] + (v1[:x] - v0[:x]) * t1_interp
+          u1 = uv0[:u] + (uv1[:u] - uv0[:u]) * t1_interp
+          v1_tex = uv0[:v] + (uv1[:v] - uv0[:v]) * t1_interp
+        else
+          next if v2[:y] == v1[:y]
+          t1_interp = (y - v1[:y]).to_f / (v2[:y] - v1[:y])
+          x1 = v1[:x] + (v2[:x] - v1[:x]) * t1_interp
+          u1 = uv1[:u] + (uv2[:u] - uv1[:u]) * t1_interp
+          v1_tex = uv1[:v] + (uv2[:v] - uv1[:v]) * t1_interp
+        end
+
+        t2_interp = (y - v0[:y]).to_f / (v2[:y] - v0[:y])
+        x2 = v0[:x] + (v2[:x] - v0[:x]) * t2_interp
+        u2 = uv0[:u] + (uv2[:u] - uv0[:u]) * t2_interp
+        v2_tex = uv0[:v] + (uv2[:v] - uv0[:v]) * t2_interp
+
+        # Ensure x1 < x2
+        if x1 > x2
+          x1, x2 = x2, x1
+          u1, u2 = u2, u1
+          v1_tex, v2_tex = v2_tex, v1_tex
+        end
+
+        # Draw scanline with texture sampling
+        x_start = [x1.to_i, @draw_area_left].max
+        x_end = [x2.to_i, @draw_area_right].min
+        x_span = x2 - x1
+
+        (x_start..x_end).each do |x|
+          # Interpolate UV
+          t = x_span > 0 ? (x - x1) / x_span : 0
+          u = (u1 + (u2 - u1) * t).to_i & 0xFF
+          v_coord = (v1_tex + (v2_tex - v1_tex) * t).to_i & 0xFF
+
+          # Sample texture
+          texel = sample_texture(u, v_coord, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth)
+
+          # Skip transparent texels
+          next if texel_transparent?(texel)
+
+          # Convert to RGB
+          tex_color = vram_to_rgb(texel)
+
+          if raw_texture
+            # Raw texture - use texture color directly
+            draw_pixel(x, y, tex_color[:r], tex_color[:g], tex_color[:b])
+          else
+            # Modulate with base color
+            r = ((tex_color[:r] * base_color[:r]) >> 7).clamp(0, 255)
+            g = ((tex_color[:g] * base_color[:g]) >> 7).clamp(0, 255)
+            b = ((tex_color[:b] * base_color[:b]) >> 7).clamp(0, 255)
+            draw_pixel(x, y, r, g, b)
+          end
+        end
+      end
     end
   end
 end
