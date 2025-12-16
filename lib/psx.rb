@@ -12,6 +12,14 @@ require_relative "psx/cpu"
 require_relative "psx/disasm"
 require_relative "psx/display"
 
+# Try to load native extension
+begin
+  require_relative "psx_native"
+  PSX_NATIVE_AVAILABLE = true
+rescue LoadError
+  PSX_NATIVE_AVAILABLE = false
+end
+
 module PSX
   class Emulator
     attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers
@@ -21,7 +29,7 @@ module PSX
     CYCLES_PER_FRAME = CPU_FREQ / 60  # ~560K cycles per frame at 60Hz
     CYCLES_PER_SCANLINE = CYCLES_PER_FRAME / 263  # NTSC has 263 scanlines
 
-    def initialize(bios_path)
+    def initialize(bios_path, native: :auto)
       bios = BIOS.new(bios_path)
       ram = RAM.new
       @interrupts = Interrupts.new
@@ -30,27 +38,49 @@ module PSX
       @timers = Timers.new(interrupts: @interrupts)
       @memory = Memory.new(bios: bios, ram: ram, interrupts: @interrupts, dma: @dma, timers: @timers)
       @memory.gpu = @gpu
-      @cpu = CPU.new(@memory, interrupts: @interrupts)
+
+      # Choose CPU implementation
+      use_native = case native
+                   when :auto then PSX_NATIVE_AVAILABLE
+                   when true then PSX_NATIVE_AVAILABLE
+                   when false then false
+                   else PSX_NATIVE_AVAILABLE
+                   end
+
+      if use_native
+        cop0 = COP0.new
+        @cpu = NativeCPU.new(@memory, @interrupts, cop0)
+        @native_cpu = true
+        puts "Using native CPU extension"
+      else
+        @cpu = CPU.new(@memory, interrupts: @interrupts)
+        @native_cpu = false
+        puts "Using Ruby CPU implementation"
+      end
 
       @cycle_count = 0
       @frame_count = 0
+    end
+
+    def native_cpu?
+      @native_cpu
     end
 
     def run(steps: nil, debug: false)
       if debug
         run_debug(steps)
       elsif steps
-        run_fast(steps)
+        @native_cpu ? run_fast_native(steps) : run_fast(steps)
       else
         run_forever
       end
-    rescue CPU::ExecutionError => e
+    rescue CPU::ExecutionError, NativeCPU::ExecutionError => e
       puts "Execution error: #{e.message}"
       puts @cpu.dump_registers
       raise
     end
 
-    # Fast path: known number of steps, no debug
+    # Fast path for Ruby CPU: known number of steps, no debug
     def run_fast(steps)
       cpu = @cpu
       cycle_count = @cycle_count
@@ -74,6 +104,35 @@ module PSX
           frame_count += 1
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank
+        end
+      end
+
+      @cycle_count = cycle_count
+      @frame_count = frame_count
+    end
+
+    # Fast path for Native CPU: batch execution with periodic device ticks
+    def run_fast_native(steps)
+      cycle_count = @cycle_count
+      frame_count = @frame_count
+      remaining = steps
+
+      # Run in chunks, ticking devices periodically
+      chunk_size = 64  # Tick devices every 64 cycles
+      while remaining > 0
+        batch = [remaining, chunk_size].min
+        @cpu.run_steps(batch)
+        remaining -= batch
+
+        # Tick devices
+        cycle_count += batch
+        @timers.tick(batch)
+
+        if cycle_count >= CYCLES_PER_FRAME
+          cycle_count -= CYCLES_PER_FRAME
+          frame_count += 1
+          @interrupts.request(Interrupts::IRQ_VBLANK)
+          @gpu.vblank
         end
       end
 

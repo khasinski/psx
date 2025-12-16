@@ -11,6 +11,7 @@
 # Temporary/profile files
 profile.rb
 profile_detailed.rb
+benchmark_cpu.rb
 
 # Ruby
 *.gem
@@ -21,3 +22,13 @@ vendor/bundle/
 
 # Profiling
 *.dump
+
+# Native extension build artifacts
+ext/psx_native/Makefile
+ext/psx_native/mkmf.log
+ext/psx_native/*.o
+ext/psx_native/*.bundle
+ext/psx_native/*.so
+ext/psx_native/*.dSYM/
+lib/psx_native.bundle
+lib/psx_native.so
