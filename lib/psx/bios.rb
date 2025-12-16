@@ -17,11 +17,14 @@ module PSX
     end
 
     def read16(offset)
-      @data.byteslice(offset, 2).unpack1("v")
+      @data.getbyte(offset) | (@data.getbyte(offset + 1) << 8)
     end
 
     def read32(offset)
-      @data.byteslice(offset, 4).unpack1("V")
+      @data.getbyte(offset) |
+        (@data.getbyte(offset + 1) << 8) |
+        (@data.getbyte(offset + 2) << 16) |
+        (@data.getbyte(offset + 3) << 24)
     end
   end
 end

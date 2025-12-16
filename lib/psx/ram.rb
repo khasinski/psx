@@ -14,11 +14,16 @@ module PSX
     end
 
     def read16(offset)
-      @data.byteslice(offset & MASK, 2).unpack1("v")
+      offset &= MASK
+      @data.getbyte(offset) | (@data.getbyte(offset + 1) << 8)
     end
 
     def read32(offset)
-      @data.byteslice(offset & MASK, 4).unpack1("V")
+      offset &= MASK
+      @data.getbyte(offset) |
+        (@data.getbyte(offset + 1) << 8) |
+        (@data.getbyte(offset + 2) << 16) |
+        (@data.getbyte(offset + 3) << 24)
     end
 
     def write8(offset, value)
@@ -27,12 +32,16 @@ module PSX
 
     def write16(offset, value)
       offset &= MASK
-      @data[offset, 2] = [value].pack("v")
+      @data.setbyte(offset, value & 0xFF)
+      @data.setbyte(offset + 1, (value >> 8) & 0xFF)
     end
 
     def write32(offset, value)
       offset &= MASK
-      @data[offset, 4] = [value].pack("V")
+      @data.setbyte(offset, value & 0xFF)
+      @data.setbyte(offset + 1, (value >> 8) & 0xFF)
+      @data.setbyte(offset + 2, (value >> 16) & 0xFF)
+      @data.setbyte(offset + 3, (value >> 24) & 0xFF)
     end
   end
 end
