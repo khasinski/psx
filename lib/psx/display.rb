@@ -33,50 +33,55 @@ module PSX
 
       # Cache texture reference
       @texture = nil
+
+      # Pre-allocated RGBA buffer (320x240x4 = 307,200 bytes)
+      @rgba_buffer = "\x00".b * (WIDTH * HEIGHT * 4)
+      @rgba_buffer_size = WIDTH * HEIGHT * 4
+
+      # Track if we've seen real content
+      @has_rendered_content = false
     end
 
     def update(framebuffer)
-      # Convert RGB array to 32-bit RGBA for SDL
       width = framebuffer[:width]
       height = framebuffer[:height]
-      src = framebuffer[:pixels]
 
-      # Check if framebuffer has any content
-      has_content = src.any? { |p| p && p != 0 }
+      # GPU now provides pre-packed RGBA string
+      rgba = framebuffer[:rgba]
 
-      # Build RGBA pixel data using pack (faster and encoding-safe)
-      rgba_arr = []
-      i = 0
-      num_pixels = width * height
-
-      if has_content
-        # Use actual framebuffer
-        num_pixels.times do
-          rgba_arr << (src[i] || 0)
-          rgba_arr << (src[i + 1] || 0)
-          rgba_arr << (src[i + 2] || 0)
-          rgba_arr << 255  # Alpha
-          i += 3
-        end
-      else
-        # Show blue screen with "loading" pattern while BIOS initializes
-        height.times do |y|
-          width.times do |x|
-            # Dark blue background with lighter grid
-            if (x % 32 < 2) || (y % 32 < 2)
-              rgba_arr << 40 << 40 << 80 << 255  # Grid lines
-            else
-              rgba_arr << 0 << 0 << 40 << 255    # Dark blue
-            end
-          end
-        end
+      # Check if framebuffer has any non-zero content (only until first content seen)
+      if rgba && !@has_rendered_content
+        # Quick check: sample a few bytes instead of iterating all
+        has_content = rgba.getbyte(0) != 0 || rgba.getbyte(rgba.bytesize / 2) != 0
+        @has_rendered_content = true if has_content
       end
 
-      rgba = rgba_arr.pack("C*")
+      if rgba && @has_rendered_content
+        @rgba_buffer = rgba
+      else
+        # Use cached loading screen if size matches
+        buffer_size = width * height * 4
+        if @loading_screen_size != buffer_size
+          # Generate loading screen pattern once
+          rgba_arr = []
+          height.times do |y|
+            width.times do |x|
+              if (x % 32 < 2) || (y % 32 < 2)
+                rgba_arr.push(40, 40, 80, 255)  # Grid lines
+              else
+                rgba_arr.push(0, 0, 40, 255)    # Dark blue
+              end
+            end
+          end
+          @loading_screen = rgba_arr.pack("C*")
+          @loading_screen_size = buffer_size
+        end
+        @rgba_buffer = @loading_screen
+      end
 
       # Create SDL surface from RGBA data
       surface = SDL2::Surface.from_string(
-        rgba,
+        @rgba_buffer,
         width,
         height,
         32,           # depth (bits per pixel)

@@ -178,7 +178,8 @@ class GPUSpec < Minitest::Test
     fb = @gpu.framebuffer
     assert_equal 320, fb[:width]
     assert_equal 240, fb[:height]
-    assert_equal 320 * 240 * 3, fb[:pixels].length
+    # RGBA format: 4 bytes per pixel
+    assert_equal 320 * 240 * 4, fb[:rgba].bytesize
   end
 
   def test_framebuffer_converts_colors_correctly
@@ -187,9 +188,10 @@ class GPUSpec < Minitest::Test
     @gpu.vram[0] = 0x001F
 
     fb = @gpu.framebuffer
-    # RGB24: R should be 31<<3 = 248
-    assert_equal 248, fb[:pixels][0], "Red channel should be ~248"
-    assert_equal 0, fb[:pixels][1], "Green channel should be 0"
-    assert_equal 0, fb[:pixels][2], "Blue channel should be 0"
+    # RGBA format: R should be 31<<3 = 248, A should be 255
+    assert_equal 248, fb[:rgba].getbyte(0), "Red channel should be ~248"
+    assert_equal 0, fb[:rgba].getbyte(1), "Green channel should be 0"
+    assert_equal 0, fb[:rgba].getbyte(2), "Blue channel should be 0"
+    assert_equal 255, fb[:rgba].getbyte(3), "Alpha channel should be 255"
   end
 end

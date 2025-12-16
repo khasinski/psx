@@ -108,6 +108,10 @@ module PSX
       @vram_transfer_mode = nil  # :cpu_to_vram or :vram_to_cpu
       @vram_read_buffer = []
 
+      # Framebuffer caching
+      @framebuffer_dirty = true
+      @framebuffer_cache = nil
+
       # DMA direction
       @dma_direction = 0
 
@@ -235,32 +239,46 @@ module PSX
       end
     end
 
-    # Get current framebuffer as RGB array for display
+    # Get current framebuffer as RGBA packed binary string for display
+    # Returns hash with :width, :height, :rgba (binary string)
+    # Uses caching to avoid regenerating unchanged frames
     def framebuffer
+      # Return cached framebuffer if VRAM hasn't changed
+      if !@framebuffer_dirty && @framebuffer_cache &&
+         @framebuffer_cache[:width] == @horizontal_res &&
+         @framebuffer_cache[:height] == @vertical_res
+        return @framebuffer_cache
+      end
+
       width = @horizontal_res
       height = @vertical_res
-      pixels = Array.new(width * height * 3, 0)
+      num_pixels = width * height
+
+      # Build RGBA array and pack once (faster than building string)
+      rgba_arr = Array.new(num_pixels * 4)
+      dst_i = 0
 
       height.times do |y|
+        vram_row = (@display_start_y + y) * VRAM_WIDTH + @display_start_x
         width.times do |x|
-          vram_x = @display_start_x + x
-          vram_y = @display_start_y + y
-
-          color16 = @vram[vram_y * VRAM_WIDTH + vram_x] || 0
+          color16 = @vram[vram_row + x] || 0
 
           # Convert 15-bit to 24-bit RGB
-          r = ((color16 & 0x001F) << 3)
-          g = ((color16 & 0x03E0) >> 2)
-          b = ((color16 & 0x7C00) >> 7)
-
-          idx = (y * width + x) * 3
-          pixels[idx] = r
-          pixels[idx + 1] = g
-          pixels[idx + 2] = b
+          rgba_arr[dst_i] = (color16 & 0x001F) << 3      # R
+          rgba_arr[dst_i + 1] = (color16 & 0x03E0) >> 2  # G
+          rgba_arr[dst_i + 2] = (color16 & 0x7C00) >> 7  # B
+          rgba_arr[dst_i + 3] = 255                       # A
+          dst_i += 4
         end
       end
 
-      { width: width, height: height, pixels: pixels }
+      @framebuffer_dirty = false
+      @framebuffer_cache = { width: width, height: height, rgba: rgba_arr.pack("C*") }
+    end
+
+    # Mark framebuffer as needing regeneration (call when VRAM is modified)
+    def mark_dirty
+      @framebuffer_dirty = true
     end
 
     private
@@ -269,19 +287,25 @@ module PSX
     def execute_gp0_command
       case @current_cmd
       when CMD_FILL_RECT
+        mark_dirty
         gp0_fill_rect
       when 0x20..0x3F
+        mark_dirty
         gp0_polygon
       when 0x40..0x5F
+        mark_dirty
         gp0_line
       when 0x60..0x7F
+        mark_dirty
         gp0_rectangle
       when CMD_COPY_VRAM_VRAM
+        mark_dirty
         gp0_copy_vram_vram
       when CMD_COPY_CPU_VRAM
+        mark_dirty
         gp0_copy_cpu_vram
       when CMD_COPY_VRAM_CPU
-        gp0_copy_vram_cpu
+        gp0_copy_vram_cpu  # Reading from VRAM doesn't modify it
       end
 
       @cmd_buffer = []
