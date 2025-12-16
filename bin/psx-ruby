@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/psx"
+
+def usage
+  puts "Usage: psx-ruby [options] <bios.bin>"
+  puts ""
+  puts "Options:"
+  puts "  -d, --debug       Enable debug output (disassembly)"
+  puts "  -s, --steps N     Run N instructions then stop"
+  puts "  -h, --help        Show this help"
+  exit 1
+end
+
+debug = false
+steps = nil
+bios_path = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-d", "--debug"
+    debug = true
+  when "-s", "--steps"
+    steps = args.shift&.to_i
+    usage if steps.nil?
+  when "-h", "--help"
+    usage
+  else
+    bios_path = arg
+  end
+end
+
+usage unless bios_path
+
+unless File.exist?(bios_path)
+  puts "Error: BIOS file not found: #{bios_path}"
+  exit 1
+end
+
+puts "PSX-Ruby - PlayStation 1 Emulator"
+puts "Loading BIOS: #{bios_path}"
+puts ""
+
+emu = PSX::Emulator.new(bios_path)
+
+if debug
+  puts "Debug mode enabled"
+  puts ""
+end
+
+begin
+  emu.run(steps: steps, debug: debug)
+rescue Interrupt
+  puts "\nInterrupted"
+  puts emu.cpu.dump_registers
+rescue PSX::CPU::ExecutionError => e
+  puts "\nExecution error: #{e.message}"
+  puts emu.cpu.dump_registers
+end

@@ -1,0 +1,20 @@
+# BIOS files (copyrighted)
+*.BIN
+*.bin
+
+# IDE
+.idea/
+
+# Generated files
+*.ppm
+
+# Temporary/profile files
+profile.rb
+profile_detailed.rb
+
+# Ruby
+*.gem
+*.rbc
+.bundle/
+Gemfile.lock
+vendor/bundle/

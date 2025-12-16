@@ -1,0 +1,71 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/psx"
+
+def usage
+  puts "PSX-Ruby GUI - PlayStation 1 Emulator"
+  puts ""
+  puts "Usage: psx-ruby-gui [options] <bios.bin>"
+  puts ""
+  puts "Options:"
+  puts "  -f, --fps N       Target FPS (default: 60)"
+  puts "  -n, --no-frameskip  Disable frame skipping"
+  puts "  -h, --help        Show this help"
+  puts ""
+  puts "Controls:"
+  puts "  Arrow keys  - D-pad"
+  puts "  Z           - Cross (confirm)"
+  puts "  X           - Circle (cancel)"
+  puts "  A           - Square"
+  puts "  S           - Triangle"
+  puts "  Enter       - Start"
+  puts "  Space       - Select"
+  puts "  Q / W       - L1 / R1"
+  puts "  E / R       - L2 / R2"
+  puts "  Escape      - Quit"
+  exit 1
+end
+
+target_fps = 60
+frameskip = true
+bios_path = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-f", "--fps"
+    target_fps = args.shift&.to_i
+    usage if target_fps.nil? || target_fps <= 0
+  when "-n", "--no-frameskip"
+    frameskip = false
+  when "-h", "--help"
+    usage
+  else
+    bios_path = arg
+  end
+end
+
+usage unless bios_path
+
+unless File.exist?(bios_path)
+  puts "Error: BIOS file not found: #{bios_path}"
+  exit 1
+end
+
+puts "PSX-Ruby GUI"
+puts "============"
+puts "Loading BIOS: #{bios_path}"
+puts "Target FPS: #{target_fps}"
+puts "Frame skip: #{frameskip ? 'enabled' : 'disabled'}"
+puts ""
+
+begin
+  emu = PSX::Emulator.new(bios_path)
+  emu.run_with_display(target_fps: target_fps, frameskip: frameskip)
+rescue Interrupt
+  puts "\nInterrupted by user"
+rescue => e
+  puts "\nError: #{e.message}"
+  puts e.backtrace.first(5).join("\n")
+end
