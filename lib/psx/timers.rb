@@ -61,30 +61,42 @@ module PSX
       end
 
       # Increment counter, returns true if IRQ should fire
+      # Optimized to avoid per-cycle loop
       def tick(cycles = 1)
-        irq = false
-        cycles.times do
-          @counter += 1
+        return false if cycles <= 0
 
-          # Check target
-          if @counter == @target && @target > 0
+        irq = false
+        new_counter = @counter + cycles
+
+        # Check for target hit (if target is set and reset-on-target is enabled)
+        if @target > 0 && (@mode & MODE_RESET_TARGET) != 0
+          # Will we cross the target?
+          if @counter < @target && new_counter >= @target
             @mode |= MODE_TARGET_REACHED
             if (@mode & MODE_IRQ_TARGET) != 0
               irq = true if !@irq_fired || (@mode & MODE_IRQ_REPEAT) != 0
             end
-            @counter = 0 if (@mode & MODE_RESET_TARGET) != 0
+            # Reset and continue counting from target
+            new_counter = (new_counter - @target) % (@target > 0 ? @target : 0x10000)
           end
-
-          # Check overflow
-          if @counter > 0xFFFF
-            @counter &= 0xFFFF
-            @mode |= MODE_OVERFLOW
-            if (@mode & MODE_IRQ_OVERFLOW) != 0
-              irq = true if !@irq_fired || (@mode & MODE_IRQ_REPEAT) != 0
-            end
+        elsif @target > 0 && @counter < @target && new_counter >= @target
+          # Target without reset - just set flag
+          @mode |= MODE_TARGET_REACHED
+          if (@mode & MODE_IRQ_TARGET) != 0
+            irq = true if !@irq_fired || (@mode & MODE_IRQ_REPEAT) != 0
           end
         end
 
+        # Check for overflow
+        if new_counter > 0xFFFF
+          @mode |= MODE_OVERFLOW
+          if (@mode & MODE_IRQ_OVERFLOW) != 0
+            irq = true if !@irq_fired || (@mode & MODE_IRQ_REPEAT) != 0
+          end
+          new_counter &= 0xFFFF
+        end
+
+        @counter = new_counter
         @irq_fired = true if irq && (@mode & MODE_IRQ_REPEAT) == 0
         irq
       end
