@@ -58,8 +58,10 @@ module PSX
       timers = @timers
       interrupts = @interrupts
       gpu = @gpu
+      remaining = steps
 
-      steps.times do
+      while remaining > 0
+        remaining -= 1
         cpu.step
 
         # Inlined tick_devices

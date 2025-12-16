@@ -501,7 +501,10 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      set_reg(rt, @regs[rs] + sign_extend16(imm))
+      # Inline sign_extend16 and set_reg for hot path
+      imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+      @load_delay_reg = 0 if @load_delay_reg == rt
+      @regs[rt] = (@regs[rs] + imm) & 0xFFFF_FFFF if rt != 0
     end
 
     def op_slti(instruction)
@@ -571,8 +574,13 @@ module PSX
 
     def op_bgtz(instruction)
       rs = (instruction >> 21) & 0x1F
-      imm = instruction & 0xFFFF
-      branch(sign_extend16(imm) << 2) if sign_extend32(@regs[rs]) > 0
+      val = @regs[rs]
+      # sign_extend32 check: value > 0 and not negative (high bit clear or value is 0)
+      if val != 0 && (val & 0x8000_0000) == 0
+        imm = instruction & 0xFFFF
+        imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+        @branch_target = (@pc + (imm << 2)) & 0xFFFF_FFFF
+      end
     end
 
     # Jump operations (decode inlined)
@@ -618,8 +626,12 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      addr = @regs[rs] + sign_extend16(imm)
-      set_reg_delayed(rt, @memory.read8(addr))
+      # Inline sign_extend16
+      imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+      addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+      # Inline set_reg_delayed
+      @load_delay_reg = rt
+      @load_delay_value = @memory.read8(addr)
     end
 
     def op_lhu(instruction)
@@ -672,7 +684,9 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      # Inline sign_extend16
+      imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+      addr = (@regs[rs] + imm) & 0xFFFF_FFFF
       @memory.write8(addr, @regs[rt])
     end
 
