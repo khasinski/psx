@@ -65,67 +65,116 @@ module PSX
       end
     end
 
-    # Run with graphical display
+    # Run with graphical display (threaded: emulation in background)
     def run_with_display(target_fps: 60, frameskip: true)
       display = Display.new(title: "PSX-Ruby - Loading BIOS...")
-      total_cycles = 0
-      last_render = Time.now
-      render_interval = 1.0 / 30  # Render at 30fps max
+      render_interval = 1.0 / target_fps
 
       # Run many cycles between renders for speed
-      cycles_per_chunk = 500_000  # ~15ms of PS1 time per chunk
+      cycles_per_chunk = 100_000  # Smaller chunks for better responsiveness
 
-      puts "Starting emulation with display..."
+      puts "Starting emulation with display (threaded)..."
       puts "Note: BIOS takes ~40 seconds to show Sony logo"
       puts "Controls: Arrow keys=D-pad, Z=Cross, X=Circle, A=Square, S=Triangle"
       puts "          Enter=Start, Space=Select, Q/W=L1/R1, Escape=Quit"
       puts ""
 
-      loop do
-        # Poll events
-        display.poll_events
-        break if display.quit_requested?
+      # Shared state
+      @emu_mutex = Mutex.new
+      @quit_flag = false
+      @emu_error = nil
+      @total_cycles = 0
 
-        # Run a chunk of emulation (no VBlank interrupts - they break BIOS)
-        begin
-          run(steps: cycles_per_chunk)
-          total_cycles += cycles_per_chunk
-        rescue CPU::ExecutionError => e
-          puts "CPU Error: #{e.message}"
-          puts @cpu.dump_registers
-          display.close
-          return
-        end
+      # Emulation thread
+      emu_thread = Thread.new do
+        loop do
+          break if @quit_flag
 
-        # Render periodically
-        now = Time.now
-        if now - last_render >= render_interval
-          @gpu.vblank
-          @frame_count += 1
-          display.update(@gpu.framebuffer)
-          last_render = now
+          begin
+            @emu_mutex.synchronize do
+              run(steps: cycles_per_chunk)
+              @total_cycles += cycles_per_chunk
+            end
+          rescue CPU::ExecutionError => e
+            @emu_error = e
+            break
+          end
+
+          # Small yield to let main thread get lock
+          Thread.pass if @total_cycles % 500_000 == 0
         end
       end
 
+      # Main thread: SDL events and rendering
+      last_render = Time.now
+      loop do
+        # Poll SDL events (must be on main thread on macOS)
+        display.poll_events
+        if display.quit_requested?
+          @quit_flag = true
+          break
+        end
+
+        # Check for emulation errors
+        if @emu_error
+          puts "CPU Error: #{@emu_error.message}"
+          @emu_mutex.synchronize { puts @cpu.dump_registers }
+          @quit_flag = true
+          break
+        end
+
+        # Render at target FPS
+        now = Time.now
+        elapsed = now - last_render
+        if elapsed >= render_interval
+          @emu_mutex.synchronize do
+            @gpu.vblank
+            @frame_count += 1
+            display.update(@gpu.framebuffer)
+          end
+          last_render = now
+        else
+          # Sleep for remaining time to hit target FPS
+          sleep_time = render_interval - elapsed
+          sleep(sleep_time * 0.8) if sleep_time > 0.001  # Don't oversleep
+        end
+      end
+
+      # Wait for emulation thread to finish
+      emu_thread.join(1.0)  # Wait up to 1 second
+
       display.close
-      puts "\nEmulation ended after #{@frame_count} frames (#{total_cycles} cycles)"
+      puts "\nEmulation ended after #{@frame_count} frames (#{@total_cycles} cycles)"
     end
 
     # Save framebuffer as PPM image
     def save_screenshot(filename)
       fb = @gpu.framebuffer
+      rgba = fb[:rgba]
+      width = fb[:width]
+      height = fb[:height]
+
+      # Extract RGB from RGBA (skip alpha bytes)
+      rgb_data = String.new(capacity: width * height * 3)
+      i = 0
+      (width * height).times do
+        rgb_data << rgba.getbyte(i).chr << rgba.getbyte(i + 1).chr << rgba.getbyte(i + 2).chr
+        i += 4
+      end
+
       File.open(filename, "wb") do |f|
         f.puts "P6"
-        f.puts "#{fb[:width]} #{fb[:height]}"
+        f.puts "#{width} #{height}"
         f.puts "255"
-        f.write fb[:pixels].pack("C*")
+        f.write rgb_data
       end
-      puts "Saved screenshot to #{filename} (#{fb[:width]}x#{fb[:height]})"
+      puts "Saved screenshot to #{filename} (#{width}x#{height})"
     end
 
     # Save framebuffer as ASCII art (for terminal)
     def ascii_screenshot(width: 80)
       fb = @gpu.framebuffer
+      rgba = fb[:rgba]
       scale_x = fb[:width].to_f / width
       height = (fb[:height] / scale_x / 2).to_i  # /2 because terminal chars are ~2x tall
 
@@ -137,10 +186,11 @@ module PSX
         width.times do |x|
           src_x = (x * scale_x).to_i
           src_y = (y * scale_x * 2).to_i
-          idx = (src_y * fb[:width] + src_x) * 3
-          r = fb[:pixels][idx] || 0
-          g = fb[:pixels][idx + 1] || 0
-          b = fb[:pixels][idx + 2] || 0
+          # RGBA format: 4 bytes per pixel
+          idx = (src_y * fb[:width] + src_x) * 4
+          r = rgba.getbyte(idx) || 0
+          g = rgba.getbyte(idx + 1) || 0
+          b = rgba.getbyte(idx + 2) || 0
           brightness = (r + g + b) / 3.0 / 255.0
           char_idx = (brightness * (chars.length - 1)).to_i
           line << chars[char_idx]
