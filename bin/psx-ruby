@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# Enable YJIT for ~4x performance boost (Ruby 3.3+)
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
 require_relative "../lib/psx"
 
 def usage
