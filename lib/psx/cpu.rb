@@ -275,67 +275,59 @@ module PSX
       end
     end
 
-    # Instruction implementations
-
-    def decode_r(instruction)
-      rs = (instruction >> 21) & 0x1F
+    # R-type ALU operations (decode inlined for performance)
+    def op_sll(instruction)
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
       shamt = (instruction >> 6) & 0x1F
-      [rs, rt, rd, shamt]
-    end
-
-    def decode_i(instruction)
-      rs = (instruction >> 21) & 0x1F
-      rt = (instruction >> 16) & 0x1F
-      imm = instruction & 0xFFFF
-      [rs, rt, imm]
-    end
-
-    def decode_j(instruction)
-      instruction & 0x03FF_FFFF
-    end
-
-    # R-type ALU operations
-    def op_sll(instruction)
-      _, rt, rd, shamt = decode_r(instruction)
       set_reg(rd, @regs[rt] << shamt)
     end
 
     def op_srl(instruction)
-      _, rt, rd, shamt = decode_r(instruction)
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
+      shamt = (instruction >> 6) & 0x1F
       set_reg(rd, @regs[rt] >> shamt)
     end
 
     def op_sra(instruction)
-      _, rt, rd, shamt = decode_r(instruction)
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
+      shamt = (instruction >> 6) & 0x1F
       val = sign_extend32(@regs[rt])
       set_reg(rd, val >> shamt)
     end
 
     def op_sllv(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rt] << (@regs[rs] & 0x1F))
     end
 
     def op_srlv(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rt] >> (@regs[rs] & 0x1F))
     end
 
     def op_srav(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       val = sign_extend32(@regs[rt])
       set_reg(rd, val >> (@regs[rs] & 0x1F))
     end
 
     def op_jr(instruction)
-      rs, _, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
       jump(@regs[rs])
     end
 
     def op_jalr(instruction)
-      rs, _, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @next_pc)
       jump(@regs[rs])
     end
@@ -349,27 +341,28 @@ module PSX
     end
 
     def op_mfhi(instruction)
-      _, _, rd, _ = decode_r(instruction)
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @hi)
     end
 
     def op_mthi(instruction)
-      rs, _, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
       @hi = @regs[rs]
     end
 
     def op_mflo(instruction)
-      _, _, rd, _ = decode_r(instruction)
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @lo)
     end
 
     def op_mtlo(instruction)
-      rs, _, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
       @lo = @regs[rs]
     end
 
     def op_mult(instruction)
-      rs, rt, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
       a = sign_extend32(@regs[rs])
       b = sign_extend32(@regs[rt])
       result = a * b
@@ -378,14 +371,16 @@ module PSX
     end
 
     def op_multu(instruction)
-      rs, rt, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
       result = @regs[rs] * @regs[rt]
       @lo = result & 0xFFFF_FFFF
       @hi = (result >> 32) & 0xFFFF_FFFF
     end
 
     def op_div(instruction)
-      rs, rt, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
       num = sign_extend32(@regs[rs])
       den = sign_extend32(@regs[rt])
 
@@ -404,7 +399,8 @@ module PSX
     end
 
     def op_divu(instruction)
-      rs, rt, _, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
       num = @regs[rs]
       den = @regs[rt]
 
@@ -418,73 +414,99 @@ module PSX
     end
 
     def op_add(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       # TODO: overflow trap
       set_reg(rd, @regs[rs] + @regs[rt])
     end
 
     def op_addu(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rs] + @regs[rt])
     end
 
     def op_sub(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       # TODO: overflow trap
       set_reg(rd, @regs[rs] - @regs[rt])
     end
 
     def op_subu(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rs] - @regs[rt])
     end
 
     def op_and(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rs] & @regs[rt])
     end
 
     def op_or(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rs] | @regs[rt])
     end
 
     def op_xor(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rs] ^ @regs[rt])
     end
 
     def op_nor(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, ~(@regs[rs] | @regs[rt]))
     end
 
     def op_slt(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       a = sign_extend32(@regs[rs])
       b = sign_extend32(@regs[rt])
       set_reg(rd, a < b ? 1 : 0)
     end
 
     def op_sltu(instruction)
-      rs, rt, rd, _ = decode_r(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
       set_reg(rd, @regs[rs] < @regs[rt] ? 1 : 0)
     end
 
-    # I-type operations
+    # I-type operations (decode inlined for performance)
     def op_addi(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       # TODO: overflow trap
       set_reg(rt, @regs[rs] + sign_extend16(imm))
     end
 
     def op_addiu(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       set_reg(rt, @regs[rs] + sign_extend16(imm))
     end
 
     def op_slti(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       a = sign_extend32(@regs[rs])
       b = sign_extend16(imm)
       b = sign_extend32(b & 0xFFFF_FFFF)
@@ -492,98 +514,125 @@ module PSX
     end
 
     def op_sltiu(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       set_reg(rt, @regs[rs] < (sign_extend16(imm) & 0xFFFF_FFFF) ? 1 : 0)
     end
 
     def op_andi(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       set_reg(rt, @regs[rs] & imm)
     end
 
     def op_ori(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       set_reg(rt, @regs[rs] | imm)
     end
 
     def op_xori(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       set_reg(rt, @regs[rs] ^ imm)
     end
 
     def op_lui(instruction)
-      _, rt, imm = decode_i(instruction)
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       set_reg(rt, imm << 16)
     end
 
-    # Branch operations
+    # Branch operations (decode inlined)
     def op_beq(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       branch(sign_extend16(imm) << 2) if @regs[rs] == @regs[rt]
     end
 
     def op_bne(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       branch(sign_extend16(imm) << 2) if @regs[rs] != @regs[rt]
     end
 
     def op_blez(instruction)
-      rs, _, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      imm = instruction & 0xFFFF
       branch(sign_extend16(imm) << 2) if sign_extend32(@regs[rs]) <= 0
     end
 
     def op_bgtz(instruction)
-      rs, _, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      imm = instruction & 0xFFFF
       branch(sign_extend16(imm) << 2) if sign_extend32(@regs[rs]) > 0
     end
 
-    # Jump operations
+    # Jump operations (decode inlined)
     def op_j(instruction)
-      target = decode_j(instruction)
+      target = instruction & 0x03FF_FFFF
       jump((@pc & 0xF000_0000) | (target << 2))
     end
 
     def op_jal(instruction)
-      target = decode_j(instruction)
+      target = instruction & 0x03FF_FFFF
       set_reg(31, @next_pc)
       jump((@pc & 0xF000_0000) | (target << 2))
     end
 
-    # Load operations
+    # Load operations (decode inlined)
     def op_lb(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = @regs[rs] + sign_extend16(imm)
       val = sign_extend8(@memory.read8(addr))
       set_reg_delayed(rt, val)
     end
 
     def op_lh(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = @regs[rs] + sign_extend16(imm)
       val = sign_extend16(@memory.read16(addr))
       set_reg_delayed(rt, val)
     end
 
     def op_lw(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       set_reg_delayed(rt, @memory.read32(addr))
     end
 
     def op_lbu(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = @regs[rs] + sign_extend16(imm)
       set_reg_delayed(rt, @memory.read8(addr))
     end
 
     def op_lhu(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = @regs[rs] + sign_extend16(imm)
       set_reg_delayed(rt, @memory.read16(addr))
     end
 
     def op_lwl(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       aligned = addr & ~3
       val = @memory.read32(aligned)
@@ -600,7 +649,9 @@ module PSX
     end
 
     def op_lwr(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       aligned = addr & ~3
       val = @memory.read32(aligned)
@@ -615,27 +666,35 @@ module PSX
       set_reg_delayed(rt, result)
     end
 
-    # Store operations
+    # Store operations (decode inlined)
     def op_sb(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       @memory.write8(addr, @regs[rt])
     end
 
     def op_sh(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       @memory.write16(addr, @regs[rt])
     end
 
     def op_sw(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       @memory.write32(addr, @regs[rt])
     end
 
     def op_swl(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       aligned = addr & ~3
       val = @memory.read32(aligned)
@@ -651,7 +710,9 @@ module PSX
     end
 
     def op_swr(instruction)
-      rs, rt, imm = decode_i(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       aligned = addr & ~3
       val = @memory.read32(aligned)
