@@ -16,6 +16,7 @@ module TestHelpers
     bios_data = "\x00" * 512 * 1024  # Empty BIOS
     bios = PSX::BIOS.allocate
     bios.instance_variable_set(:@data, bios_data)
+    bios.instance_variable_set(:@words, Array.new(512 * 1024 / 4, 0))  # Pre-computed word array
 
     ram = PSX::RAM.new
     interrupts = PSX::Interrupts.new
