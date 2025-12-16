@@ -37,23 +37,65 @@ module PSX
     end
 
     def run(steps: nil, debug: false)
-      count = 0
-      loop do
-        if debug
-          puts @cpu.disassemble_current
-          puts @cpu.dump_registers if count % 10 == 0
-        end
-
-        @cpu.step
-        tick_devices
-
-        count += 1
-        break if steps && count >= steps
+      if debug
+        run_debug(steps)
+      elsif steps
+        run_fast(steps)
+      else
+        run_forever
       end
     rescue CPU::ExecutionError => e
       puts "Execution error: #{e.message}"
       puts @cpu.dump_registers
       raise
+    end
+
+    # Fast path: known number of steps, no debug
+    def run_fast(steps)
+      cpu = @cpu
+      cycle_count = @cycle_count
+      frame_count = @frame_count
+      timers = @timers
+      interrupts = @interrupts
+      gpu = @gpu
+
+      steps.times do
+        cpu.step
+
+        # Inlined tick_devices
+        cycle_count += 1
+        if cycle_count & 63 == 0  # % 64 as bitmask
+          timers.tick(64)
+        end
+        if cycle_count >= CYCLES_PER_FRAME
+          cycle_count = 0
+          frame_count += 1
+          interrupts.request(Interrupts::IRQ_VBLANK)
+          gpu.vblank
+        end
+      end
+
+      @cycle_count = cycle_count
+      @frame_count = frame_count
+    end
+
+    def run_forever
+      loop do
+        @cpu.step
+        tick_devices
+      end
+    end
+
+    def run_debug(steps)
+      count = 0
+      loop do
+        puts @cpu.disassemble_current
+        puts @cpu.dump_registers if count % 10 == 0
+        @cpu.step
+        tick_devices
+        count += 1
+        break if steps && count >= steps
+      end
     end
 
     # Run for specified number of frames

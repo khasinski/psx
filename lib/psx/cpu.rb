@@ -45,35 +45,37 @@ module PSX
       end
 
       # Save current PC for exception handling
-      @current_pc = @pc
+      pc = @pc
+      @current_pc = pc
 
       # Fetch instruction
-      instruction = @memory.read32(@pc)
+      instruction = @memory.read32(pc)
 
-      # Track if we're in a delay slot
-      @in_delay_slot = !@branch_target.nil?
+      # Track if we're in a delay slot and get branch target
+      branch_target = @branch_target
+      @in_delay_slot = !branch_target.nil?
 
-      # Update PC
-      @pc = @next_pc
-      @next_pc = @pc + 4
+      # Update PC (must use @next_pc which may have been modified by previous branch)
+      next_pc = @next_pc
+      @pc = next_pc
+      @next_pc = next_pc + 4
 
       # Apply pending load (inlined for performance)
-      if @load_delay_reg != 0
-        @regs[@load_delay_reg] = @load_delay_value
+      load_reg = @load_delay_reg
+      if load_reg != 0
+        @regs[load_reg] = @load_delay_value
         @load_delay_reg = 0
       end
 
-      # Execute (skip if NOP)
-      execute(instruction) unless instruction == 0
+      # Execute (skip NOP)
+      execute(instruction) if instruction != 0
 
-      # Handle branch delay
-      if @branch_target
-        @next_pc = @branch_target
+      # Handle branch delay (check @branch_target as instruction may have set new one)
+      new_branch = @branch_target
+      if new_branch
+        @next_pc = new_branch
         @branch_target = nil
       end
-
-      # Ensure R0 is always 0
-      @regs[0] = 0
     end
 
     def disassemble_current
@@ -148,8 +150,7 @@ module PSX
     end
 
     def execute(instruction)
-      return if instruction == 0  # NOP
-
+      # NOP check done in step() for performance
       opcode = (instruction >> 26) & 0x3F
 
       case opcode
