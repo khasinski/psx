@@ -42,35 +42,48 @@ module PSX
     end
 
     def read8(addr)
-      phys = translate(addr)
-      region, offset = decode(phys)
+      phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      case region
-      when :ram then @ram.read8(offset)
-      when :bios then @bios.read8(offset)
-      when :scratchpad then @scratchpad.getbyte(offset)
-      when :io then io_read8(offset)
-      when :expansion1, :expansion2 then 0xFF
-      else
-        warn format("Unhandled read8 at 0x%08X", addr)
-        0
+      # RAM (most common)
+      return @ram.read8(phys & RAM_MIRROR_MASK) if phys < 0x0080_0000
+
+      # BIOS
+      return @bios.read8(phys - BIOS_START) if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
+
+      # Scratchpad
+      if phys >= 0x1F80_0000 && phys < 0x1F80_0400
+        return @scratchpad.getbyte(phys - SCRATCHPAD_START)
       end
+
+      # I/O
+      return io_read8(phys - IO_START) if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+
+      # Expansion regions
+      return 0xFF if phys >= 0x1F00_0000 && phys < 0x1F80_0000
+      return 0xFF if phys >= 0x1F80_2000 && phys < 0x1F80_2100
+
+      0
     end
 
     def read16(addr)
-      phys = translate(addr)
-      region, offset = decode(phys)
+      phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      case region
-      when :ram then @ram.read16(offset)
-      when :bios then @bios.read16(offset)
-      when :scratchpad
-        @scratchpad.getbyte(offset) | (@scratchpad.getbyte(offset + 1) << 8)
-      when :io then io_read16(offset)
-      else
-        warn format("Unhandled read16 at 0x%08X", addr)
-        0
+      # RAM (most common)
+      return @ram.read16(phys & RAM_MIRROR_MASK) if phys < 0x0080_0000
+
+      # BIOS
+      return @bios.read16(phys - BIOS_START) if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
+
+      # Scratchpad
+      if phys >= 0x1F80_0000 && phys < 0x1F80_0400
+        offset = phys - SCRATCHPAD_START
+        return @scratchpad.getbyte(offset) | (@scratchpad.getbyte(offset + 1) << 8)
       end
+
+      # I/O
+      return io_read16(phys - IO_START) if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+
+      0
     end
 
     def read32(addr)
@@ -87,53 +100,82 @@ module PSX
         return @bios.read32(phys - BIOS_START)
       end
 
-      # Slow path for everything else
-      region, offset = decode(phys)
-
-      case region
-      when :scratchpad
-        @scratchpad.byteslice(offset, 4).unpack1("V")
-      when :io then io_read32(offset)
-      when :cache_control then 0
-      when :expansion1, :expansion2 then 0xFFFF_FFFF
-      else
-        warn format("Unhandled read32 at 0x%08X", addr)
-        0
+      # Scratchpad
+      if phys >= 0x1F80_0000 && phys < 0x1F80_0400
+        offset = phys - SCRATCHPAD_START
+        return @scratchpad.getbyte(offset) |
+               (@scratchpad.getbyte(offset + 1) << 8) |
+               (@scratchpad.getbyte(offset + 2) << 16) |
+               (@scratchpad.getbyte(offset + 3) << 24)
       end
+
+      # I/O
+      return io_read32(phys - IO_START) if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+
+      # Cache control
+      return 0 if phys >= 0xFFFE_0000 && phys < 0xFFFE_0200
+
+      # Expansion regions
+      return 0xFFFF_FFFF if phys >= 0x1F00_0000 && phys < 0x1F80_0000
+      return 0xFFFF_FFFF if phys >= 0x1F80_2000 && phys < 0x1F80_2100
+
+      0
     end
 
     def write8(addr, value)
       return if @cache_isolated  # Writes go to cache, not memory
 
-      phys = translate(addr)
-      region, offset = decode(phys)
+      phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      case region
-      when :ram then @ram.write8(offset, value)
-      when :scratchpad then @scratchpad.setbyte(offset, value & 0xFF)
-      when :io then io_write8(offset, value)
-      when :bios then warn format("Write to BIOS at 0x%08X", addr)
-      else
-        warn format("Unhandled write8 at 0x%08X = 0x%02X", addr, value)
+      # RAM (most common)
+      if phys < 0x0080_0000
+        @ram.write8(phys & RAM_MIRROR_MASK, value)
+        return
       end
+
+      # Scratchpad
+      if phys >= 0x1F80_0000 && phys < 0x1F80_0400
+        @scratchpad.setbyte(phys - SCRATCHPAD_START, value & 0xFF)
+        return
+      end
+
+      # I/O
+      if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+        io_write8(phys - IO_START, value)
+        return
+      end
+
+      # BIOS (read-only)
+      warn format("Write to BIOS at 0x%08X", addr) if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
     end
 
     def write16(addr, value)
       return if @cache_isolated
 
-      phys = translate(addr)
-      region, offset = decode(phys)
+      phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      case region
-      when :ram then @ram.write16(offset, value)
-      when :scratchpad
+      # RAM (most common)
+      if phys < 0x0080_0000
+        @ram.write16(phys & RAM_MIRROR_MASK, value)
+        return
+      end
+
+      # Scratchpad
+      if phys >= 0x1F80_0000 && phys < 0x1F80_0400
+        offset = phys - SCRATCHPAD_START
         @scratchpad.setbyte(offset, value & 0xFF)
         @scratchpad.setbyte(offset + 1, (value >> 8) & 0xFF)
-      when :io then io_write16(offset, value)
-      when :bios then warn format("Write to BIOS at 0x%08X", addr)
-      else
-        warn format("Unhandled write16 at 0x%08X = 0x%04X", addr, value)
+        return
       end
+
+      # I/O
+      if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+        io_write16(phys - IO_START, value)
+        return
+      end
+
+      # BIOS (read-only)
+      warn format("Write to BIOS at 0x%08X", addr) if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
     end
 
     def write32(addr, value)
@@ -148,55 +190,32 @@ module PSX
         return
       end
 
-      # Slow path for everything else
-      region, offset = decode(phys)
-
-      case region
-      when :scratchpad
-        @scratchpad[offset, 4] = [value].pack("V")
-      when :io then io_write32(offset, value)
-      when :bios then warn format("Write to BIOS at 0x%08X", addr)
-      when :cache_control
-        # Cache control register - ignore writes
-      when :expansion1, :expansion2
-        # Expansion regions - ignore writes
-      else
-        warn format("Unhandled write32 at 0x%08X = 0x%08X", addr, value)
+      # Scratchpad
+      if phys >= 0x1F80_0000 && phys < 0x1F80_0400
+        offset = phys - SCRATCHPAD_START
+        @scratchpad.setbyte(offset, value & 0xFF)
+        @scratchpad.setbyte(offset + 1, (value >> 8) & 0xFF)
+        @scratchpad.setbyte(offset + 2, (value >> 16) & 0xFF)
+        @scratchpad.setbyte(offset + 3, (value >> 24) & 0xFF)
+        return
       end
+
+      # I/O
+      if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+        io_write32(phys - IO_START, value)
+        return
+      end
+
+      # BIOS (read-only)
+      if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
+        warn format("Write to BIOS at 0x%08X", addr)
+        return
+      end
+
+      # Cache control and expansion regions - ignore writes
     end
 
     private
-
-    def translate(addr)
-      # Mask address based on KSEG region
-      region_index = (addr >> 29) & 0x7
-      addr & REGION_MASK[region_index]
-    end
-
-    def decode(phys)
-      case phys
-      when 0x0000_0000...0x0080_0000
-        # RAM (2 MB mirrored 4x)
-        [:ram, phys & RAM_MIRROR_MASK]
-      when 0x1F80_0000...0x1F80_0400
-        [:scratchpad, phys - SCRATCHPAD_START]
-      when 0x1F80_1000...0x1F80_3000
-        [:io, phys - IO_START]
-      when 0x1FC0_0000...0x1FC8_0000
-        [:bios, phys - BIOS_START]
-      when 0x1F00_0000...0x1F80_0000
-        # Expansion Region 1
-        [:expansion1, phys - 0x1F00_0000]
-      when 0xFFFE_0000...0xFFFE_0200
-        # Cache control
-        [:cache_control, phys - 0xFFFE_0000]
-      when 0x1F80_2000...0x1F80_2100
-        # Expansion Region 2 (I/O ports)
-        [:expansion2, phys - 0x1F80_2000]
-      else
-        [:unknown, phys]
-      end
-    end
 
     # I/O register stubs - will be expanded later
     def io_read8(offset)
