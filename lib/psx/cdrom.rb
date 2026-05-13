@@ -172,8 +172,11 @@ module PSX
           queue(3, [@stat])
         end
       when 0x1A # GetID
+        # No-disc response per nocash spec: INT3(stat) then
+        # INT5(11h, 80h, 00h, 00h, 00h, 00h, 00h, 00h). 0x80 in byte 1 is
+        # the "no disc / not ready" error code.
         queue(3, [@stat])
-        queue(5, [0x08, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) # no disc
+        queue(5, [0x11, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
       when 0x1B # ReadS
         queue(3, [@stat])
         queue(5, [0x11, 0x80])
