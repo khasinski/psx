@@ -67,12 +67,15 @@ class DMASpec < Minitest::Test
 
   def test_manual_sync_requires_trigger
     channel = @dma.channels[2]
-    # Sync mode 0 (manual) requires both start and trigger
-    channel.channel_ctrl = PSX::DMA::CTRL_START_BUSY  # Only start
-    refute channel.active?, "Manual mode needs trigger bit"
+    # Sync mode 0 (manual) requires the trigger bit only when the caller
+    # indicates the channel has no DRQ source (OTC). For DRQ-backed
+    # channels (e.g. GPU/SPU), BUSY alone suffices.
+    channel.channel_ctrl = PSX::DMA::CTRL_START_BUSY
+    refute channel.active?(needs_trigger: true), "OTC-style channel needs trigger bit"
+    assert channel.active?, "DRQ-backed channel starts on BUSY alone"
 
     channel.channel_ctrl = PSX::DMA::CTRL_START_BUSY | PSX::DMA::CTRL_START_TRIGGER
-    assert channel.active?
+    assert channel.active?(needs_trigger: true)
   end
 
   # === Channel Properties ===

@@ -24,9 +24,9 @@ module PSX
       0xFFFF_FFFF, 0xFFFF_FFFF                              # KSEG2: 0xC000_0000 - 0xFFFF_FFFF
     ].freeze
 
-    attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0
+    attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0, :spu
 
-    def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil)
+    def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil)
       @bios = bios
       @ram = ram
       @interrupts = interrupts
@@ -34,6 +34,7 @@ module PSX
       @timers = timers
       @cdrom = cdrom
       @sio0 = sio0
+      @spu = spu
       @gpu = nil  # Set later when GPU is created
       @scratchpad = ("\x00" * SCRATCHPAD_SIZE).b  # Force binary encoding
       @cache_isolated = false
@@ -243,11 +244,10 @@ module PSX
         # SIO1 CTRL
         0
       when 0x0C80...0x0D00
-        # SPU status - return ready
+        # SPU voice registers - read back 0
         0
       when 0x0D80...0x0E00
-        # SPU control
-        0
+        @spu ? @spu.read16(offset) : 0
       else
         # warn format("IO read16 at 0x%08X", IO_START + offset)
         0
@@ -311,8 +311,10 @@ module PSX
       case offset
       when 0x0040..0x004F
         @sio0&.write16(offset, value)
-      when 0x0C80...0x0E00
-        # SPU registers
+      when 0x0C80...0x0D80
+        # SPU voice registers - drop
+      when 0x0D80...0x0E00
+        @spu&.write16(offset, value)
       else
         # warn format("IO write16 at 0x%08X = 0x%04X", IO_START + offset, value)
       end

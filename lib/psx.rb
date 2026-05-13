@@ -9,6 +9,7 @@ require_relative "psx/gpu"
 require_relative "psx/timers"
 require_relative "psx/cdrom"
 require_relative "psx/sio0"
+require_relative "psx/spu"
 require_relative "psx/memory"
 require_relative "psx/cpu"
 require_relative "psx/disasm"
@@ -28,7 +29,8 @@ module PSX
       bios = BIOS.new(bios_path)
       ram = RAM.new
       @interrupts = Interrupts.new
-      @dma = DMA.new(interrupts: @interrupts)
+      @spu = SPU.new
+      @dma = DMA.new(interrupts: @interrupts, spu: @spu)
       @gpu = GPU.new(interrupts: @interrupts)
       @timers = Timers.new(interrupts: @interrupts)
       @cdrom = CDROM.new(interrupts: @interrupts)
@@ -36,7 +38,7 @@ module PSX
       @sio0 = SIO0.new(interrupts: @interrupts, controller_state: -> { @controller_state_proc.call })
       @memory = Memory.new(
         bios: bios, ram: ram, interrupts: @interrupts,
-        dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0
+        dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0, spu: @spu
       )
       @memory.gpu = @gpu
       @cpu = CPU.new(@memory, interrupts: @interrupts)

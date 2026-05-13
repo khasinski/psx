@@ -46,16 +46,18 @@ module PSX
         @channel_ctrl = 0
       end
 
-      def active?
-        # Channel is active when Start/Busy bit is set
-        # For sync mode 0, also need trigger bit
-        sync_mode = (@channel_ctrl >> 9) & 0x3
+      def active?(needs_trigger: false)
+        # Channel is active when Start/Busy bit is set.
+        # SyncMode 0 (Manual) without a DRQ-driving device (e.g. OTC) also
+        # needs the start-trigger bit. Channels with DRQ (GPU, SPU, CDROM,
+        # ...) auto-start when BUSY is set.
         enabled = (@channel_ctrl & CTRL_START_BUSY) != 0
+        return false unless enabled
 
-        if sync_mode == SYNC_MANUAL
-          enabled && ((@channel_ctrl & CTRL_START_TRIGGER) != 0)
+        if needs_trigger
+          (@channel_ctrl & CTRL_START_TRIGGER) != 0
         else
-          enabled
+          true
         end
       end
 
@@ -93,9 +95,11 @@ module PSX
     end
 
     attr_reader :channels, :dpcr, :dicr
+    attr_accessor :spu
 
-    def initialize(interrupts: nil)
+    def initialize(interrupts: nil, spu: nil)
       @interrupts = interrupts
+      @spu = spu
       @channels = Array.new(NUM_CHANNELS) { Channel.new }
       @dpcr = 0x0765_4321  # Default: all channels enabled with default priorities
       @dicr = 0
@@ -221,11 +225,17 @@ module PSX
     def tick(memory, gpu: nil)
       NUM_CHANNELS.times do |n|
         next unless channel_enabled?(n)
-        next unless @channels[n].active?
+        sync_mode = (@channels[n].channel_ctrl >> 9) & 0x3
+        # Only OTC needs an explicit manual trigger in SyncMode 0; channels
+        # backed by a device (GPU/SPU/...) start on BUSY alone.
+        needs_trigger = (n == OTC) && (sync_mode == SYNC_MANUAL)
+        next unless @channels[n].active?(needs_trigger: needs_trigger)
 
         case n
         when GPU
           transfer_gpu(memory, gpu)
+        when SPU
+          transfer_spu(memory)
         when OTC
           transfer_otc(memory)
         # Other channels can be added as needed
@@ -303,6 +313,36 @@ module PSX
 
       channel.finish!
       set_irq_flag(GPU)
+    end
+
+    def transfer_spu(memory)
+      channel = @channels[SPU]
+
+      size = channel.block_size
+      size = 0x10000 if size == 0
+      count = channel.block_count
+      count = 1 if count == 0
+      total = size * count
+
+      addr = channel.base_addr
+      step = channel.step
+
+      if channel.direction == :from_ram
+        total.times do
+          word = memory.read32(addr & 0x1F_FFFC)
+          @spu&.dma_write_word(word)
+          addr = (addr + step) & 0xFFFF_FFFF
+        end
+      else
+        total.times do
+          word = @spu ? @spu.dma_read_word : 0
+          memory.write32(addr & 0x1F_FFFC, word)
+          addr = (addr + step) & 0xFFFF_FFFF
+        end
+      end
+
+      channel.finish!
+      set_irq_flag(SPU)
     end
 
     def transfer_otc(memory)
