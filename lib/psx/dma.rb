@@ -92,6 +92,7 @@ module PSX
       @channels = Array.new(NUM_CHANNELS) { Channel.new }
       @dpcr = 0x0765_4321  # Default: all channels enabled with default priorities
       @dicr = 0
+      @master_flag_latched = false  # Has IRQ#3 fired for the current rising edge?
     end
 
     # Register access (offset from 0x1F801080)
@@ -164,19 +165,26 @@ module PSX
     end
 
     def update_master_flag
-      # Master flag is set if:
-      # - Force IRQ is set, OR
-      # - Master enable is set AND any (flag AND enable) is set
+      # PSX semantics: IRQ#3 fires on the rising edge of master-flag (bit 31).
+      # The master flag itself is "calculated" from current state. We expose it
+      # as DICR bit 31 for software to read, and use an internal latch so the
+      # IRQ fires exactly once per rising edge — until the condition goes false
+      # again (BIOS acks channel flags or clears master enable).
       force = (@dicr & DICR_FORCE_IRQ) != 0
       master_enable = (@dicr & DICR_IRQ_MASTER) != 0
       flags = (@dicr >> 24) & 0x7F
       enables = (@dicr >> 16) & 0x7F
+      master = force || (master_enable && (flags & enables) != 0)
 
-      if force || (master_enable && (flags & enables) != 0)
+      if master
         @dicr |= DICR_IRQ_MASTER_FLAG
-        @interrupts&.request(Interrupts::IRQ_DMA)
+        unless @master_flag_latched
+          @master_flag_latched = true
+          @interrupts&.request(Interrupts::IRQ_DMA)
+        end
       else
         @dicr &= ~DICR_IRQ_MASTER_FLAG
+        @master_flag_latched = false
       end
     end
 
@@ -187,6 +195,9 @@ module PSX
     end
 
     def set_irq_flag(channel)
+      # Per Nocash: per-channel IRQ flag is set on completion only when the
+      # corresponding per-channel IRQ enable (bits 16-22) is also set.
+      return unless ((@dicr >> (16 + channel)) & 1) == 1
       @dicr |= (1 << (24 + channel))
       update_master_flag
     end

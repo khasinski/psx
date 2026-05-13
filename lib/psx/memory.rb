@@ -24,14 +24,15 @@ module PSX
       0xFFFF_FFFF, 0xFFFF_FFFF                              # KSEG2: 0xC000_0000 - 0xFFFF_FFFF
     ].freeze
 
-    attr_accessor :cache_isolated, :dma, :gpu
+    attr_accessor :cache_isolated, :dma, :gpu, :cdrom
 
-    def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil)
+    def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil)
       @bios = bios
       @ram = ram
       @interrupts = interrupts
       @dma = dma
       @timers = timers
+      @cdrom = cdrom
       @gpu = nil  # Set later when GPU is created
       @scratchpad = ("\x00" * SCRATCHPAD_SIZE).b  # Force binary encoding
       @cache_isolated = false
@@ -220,6 +221,11 @@ module PSX
     # I/O register stubs - will be expanded later
     def io_read8(offset)
       case offset
+      when 0x0040
+        # JOY_DATA: "no device" response byte
+        0xFF
+      when 0x0800..0x0803
+        @cdrom ? @cdrom.read8(offset - 0x0800) : 0
       when 0x1040...0x1050
         # Expansion 2 (POST/debug) - return 0
         0
@@ -231,14 +237,24 @@ module PSX
 
     def io_read16(offset)
       case offset
+      when 0x0040
+        # JOY_DATA: "no device" response (16-bit read)
+        0xFF
       when 0x0044
-        # Timer 0 counter
+        # JOY_STAT (SIO0): TX Ready 1+2 + RX FIFO Not Empty set so the BIOS
+        # progresses through TX/RX polls without deadlocking. /ACK signaling
+        # and proper IRQ_SIO timing are not modeled, so SIO probing won't
+        # actually time out -- BIOS will display the license screen but
+        # continue probing controllers forever after that.
+        0x07
+      when 0x0048
+        # JOY_MODE - readable, return 0
         0
-      when 0x0054
-        # Timer 1 counter
+      when 0x004A
+        # JOY_CTRL - readable, return 0
         0
-      when 0x0064
-        # Timer 2 counter
+      when 0x005A
+        # SIO1 CTRL
         0
       when 0x0C80...0x0D00
         # SPU status - return ready
@@ -257,6 +273,12 @@ module PSX
       when 0x0000...0x0024
         # Memory control 1
         0
+      when 0x0040
+        # JOY_DATA (32-bit read) - no device
+        0xFF
+      when 0x0044
+        # JOY_STAT (32-bit) - TX ready + RX FIFO not empty + /ACK high (no dev)
+        0x87
       when 0x0060
         # RAM size register
         0x0000_0B88
@@ -292,6 +314,8 @@ module PSX
 
     def io_write8(offset, value)
       case offset
+      when 0x0800..0x0803
+        @cdrom&.write8(offset - 0x0800, value)
       when 0x1040...0x1050
         # POST/debug output - could display but ignore for now
       else

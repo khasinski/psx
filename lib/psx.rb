@@ -7,74 +7,46 @@ require_relative "psx/interrupts"
 require_relative "psx/dma"
 require_relative "psx/gpu"
 require_relative "psx/timers"
+require_relative "psx/cdrom"
 require_relative "psx/memory"
 require_relative "psx/cpu"
 require_relative "psx/disasm"
 require_relative "psx/display"
 
-# Try to load native extension
-begin
-  require_relative "psx_native"
-  PSX_NATIVE_AVAILABLE = true
-rescue LoadError
-  PSX_NATIVE_AVAILABLE = false
-end
-
 module PSX
   class Emulator
-    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers
+    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom
 
     # Timing constants
     CPU_FREQ = 33_868_800  # 33.8688 MHz
     CYCLES_PER_FRAME = CPU_FREQ / 60  # ~560K cycles per frame at 60Hz
     CYCLES_PER_SCANLINE = CYCLES_PER_FRAME / 263  # NTSC has 263 scanlines
 
-    def initialize(bios_path, native: :auto)
+    def initialize(bios_path)
       bios = BIOS.new(bios_path)
       ram = RAM.new
       @interrupts = Interrupts.new
       @dma = DMA.new(interrupts: @interrupts)
       @gpu = GPU.new(interrupts: @interrupts)
       @timers = Timers.new(interrupts: @interrupts)
-      @memory = Memory.new(bios: bios, ram: ram, interrupts: @interrupts, dma: @dma, timers: @timers)
+      @cdrom = CDROM.new(interrupts: @interrupts)
+      @memory = Memory.new(bios: bios, ram: ram, interrupts: @interrupts, dma: @dma, timers: @timers, cdrom: @cdrom)
       @memory.gpu = @gpu
-
-      # Choose CPU implementation
-      use_native = case native
-                   when :auto then PSX_NATIVE_AVAILABLE
-                   when true then PSX_NATIVE_AVAILABLE
-                   when false then false
-                   else PSX_NATIVE_AVAILABLE
-                   end
-
-      if use_native
-        cop0 = COP0.new
-        @cpu = NativeCPU.new(@memory, @interrupts, cop0)
-        @native_cpu = true
-        puts "Using native CPU extension"
-      else
-        @cpu = CPU.new(@memory, interrupts: @interrupts)
-        @native_cpu = false
-        puts "Using Ruby CPU implementation"
-      end
+      @cpu = CPU.new(@memory, interrupts: @interrupts)
 
       @cycle_count = 0
       @frame_count = 0
-    end
-
-    def native_cpu?
-      @native_cpu
     end
 
     def run(steps: nil, debug: false)
       if debug
         run_debug(steps)
       elsif steps
-        @native_cpu ? run_fast_native(steps) : run_fast(steps)
+        run_fast(steps)
       else
         run_forever
       end
-    rescue CPU::ExecutionError, NativeCPU::ExecutionError => e
+    rescue CPU::ExecutionError => e
       puts "Execution error: #{e.message}"
       puts @cpu.dump_registers
       raise
@@ -104,35 +76,7 @@ module PSX
           frame_count += 1
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank
-        end
-      end
-
-      @cycle_count = cycle_count
-      @frame_count = frame_count
-    end
-
-    # Fast path for Native CPU: batch execution with periodic device ticks
-    def run_fast_native(steps)
-      cycle_count = @cycle_count
-      frame_count = @frame_count
-      remaining = steps
-
-      # Run in chunks, ticking devices periodically
-      chunk_size = 64  # Tick devices every 64 cycles
-      while remaining > 0
-        batch = [remaining, chunk_size].min
-        @cpu.run_steps(batch)
-        remaining -= batch
-
-        # Tick devices
-        cycle_count += batch
-        @timers.tick(batch)
-
-        if cycle_count >= CYCLES_PER_FRAME
-          cycle_count -= CYCLES_PER_FRAME
-          frame_count += 1
-          @interrupts.request(Interrupts::IRQ_VBLANK)
-          @gpu.vblank
+          @cdrom.tick
         end
       end
 
@@ -210,6 +154,8 @@ module PSX
 
       # Main thread: SDL events and rendering
       last_render = Time.now
+      last_status = Time.now
+      last_status_cycles = 0
       loop do
         # Poll SDL events (must be on main thread on macOS)
         display.poll_events
@@ -240,6 +186,17 @@ module PSX
           # Sleep for remaining time to hit target FPS
           sleep_time = render_interval - elapsed
           sleep(sleep_time * 0.8) if sleep_time > 0.001  # Don't oversleep
+        end
+
+        # Periodic status line so progress is visible from the console.
+        if now - last_status >= 2.0
+          delta = @total_cycles - last_status_cycles
+          ips = delta.to_f / (now - last_status)
+          printf "frames=%5d  cycles=%10d  %.1f Mips  PC=%08X\n",
+                 @frame_count, @total_cycles, ips / 1_000_000.0, @cpu.pc
+          $stdout.flush
+          last_status = now
+          last_status_cycles = @total_cycles
         end
       end
 
@@ -319,6 +276,7 @@ module PSX
         @frame_count += 1
         @interrupts.request(Interrupts::IRQ_VBLANK)
         @gpu.vblank  # Toggle interlace field
+        @cdrom.tick
       end
     end
   end

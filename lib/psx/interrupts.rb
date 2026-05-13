@@ -33,8 +33,8 @@ module PSX
     end
 
     def write_stat(value)
-      # Writing to I_STAT acknowledges (clears) interrupts
-      # Write 1 to acknowledge, write 0 to keep
+      # Writing to I_STAT acknowledges (clears) interrupts.
+      # On PSX: write 0 to a bit clears it (ack), write 1 leaves it unchanged.
       @stat &= value
     end
 

@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Smoke test: boot the BIOS in chunks, capturing PPM screenshots every N
+# cycles so we can see how far it gets. Useful for verifying boot progress
+# without spinning up the full SDL display.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path = ARGV.shift || "SCPH1001.BIN"
+total_steps = (ARGV.shift || "20_000_000").gsub("_", "").to_i
+chunk_steps = (ARGV.shift || "2_000_000").gsub("_", "").to_i
+out_dir = ARGV.shift || "smoke"
+
+unless File.exist?(bios_path)
+  warn "BIOS not found: #{bios_path}"
+  exit 1
+end
+
+Dir.mkdir(out_dir) unless Dir.exist?(out_dir)
+
+emu = PSX::Emulator.new(bios_path)
+chunks = (total_steps.to_f / chunk_steps).ceil
+puts "Total steps: #{total_steps}, chunks: #{chunks} x #{chunk_steps}"
+
+t0 = Time.now
+chunks.times do |i|
+  emu.run(steps: chunk_steps)
+  fname = format("%s/frame_%03d.ppm", out_dir, i)
+  emu.save_screenshot(fname)
+  elapsed = Time.now - t0
+  ips = ((i + 1) * chunk_steps / elapsed).to_i
+  puts format("[chunk %d/%d] PC=0x%08X %s (%.1fs, %d ips)", i + 1, chunks, emu.cpu.pc, fname, elapsed, ips)
+end
+
+puts ""
+puts format("Final state: SR=%08X CAUSE=%08X EPC=%08X", emu.cpu.cop0.sr, emu.cpu.cop0.cause, emu.cpu.cop0.epc)
+puts format("             I_STAT=%08X I_MASK=%08X DICR=%08X", emu.interrupts.stat, emu.interrupts.mask, emu.dma.dicr)
+
+pc = emu.cpu.pc
+puts ""
+puts "Disasm around PC=0x#{format('%08X', pc)}:"
+base = pc - 32
+(base..(base + 64)).step(4) do |addr|
+  next if addr < 0
+  instr = emu.memory.read32(addr)
+  marker = (addr == pc) ? " <-- PC" : ""
+  puts format("  %08X: %08X  %s%s", addr, instr, PSX::Disasm.disassemble(addr, instr), marker)
+end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "cop0"
+require_relative "gte"
 
 module PSX
   class CPU
@@ -8,7 +9,7 @@ module PSX
 
     RESET_VECTOR = 0xBFC0_0000  # BIOS entry point
 
-    attr_reader :pc, :regs, :hi, :lo, :memory, :cop0
+    attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte
 
     def initialize(memory, interrupts: nil)
       @memory = memory
@@ -19,8 +20,9 @@ module PSX
       @hi = 0
       @lo = 0
 
-      # Coprocessor 0
+      # Coprocessors
       @cop0 = COP0.new
+      @gte = GTE.new
 
       # Delayed load handling
       @load_delay_reg = 0
@@ -184,6 +186,8 @@ module PSX
       when 0x2A then op_swl(instruction)
       when 0x2B then op_sw(instruction)
       when 0x2E then op_swr(instruction)
+      when 0x32 then op_lwc2(instruction)
+      when 0x3A then op_swc2(instruction)
       else
         raise ExecutionError, format("Unknown opcode 0x%02X at PC=0x%08X", opcode, @pc - 4)
       end
@@ -257,22 +261,29 @@ module PSX
     end
 
     def execute_cop2(instruction)
-      # GTE - stub for now
+      # COP2 instructions split by bit 25:
+      #   bit 25 = 0: register move / load / store (cop_op selects which)
+      #   bit 25 = 1: GTE command (lower 25 bits encode the operation)
+      if (instruction & (1 << 25)) != 0
+        @gte.execute(instruction)
+        return
+      end
+
       cop_op = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      rd = (instruction >> 11) & 0x1F
 
       case cop_op
-      when 0x00  # MFC2
-        rt = (instruction >> 16) & 0x1F
-        set_reg_delayed(rt, 0)
-      when 0x02  # CFC2
-        rt = (instruction >> 16) & 0x1F
-        set_reg_delayed(rt, 0)
-      when 0x04  # MTC2
-        # Move to GTE data register - ignore for now
-      when 0x06  # CTC2
-        # Move to GTE control register - ignore for now
+      when 0x00  # MFC2 - move data reg to CPU
+        set_reg_delayed(rt, @gte.read_data(rd))
+      when 0x02  # CFC2 - move control reg to CPU
+        set_reg_delayed(rt, @gte.read_control(rd))
+      when 0x04  # MTC2 - move CPU to data reg
+        @gte.write_data(rd, @regs[rt])
+      when 0x06  # CTC2 - move CPU to control reg
+        @gte.write_control(rd, @regs[rt])
       else
-        # GTE command - ignore for now
+        raise ExecutionError, format("Unknown COP2 op 0x%02X at PC=0x%08X", cop_op, @pc - 4)
       end
     end
 
@@ -740,6 +751,23 @@ module PSX
       when 3 then result = (val & 0x00FF_FFFF) | (reg << 24)
       end
       @memory.write32(aligned, result)
+    end
+
+    # COP2 (GTE) memory access
+    def op_lwc2(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F   # GTE data register index
+      imm = instruction & 0xFFFF
+      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      @gte.write_data(rt, @memory.read32(addr))
+    end
+
+    def op_swc2(instruction)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F   # GTE data register index
+      imm = instruction & 0xFFFF
+      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      @memory.write32(addr, @gte.read_data(rt))
     end
 
     # COP0 operations

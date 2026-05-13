@@ -140,7 +140,6 @@ module PSX
       @texture&.destroy
       @renderer.destroy
       @window.destroy
-      SDL2.quit
     end
 
     private
