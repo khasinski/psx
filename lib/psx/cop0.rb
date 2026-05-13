@@ -34,7 +34,9 @@ module PSX
     SR_BEV  = 0x40_0000  # Boot Exception Vectors
     SR_RE   = 0x200_0000 # Reverse Endianness
     SR_CU0  = 0x1000_0000  # COP0 Enable
+    SR_CU1  = 0x2000_0000  # COP1 Enable (no FPU on PSX, but enable bit exists)
     SR_CU2  = 0x4000_0000  # COP2 (GTE) Enable
+    SR_CU3  = 0x8000_0000  # COP3 Enable
 
     # Exception codes (for CAUSE register bits 2-6)
     EXC_INT   = 0x00  # Interrupt
@@ -127,28 +129,24 @@ module PSX
       end
     end
 
-    # Enter exception handler
-    # Returns the exception vector address
-    def enter_exception(code, pc, in_delay_slot: false, bad_addr: nil)
-      # Save return address
+    # Enter exception handler. Returns the exception vector address.
+    # `coprocessor` is the COP number (0-3) reported in CAUSE.CE for
+    # Coprocessor-Unusable exceptions.
+    def enter_exception(code, pc, in_delay_slot: false, bad_addr: nil, coprocessor: nil)
       @regs[EPC] = in_delay_slot ? pc - 4 : pc
-
-      # Set BadVAddr for address exceptions
       @regs[BADVADDR] = bad_addr if bad_addr
 
-      # Build CAUSE register
-      # Bits 2-6: exception code
-      # Bit 31: BD (branch delay)
-      @regs[CAUSE] = (@regs[CAUSE] & 0x0000_FF00) |  # Preserve interrupt pending bits
+      # CAUSE: preserve interrupt-pending bits, set ExcCode, BD, and CE.
+      ce = coprocessor ? ((coprocessor & 0x3) << 28) : 0
+      @regs[CAUSE] = (@regs[CAUSE] & 0x0000_FF00) |
                      (code << 2) |
+                     ce |
                      (in_delay_slot ? 0x8000_0000 : 0)
 
-      # Shift the interrupt enable/kernel mode bits
-      # Current -> Previous -> Old
+      # Shift IE/KU stack: current -> previous -> old.
       mode = @regs[SR] & 0x3F
       @regs[SR] = (@regs[SR] & ~0x3F) | ((mode << 2) & 0x3F)
 
-      # Return exception vector based on BEV bit
       bev? ? 0xBFC0_0180 : 0x8000_0080
     end
 

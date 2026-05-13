@@ -220,6 +220,50 @@ module PSX
       puts "\nEmulation ended after #{@frame_count} frames (#{@total_cycles} cycles)"
     end
 
+    # Load a PS-EXE executable into RAM and prepare the CPU to run it.
+    # Standard PSX EXE format: 2048-byte header (magic "PS-X EXE"), followed
+    # by the text/data section that must be copied to dest_addr. After load
+    # the CPU is positioned at the executable's entry point with GP and SP
+    # set per the header (or the conventional defaults if zero).
+    def load_psexe(path)
+      data = File.binread(path)
+      raise "PS-EXE smaller than header: #{data.bytesize} bytes" if data.bytesize < 0x800
+      magic = data.byteslice(0, 8)
+      raise "Not a PS-EXE (magic=#{magic.inspect})" unless magic == "PS-X EXE"
+
+      initial_pc    = data.byteslice(0x10, 4).unpack1("V")
+      initial_gp    = data.byteslice(0x14, 4).unpack1("V")
+      dest_addr     = data.byteslice(0x18, 4).unpack1("V")
+      file_size     = data.byteslice(0x1C, 4).unpack1("V")
+      memfill_start = data.byteslice(0x20, 4).unpack1("V")
+      memfill_size  = data.byteslice(0x24, 4).unpack1("V")
+      stack_addr    = data.byteslice(0x28, 4).unpack1("V")
+      _stack_size   = data.byteslice(0x2C, 4).unpack1("V")
+
+      payload = data.byteslice(0x800, file_size) || ""
+      payload.each_byte.with_index do |b, i|
+        @memory.write8((dest_addr + i) & 0xFFFF_FFFF, b)
+      end
+
+      if memfill_size.positive?
+        memfill_size.times do |i|
+          @memory.write8((memfill_start + i) & 0xFFFF_FFFF, 0)
+        end
+      end
+
+      sp = stack_addr.zero? ? 0x801F_FFF0 : stack_addr
+      @cpu.regs[28] = initial_gp & 0xFFFF_FFFF
+      @cpu.regs[29] = sp & 0xFFFF_FFFF
+      @cpu.regs[30] = sp & 0xFFFF_FFFF
+      @cpu.regs[31] = 0 # return-to-zero on exit
+      @cpu.pc = initial_pc
+
+      {
+        entry: initial_pc, gp: initial_gp, sp: sp, dest: dest_addr,
+        size: file_size, memfill: [memfill_start, memfill_size]
+      }
+    end
+
     # Save framebuffer as PPM image
     def save_screenshot(filename)
       fb = @gpu.framebuffer

@@ -80,7 +80,14 @@ module PSX
       end
 
       def finish!
-        # Clear start/busy and trigger bits
+        # On transfer completion: bit 24 (Start/Busy) and bit 28 (Start/
+        # Trigger) both clear. Bit 28 is "consumed" by the transfer it
+        # triggered. Unused R/W bits (29/30) keep their values.
+        # Verified against ps1-tests/dma/otc-test:
+        #   testOtcWhichBitsAreHardwiredToZero -- bit 28 stays when no
+        #     transfer happens (busy bit wasn't set, finish! isn't called).
+        #   testOtcControlBitsAfterTransfer   -- bit 28 cleared after
+        #     transfer actually ran.
         @channel_ctrl &= ~(CTRL_START_BUSY | CTRL_START_TRIGGER)
       end
     end
@@ -135,7 +142,14 @@ module PSX
         when 0x4
           channel.block_ctrl = value
         when 0x8
-          channel.channel_ctrl = value
+          # OTC (channel 6) has hard-wired CHCR bits: only bits 24, 28, 30
+          # are writable, and bit 1 (Memory Address Step = backward) always
+          # reads as 1. Verified against ps1-tests/dma/otc-test.
+          if channel_num == OTC
+            channel.channel_ctrl = (value & 0x5100_0000) | 0x0000_0002
+          else
+            channel.channel_ctrl = value
+          end
         end
       elsif offset == 0x70
         @dpcr = value

@@ -1,0 +1,136 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Run a PSX PS-EXE test program through the emulator, capturing the BIOS
+# putchar/puts stream so we can diff against the reference output that the
+# ps1-tests suite ships in each test's psx.log.
+#
+# Usage:
+#   bin/psx-test [-b BIOS] [-e EXPECTED] [--max-cycles N] [--boot-cycles N] EXE
+#
+# By default the BIOS runs for ~5M cycles before we drop the PS-EXE on top
+# of it; that's enough for the A/B/C jump tables to be initialised but
+# fast, so we don't get stuck in the same post-license-screen hang the GUI
+# does.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path    = "SCPH1001.BIN"
+expected     = nil
+max_cycles   = 200_000_000
+boot_cycles  = 5_000_000
+exe_path     = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"          then bios_path   = args.shift
+  when "-e", "--expected"      then expected    = args.shift
+  when "--max-cycles"          then max_cycles  = args.shift.to_i
+  when "--boot-cycles"         then boot_cycles = args.shift.to_i
+  when "-h", "--help"
+    puts "Usage: psx-test [-b BIOS] [-e EXPECTED] [--max-cycles N] [--boot-cycles N] EXE"
+    exit 0
+  else
+    exe_path = arg
+  end
+end
+
+unless exe_path && File.exist?(exe_path)
+  warn "EXE not found"
+  exit 2
+end
+unless File.exist?(bios_path)
+  warn "BIOS not found: #{bios_path}"
+  exit 2
+end
+
+emu = PSX::Emulator.new(bios_path)
+
+# Let the BIOS initialise its A/B/C tables and exception vectors.
+emu.run(steps: boot_cycles)
+
+captured = String.new
+emu.cpu.tty_handler = ->(kind, val) do
+  case kind
+  when :char then captured << val.chr
+  when :str  then captured << val
+  end
+end
+
+info = emu.load_psexe(exe_path)
+warn format("[psx-test] loaded %s at 0x%08X (size=%d, entry=0x%08X)",
+            exe_path, info[:dest], info[:size], info[:entry])
+
+# Run the program. Stop early if we see a recognised end marker so tests
+# that print "Done." then loop forever don't burn the whole quota.
+chunk = 200_000
+done = false
+remaining = max_cycles
+while remaining > 0 && !done
+  step = [remaining, chunk].min
+  begin
+    emu.run(steps: step)
+  rescue PSX::CPU::ExecutionError => e
+    warn "[psx-test] CPU error after #{max_cycles - remaining} cycles: #{e.message}"
+    break
+  end
+  remaining -= step
+  done = true if captured.include?("Done.")
+end
+
+print captured
+
+if expected
+  # ps1-tests' psx.log files are saved with a "% " prefix on every line
+  # and psn00bsdk's printf is just a wrapper around BIOS puts -- it doesn't
+  # expand %s/%d/%x specifiers. So we can't compare raw strings; instead we
+  # extract the pass/fail/Done markers from both sides and compare the
+  # pattern. That's enough to know whether the program behaved correctly.
+  normalize = lambda do |text|
+    text.lines.filter_map do |line|
+      l = line.sub(/^% /, "").rstrip
+      case l
+      when /^pass - /              then "PASS"
+      when /^fail - /              then "FAIL"
+      when /^Passed tests: (\d+)/  then "PASSED:#{Regexp.last_match(1)}"
+      when /^Failed tests: (\d+)/  then "FAILED:#{Regexp.last_match(1)}"
+      when /^Done\.?$/i            then "DONE"
+      end
+    end
+  end
+
+  expected_text = File.read(expected)
+  exp_norm = normalize.call(expected_text)
+  act_norm = normalize.call(captured)
+
+  exp_tally = exp_norm.tally
+  act_tally = act_norm.tally
+  exp_pass = exp_tally["PASS"] || 0
+  exp_fail = exp_tally["FAIL"] || 0
+  act_pass = act_tally["PASS"] || 0
+  act_fail = act_tally["FAIL"] || 0
+  reached_done = act_norm.include?("DONE")
+
+  # Accept "superset" pass: tests in the binary may have grown beyond what
+  # the static psx.log captured, so more passes is fine. Fails must match
+  # what the reference log shows (usually zero) and we have to reach Done.
+  if act_fail == exp_fail && act_pass >= exp_pass && reached_done
+    extra = act_pass - exp_pass
+    note = extra.positive? ? " (+#{extra} extra passes vs reference)" : ""
+    warn "[psx-test] OK -- #{act_pass} pass, #{act_fail} fail#{note}"
+    exit 0
+  end
+  warn "[psx-test] PATTERN MISMATCH"
+  warn "  expected: #{exp_tally.inspect}"
+  warn "  actual:   #{act_tally.inspect}"
+  warn "  reached Done: #{reached_done}"
+  exp_norm.zip(act_norm).each_with_index do |(e, a), i|
+    next if e == a
+    warn "  first divergence at marker #{i}: expected=#{e.inspect}, actual=#{a.inspect}"
+    break
+  end
+  exit 1
+end

@@ -23,3 +23,6 @@ vendor/bundle/
 
 # Profiling
 *.dump
+
+# Local copy of JaCzekanski/ps1-tests checkout used by bin/psx-test
+.tests/

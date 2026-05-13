@@ -9,7 +9,19 @@ module PSX
 
     RESET_VECTOR = 0xBFC0_0000  # BIOS entry point
 
+    # Physical address of the A/B/C BIOS jump tables in low RAM
+    BIOS_A_DISPATCH = 0x000000A0
+    BIOS_B_DISPATCH = 0x000000B0
+    BIOS_C_DISPATCH = 0x000000C0
+
     attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte
+    attr_accessor :tty_handler
+
+    def pc=(value)
+      @pc = value & 0xFFFF_FFFF
+      @next_pc = (@pc + 4) & 0xFFFF_FFFF
+      @branch_target = nil
+    end
 
     def initialize(memory, interrupts: nil)
       @memory = memory
@@ -44,6 +56,14 @@ module PSX
       if @interrupt_check_counter >= @interrupt_check_interval
         @interrupt_check_counter = 0
         check_interrupts
+      end
+
+      # Optional TTY hook: intercept BIOS A-table entry so PS-EXE programs
+      # built against the standard BIOS putchar/puts functions can be tested
+      # without depending on a working CD-ROM/Shell. Returns true when the
+      # call has been handled and PC was advanced to the caller.
+      if @tty_handler && intercept_bios_call(@pc)
+        return
       end
 
       # Save current PC for exception handling
@@ -110,6 +130,47 @@ module PSX
       end
     end
 
+    # Intercept BIOS jump-table calls for PS-EXE testing. Returns true when
+    # a known function (currently putchar/puts on A and B tables) was handled
+    # and PC has been advanced to the caller via $ra.
+    def intercept_bios_call(pc)
+      phys = pc & 0x1FFFFFFF
+      return false unless phys == BIOS_A_DISPATCH || phys == BIOS_B_DISPATCH
+
+      code = @regs[9] & 0xFF  # $t1
+      handled = case [phys, code]
+                when [BIOS_A_DISPATCH, 0x3C], [BIOS_A_DISPATCH, 0x3D],
+                     [BIOS_B_DISPATCH, 0x3B], [BIOS_B_DISPATCH, 0x3D]
+                  @tty_handler.call(:char, @regs[4] & 0xFF)
+                  true
+                when [BIOS_A_DISPATCH, 0x3E], [BIOS_A_DISPATCH, 0x3F],
+                     [BIOS_B_DISPATCH, 0x3E], [BIOS_B_DISPATCH, 0x3F]
+                  @tty_handler.call(:str, read_cstring(@regs[4]))
+                else
+                  false
+                end
+      return false unless handled
+
+      # Return to caller: PC = $ra, no branch delay slot.
+      ra = @regs[31]
+      @pc = ra & 0xFFFF_FFFF
+      @next_pc = (@pc + 4) & 0xFFFF_FFFF
+      @branch_target = nil
+      true
+    end
+
+    # Read a null-terminated string from memory at addr, capped to avoid
+    # runaway reads on bad pointers.
+    def read_cstring(addr, max: 4096)
+      out = String.new
+      max.times do
+        b = @memory.read8((addr + out.length) & 0xFFFF_FFFF)
+        break if b == 0
+        out << b.chr
+      end
+      out
+    end
+
     def apply_load_delay
       if @load_delay_reg != 0
         @regs[@load_delay_reg] = @load_delay_value
@@ -173,7 +234,9 @@ module PSX
       when 0x0E then op_xori(instruction)
       when 0x0F then op_lui(instruction)
       when 0x10 then execute_cop0(instruction)
+      when 0x11 then execute_cop1(instruction)
       when 0x12 then execute_cop2(instruction)  # GTE
+      when 0x13 then execute_cop3(instruction)
       when 0x20 then op_lb(instruction)
       when 0x21 then op_lh(instruction)
       when 0x22 then op_lwl(instruction)
@@ -186,10 +249,16 @@ module PSX
       when 0x2A then op_swl(instruction)
       when 0x2B then op_sw(instruction)
       when 0x2E then op_swr(instruction)
-      when 0x32 then op_lwc2(instruction)
-      when 0x3A then op_swc2(instruction)
+      when 0x30 then op_lwcN(instruction, 0)
+      when 0x31 then op_lwcN(instruction, 1)
+      when 0x32 then op_lwcN(instruction, 2)
+      when 0x33 then op_lwcN(instruction, 3)
+      when 0x38 then op_swcN(instruction, 0)
+      when 0x39 then op_swcN(instruction, 1)
+      when 0x3A then op_swcN(instruction, 2)
+      when 0x3B then op_swcN(instruction, 3)
       else
-        raise ExecutionError, format("Unknown opcode 0x%02X at PC=0x%08X", opcode, @pc - 4)
+        exception(COP0::EXC_RI)
       end
     end
 
@@ -226,7 +295,7 @@ module PSX
       when 0x2A then op_slt(instruction)
       when 0x2B then op_sltu(instruction)
       else
-        raise ExecutionError, format("Unknown SPECIAL funct 0x%02X at PC=0x%08X", funct, @pc - 4)
+        exception(COP0::EXC_RI)
       end
     end
 
@@ -249,6 +318,14 @@ module PSX
     end
 
     def execute_cop0(instruction)
+      # COP0 is always available in kernel mode, and gated by SR.CU0 in user
+      # mode (KUc=1). When user-mode software touches a disabled COP0 the
+      # CPU raises Coprocessor-Unusable with CE=0.
+      if (@cop0.sr & COP0::SR_KUC) != 0 && (@cop0.sr & COP0::SR_CU0) == 0
+        exception(COP0::EXC_CPU, coprocessor: 0)
+        return
+      end
+
       cop_op = (instruction >> 21) & 0x1F
 
       case cop_op
@@ -256,14 +333,32 @@ module PSX
       when 0x04 then op_mtc0(instruction)
       when 0x10 then op_rfe(instruction)
       else
-        raise ExecutionError, format("Unknown COP0 op 0x%02X at PC=0x%08X", cop_op, @pc - 4)
+        # Unknown COP0 ops silently no-op on the PSX (verified by
+        # ps1-tests/cpu/cop testCop0InvalidOpcode -- "????" in source).
+      end
+    end
+
+    # COP1 doesn't exist on the PSX. Access raises Coprocessor-Unusable when
+    # CU1=0; with CU1=1 the instruction silently no-ops.
+    def execute_cop1(_instruction)
+      if (@cop0.sr & COP0::SR_CU1) == 0
+        exception(COP0::EXC_CPU, coprocessor: 1)
+      end
+    end
+
+    # COP3 doesn't exist either. Same model as COP1.
+    def execute_cop3(_instruction)
+      if (@cop0.sr & COP0::SR_CU3) == 0
+        exception(COP0::EXC_CPU, coprocessor: 3)
       end
     end
 
     def execute_cop2(instruction)
-      # COP2 instructions split by bit 25:
-      #   bit 25 = 0: register move / load / store (cop_op selects which)
-      #   bit 25 = 1: GTE command (lower 25 bits encode the operation)
+      if (@cop0.sr & COP0::SR_CU2) == 0
+        exception(COP0::EXC_CPU, coprocessor: 2)
+        return
+      end
+
       if (instruction & (1 << 25)) != 0
         @gte.execute(instruction)
         return
@@ -274,16 +369,11 @@ module PSX
       rd = (instruction >> 11) & 0x1F
 
       case cop_op
-      when 0x00  # MFC2 - move data reg to CPU
-        set_reg_delayed(rt, @gte.read_data(rd))
-      when 0x02  # CFC2 - move control reg to CPU
-        set_reg_delayed(rt, @gte.read_control(rd))
-      when 0x04  # MTC2 - move CPU to data reg
-        @gte.write_data(rd, @regs[rt])
-      when 0x06  # CTC2 - move CPU to control reg
-        @gte.write_control(rd, @regs[rt])
-      else
-        raise ExecutionError, format("Unknown COP2 op 0x%02X at PC=0x%08X", cop_op, @pc - 4)
+      when 0x00 then set_reg_delayed(rt, @gte.read_data(rd))     # MFC2
+      when 0x02 then set_reg_delayed(rt, @gte.read_control(rd))  # CFC2
+      when 0x04 then @gte.write_data(rd, @regs[rt])              # MTC2
+      when 0x06 then @gte.write_control(rd, @regs[rt])           # CTC2
+        # Unknown COP2 register ops silently no-op (testCop2InvalidOpcode).
       end
     end
 
@@ -753,21 +843,51 @@ module PSX
       @memory.write32(aligned, result)
     end
 
-    # COP2 (GTE) memory access
-    def op_lwc2(instruction)
-      rs = (instruction >> 21) & 0x1F
-      rt = (instruction >> 16) & 0x1F   # GTE data register index
-      imm = instruction & 0xFFFF
-      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
-      @gte.write_data(rt, @memory.read32(addr))
+    # Coprocessor load (LWCn). For COP2 we move the word into the GTE data
+    # register; for the other coprocessors we either no-op (when enabled) or
+    # raise Coprocessor-Unusable (when disabled). Note that COP0/1/3 don't
+    # actually have memory data registers on the PSX -- BIOS catches the
+    # exception or treats the instruction as harmless.
+    def op_lwcN(instruction, cop)
+      unless coprocessor_usable?(cop)
+        exception(COP0::EXC_CPU, coprocessor: cop)
+        return
+      end
+      if cop == 2
+        rs = (instruction >> 21) & 0x1F
+        rt = (instruction >> 16) & 0x1F
+        imm = instruction & 0xFFFF
+        addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+        @gte.write_data(rt, @memory.read32(addr))
+      end
     end
 
-    def op_swc2(instruction)
-      rs = (instruction >> 21) & 0x1F
-      rt = (instruction >> 16) & 0x1F   # GTE data register index
-      imm = instruction & 0xFFFF
-      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
-      @memory.write32(addr, @gte.read_data(rt))
+    def op_swcN(instruction, cop)
+      unless coprocessor_usable?(cop)
+        exception(COP0::EXC_CPU, coprocessor: cop)
+        return
+      end
+      if cop == 2
+        rs = (instruction >> 21) & 0x1F
+        rt = (instruction >> 16) & 0x1F
+        imm = instruction & 0xFFFF
+        addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+        @memory.write32(addr, @gte.read_data(rt))
+      end
+    end
+
+    # Whether LWCn / SWCn for the given coprocessor is allowed. Unlike the
+    # main COP0 register move instructions (MFC0/MTC0/RFE) the load/store
+    # variants require CU0 to be set explicitly even in kernel mode -- this
+    # is what ps1-tests/cpu/cop testSwc0Disabled exercises.
+    def coprocessor_usable?(cop)
+      mask = case cop
+             when 0 then COP0::SR_CU0
+             when 1 then COP0::SR_CU1
+             when 2 then COP0::SR_CU2
+             when 3 then COP0::SR_CU3
+             end
+      (@cop0.sr & mask) != 0
     end
 
     # COP0 operations
@@ -792,16 +912,15 @@ module PSX
       @cop0.return_from_exception
     end
 
-    def exception(cause, bad_addr: nil)
-      # Enter exception, get vector address
+    def exception(cause, bad_addr: nil, coprocessor: nil)
       vector = @cop0.enter_exception(
         cause,
         @current_pc,
         in_delay_slot: @in_delay_slot,
-        bad_addr: bad_addr
+        bad_addr: bad_addr,
+        coprocessor: coprocessor
       )
 
-      # Jump to exception vector
       @pc = vector
       @next_pc = @pc + 4
       @branch_target = nil
