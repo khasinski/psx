@@ -182,12 +182,15 @@ module PSX
           break
         end
 
-        # Render at target FPS
+        # Render at target FPS. Important: do NOT toggle @gpu.vblank here.
+        # The emulator's run loop is the authoritative driver of vblank
+        # (CYCLES_PER_FRAME boundaries). Toggling here at wall-clock 60 Hz on
+        # top of that confuses BIOS-side vsync counters and trips
+        # SystemErrorUnresolvedException.
         now = Time.now
         elapsed = now - last_render
         if elapsed >= render_interval
           @emu_mutex.synchronize do
-            @gpu.vblank
             @frame_count += 1
             display.update(@gpu.framebuffer)
           end
