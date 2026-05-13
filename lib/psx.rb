@@ -8,6 +8,7 @@ require_relative "psx/dma"
 require_relative "psx/gpu"
 require_relative "psx/timers"
 require_relative "psx/cdrom"
+require_relative "psx/sio0"
 require_relative "psx/memory"
 require_relative "psx/cpu"
 require_relative "psx/disasm"
@@ -15,7 +16,8 @@ require_relative "psx/display"
 
 module PSX
   class Emulator
-    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom
+    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom, :sio0
+    attr_accessor :controller_state_proc
 
     # Timing constants
     CPU_FREQ = 33_868_800  # 33.8688 MHz
@@ -30,7 +32,12 @@ module PSX
       @gpu = GPU.new(interrupts: @interrupts)
       @timers = Timers.new(interrupts: @interrupts)
       @cdrom = CDROM.new(interrupts: @interrupts)
-      @memory = Memory.new(bios: bios, ram: ram, interrupts: @interrupts, dma: @dma, timers: @timers, cdrom: @cdrom)
+      @controller_state_proc = -> { 0xFFFF }
+      @sio0 = SIO0.new(interrupts: @interrupts, controller_state: -> { @controller_state_proc.call })
+      @memory = Memory.new(
+        bios: bios, ram: ram, interrupts: @interrupts,
+        dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0
+      )
       @memory.gpu = @gpu
       @cpu = CPU.new(@memory, interrupts: @interrupts)
 
@@ -62,6 +69,7 @@ module PSX
       gpu = @gpu
       remaining = steps
 
+      sio0 = @sio0
       while remaining > 0
         remaining -= 1
         cpu.step
@@ -70,6 +78,7 @@ module PSX
         cycle_count += 1
         if cycle_count & 63 == 0  # % 64 as bitmask
           timers.tick(64)
+          sio0.tick(64)
         end
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
@@ -115,6 +124,7 @@ module PSX
     # Run with graphical display (threaded: emulation in background)
     def run_with_display(target_fps: 60, frameskip: true)
       display = Display.new(title: "PSX-Ruby - Loading BIOS...")
+      @controller_state_proc = -> { display.controller_state }
       render_interval = 1.0 / target_fps
 
       # Run many cycles between renders for speed
@@ -268,6 +278,7 @@ module PSX
       # Tick timers less frequently for performance
       if @cycle_count % 64 == 0
         @timers.tick(64)
+        @sio0.tick(64)
       end
 
       # VBlank every frame
