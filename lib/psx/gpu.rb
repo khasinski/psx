@@ -89,6 +89,7 @@ module PSX
       @texture_window_mask_y = 0
       @texture_window_offset_x = 0
       @texture_window_offset_y = 0
+      @texture_disable_allow = false
 
       # Mask settings
       @set_mask_bit = false
@@ -235,9 +236,15 @@ module PSX
         gp1_vertical_range(value)
       when 0x08
         gp1_display_mode(value)
+      when 0x09
+        gp1_texture_disable(value)
       when 0x10..0x1F
         gp1_gpu_info(value)
       end
+    end
+
+    def gp1_texture_disable(value)
+      @texture_disable_allow = (value & 1) != 0
     end
 
     # Get current framebuffer as RGBA packed binary string for display
@@ -446,6 +453,13 @@ module PSX
         tex_page_y = ((tpage >> 4) & 0x01) * 256
         tex_depth = (tpage >> 7) & 0x03
 
+        # A textured polygon's tpage parameter also rewrites GPUSTAT bits 0-8
+        # (and, when GP1 09 allowed it, bit 15 from tpage bit 11). Bits 9-10
+        # remain whatever GP0 E1 set them to (verified by ps1-tests gpu/gp0-e1).
+        @status = (@status & ~0x01FF) | (tpage & 0x01FF)
+        tex_disable = (@texture_disable_allow && (tpage & (1 << 11)) != 0) ? 0x8000 : 0
+        @status = (@status & ~0x8000) | tex_disable
+
         if quad
           draw_textured_triangle(points[0], points[1], points[2],
                                  texcoords[0], texcoords[1], texcoords[2],
@@ -628,31 +642,30 @@ module PSX
     def vram_write_data(value)
       return if @vram_transfer_count <= 0
 
-      # Write two pixels per word
-      p0 = value & 0xFFFF
-      p1 = (value >> 16) & 0xFFFF
-
-      # Write first pixel
-      @vram[@vram_transfer_y * VRAM_WIDTH + (@vram_transfer_x % VRAM_WIDTH)] = p0
-      @vram_transfer_x += 1
-      if @vram_transfer_x >= @vram_transfer_start_x + @vram_transfer_width
-        @vram_transfer_x = @vram_transfer_start_x
-        @vram_transfer_y = (@vram_transfer_y + 1) % VRAM_HEIGHT
-      end
-
-      # Write second pixel
-      @vram[@vram_transfer_y * VRAM_WIDTH + (@vram_transfer_x % VRAM_WIDTH)] = p1
-      @vram_transfer_x += 1
-      if @vram_transfer_x >= @vram_transfer_start_x + @vram_transfer_width
-        @vram_transfer_x = @vram_transfer_start_x
-        @vram_transfer_y = (@vram_transfer_y + 1) % VRAM_HEIGHT
-      end
+      vram_write_pixel(value & 0xFFFF)
+      vram_write_pixel((value >> 16) & 0xFFFF)
 
       @vram_transfer_count -= 1
 
       if @vram_transfer_count <= 0
         @vram_transfer_mode = nil
         @status |= STAT_CMD_READY
+      end
+    end
+
+    def vram_write_pixel(pixel)
+      idx = @vram_transfer_y * VRAM_WIDTH + (@vram_transfer_x % VRAM_WIDTH)
+
+      # Mask bit settings apply to CPU-to-VRAM blits (verified by
+      # ps1-tests gpu/mask-bit).
+      unless @check_mask_bit && (@vram[idx] & 0x8000) != 0
+        @vram[idx] = pixel | (@set_mask_bit ? 0x8000 : 0)
+      end
+
+      @vram_transfer_x += 1
+      if @vram_transfer_x >= @vram_transfer_start_x + @vram_transfer_width
+        @vram_transfer_x = @vram_transfer_start_x
+        @vram_transfer_y = (@vram_transfer_y + 1) % VRAM_HEIGHT
       end
     end
 
@@ -663,8 +676,13 @@ module PSX
       @semi_transparency = (value >> 5) & 0x03
       @texture_depth = (value >> 7) & 0x03
 
-      # Update status
       @status = (@status & ~0x07FF) | (value & 0x07FF)
+
+      # GPUSTAT bit 15 (Texture Disable) comes from E1 bit 11, but only when
+      # GP1 09 ("Allow Texture Disable") has been set. With allow=false an E1
+      # write force-clears bit 15 (verified by ps1-tests gpu/gp0-e1).
+      bit15 = (@texture_disable_allow && (value & (1 << 11)) != 0) ? 0x8000 : 0
+      @status = (@status & ~0x8000) | bit15
     end
 
     def gp0_texture_window(value)
