@@ -38,12 +38,13 @@ module PSX
     DICR_IRQ_MASTER_FLAG = 0x8000_0000  # Master IRQ flag (bit 31)
 
     class Channel
-      attr_accessor :base_addr, :block_ctrl, :channel_ctrl
+      attr_accessor :base_addr, :block_ctrl, :channel_ctrl, :busy_cycles
 
       def initialize
         @base_addr = 0
         @block_ctrl = 0
         @channel_ctrl = 0
+        @busy_cycles = 0
       end
 
       def active?(needs_trigger: false)
@@ -222,6 +223,22 @@ module PSX
 
     # Execute pending DMA transfers
     # Returns true if any transfer was performed
+    def tick_cycles(cycles)
+      return unless @pending_completions && !@pending_completions.empty?
+
+      @pending_completions.reject! do |n|
+        ch = @channels[n]
+        ch.busy_cycles -= cycles
+        if ch.busy_cycles <= 0
+          ch.finish!
+          set_irq_flag(n)
+          true
+        else
+          false
+        end
+      end
+    end
+
     def tick(memory, gpu: nil)
       NUM_CHANNELS.times do |n|
         next unless channel_enabled?(n)
@@ -341,8 +358,10 @@ module PSX
         end
       end
 
-      channel.finish!
-      set_irq_flag(SPU)
+      # Real SPU DMA is ~16 cycles per word; defer the BUSY clear so that
+      # cycle-counting tests (ps1-tests spu/memory-transfer) see a non-zero
+      # wait. Data already in place — only the completion flag waits.
+      schedule_completion(SPU, total * 16)
     end
 
     def transfer_otc(memory)
@@ -368,8 +387,20 @@ module PSX
         addr = (addr - 4) & 0x1F_FFFC
       end
 
+      # OTC is RAM-only; finish synchronously so the existing otc-test asserts
+      # still hold (they check CHCR after a single write, with no cycle gap).
       channel.finish!
       set_irq_flag(OTC)
     end
+
+    # Mark a channel as still busy for `cycles` more CPU cycles, so callers
+    # polling CHCR.BUSY see a non-zero wait. Called by transfers that want to
+    # model device-side latency. Resolved by `tick_cycles`.
+    def schedule_completion(channel_num, cycles)
+      @channels[channel_num].busy_cycles = cycles
+      @pending_completions ||= []
+      @pending_completions << channel_num unless @pending_completions.include?(channel_num)
+    end
+
   end
 end

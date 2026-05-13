@@ -243,6 +243,12 @@ module PSX
       when 0x005A
         # SIO1 CTRL
         0
+      when 0x0070
+        @interrupts&.read_stat || 0
+      when 0x0074
+        @interrupts&.read_mask || 0
+      when 0x0100...0x0130
+        @timers&.read(offset - 0x0100) || 0
       when 0x0C80...0x0D00
         # SPU voice registers - read back 0
         0
@@ -311,6 +317,12 @@ module PSX
       case offset
       when 0x0040..0x004F
         @sio0&.write16(offset, value)
+      when 0x0070
+        @interrupts&.write_stat(value)
+      when 0x0074
+        @interrupts&.write_mask(value)
+      when 0x0100...0x0130
+        @timers&.write(offset - 0x0100, value)
       when 0x0C80...0x0D80
         # SPU voice registers - drop
       when 0x0D80...0x0E00

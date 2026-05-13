@@ -72,6 +72,7 @@ module PSX
       remaining = steps
 
       sio0 = @sio0
+      dma = @dma
       while remaining > 0
         remaining -= 1
         cpu.step
@@ -81,6 +82,7 @@ module PSX
         if cycle_count & 63 == 0  # % 64 as bitmask
           timers.tick(64)
           sio0.tick(64)
+          dma.tick_cycles(64)
         end
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
@@ -328,6 +330,7 @@ module PSX
       if @cycle_count % 64 == 0
         @timers.tick(64)
         @sio0.tick(64)
+        @dma.tick_cycles(64)
       end
 
       # VBlank every frame
