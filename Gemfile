@@ -2,6 +2,4 @@
 
 source "https://rubygems.org"
 
-gem "minitest"
-gem "rake"
-gem "ruby-sdl2"
+gemspec

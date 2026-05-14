@@ -1,28 +1,31 @@
-# BIOS files (copyrighted)
+# BIOS files (copyrighted — never commit these)
 *.BIN
 *.bin
+*.rom
+*.ROM
 
-# IDE
+# Generated images / scratch
+*.ppm
+smoke*/
+
+# Local copy of JaCzekanski/ps1-tests checkout used by bin/psx-test
+.tests/
+
+# Local development / IDE
 .idea/
+.vscode/
 
 # macOS
 .DS_Store
 
-# Generated files
-*.ppm
-
-# Temporary/profile files
+# Temporary / profiling files
 profile*.rb
 benchmark_cpu.rb
+*.dump
 
-# Ruby
+# Ruby packaging
 *.gem
 *.rbc
 .bundle/
 vendor/bundle/
-
-# Profiling
-*.dump
-
-# Local copy of JaCzekanski/ps1-tests checkout used by bin/psx-test
-.tests/
+pkg/

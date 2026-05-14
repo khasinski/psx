@@ -1,29 +1,30 @@
+PATH
+  remote: .
+  specs:
+    psx (0.1.0)
+      ruby-sdl2 (~> 0.3)
+
 GEM
   remote: https://rubygems.org/
   specs:
-    drb (2.2.3)
-    minitest (6.0.3)
-      drb (~> 2.0)
-      prism (~> 1.5)
-    prism (1.9.0)
-    rake (13.3.1)
-    ruby-sdl2 (0.3.6)
+    minitest (5.27.0)
+    rake (13.4.2)
+    ruby-sdl2 (0.3.7)
 
 PLATFORMS
   arm64-darwin-25
   ruby
 
 DEPENDENCIES
-  minitest
-  rake
-  ruby-sdl2
+  minitest (~> 5)
+  psx!
+  rake (~> 13)
 
 CHECKSUMS
-  drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
-  minitest (6.0.3) sha256=88ac8a1de36c00692420e7cb3cc11a0773bbcb126aee1c249f320160a7d11411
-  prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
-  rake (13.3.1) sha256=8c9e89d09f66a26a01264e7e3480ec0607f0c497a861ef16063604b1b08eb19c
-  ruby-sdl2 (0.3.6) sha256=993d1223f03ebb8143d6a981c23913182c57364a4ea4a41db1c194bacc49e780
+  minitest (5.27.0) sha256=2d3b17f8a36fe7801c1adcffdbc38233b938eb0b4966e97a6739055a45fa77d5
+  psx (0.1.0)
+  rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
+  ruby-sdl2 (0.3.7) sha256=16f9be9c6883ed5054d34af0a5bedecaa7bf2746d344b8f7729350c5bcff5bc6
 
 BUNDLED WITH
   4.0.8

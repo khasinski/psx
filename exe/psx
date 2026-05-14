@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# PlayStation 1 emulator — graphical front-end. Loads a BIOS image and runs
+# the emulator with an SDL window for display + keyboard controller input.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require "psx"
+
+def usage
+  warn <<~USAGE
+    PSX — PlayStation 1 emulator (#{PSX::VERSION})
+
+    Usage: psx [options] <bios.bin>
+
+    Options:
+      -f, --fps N         Target FPS (default: 60)
+      -n, --no-frameskip  Disable frame skipping
+      -v, --version       Print version and exit
+      -h, --help          Show this help
+
+    Controls (keyboard, slot 1 digital pad):
+      Arrow keys    D-pad
+      Z             Cross (confirm)
+      X             Circle (cancel)
+      A             Square
+      S             Triangle
+      Enter         Start
+      Space         Select
+      Q / W         L1 / R1
+      E / R         L2 / R2
+      Escape        Quit
+
+    A BIOS ROM (e.g. SCPH1001.BIN, 512 KB) is required and must be provided
+    by the user; PSX-Ruby does not ship one.
+  USAGE
+  exit 1
+end
+
+target_fps = 60
+frameskip = true
+bios_path = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-f", "--fps"
+    target_fps = args.shift&.to_i
+    usage if target_fps.nil? || target_fps <= 0
+  when "-n", "--no-frameskip"
+    frameskip = false
+  when "-v", "--version"
+    puts PSX::VERSION
+    exit 0
+  when "-h", "--help"
+    usage
+  else
+    bios_path = arg
+  end
+end
+
+usage unless bios_path
+
+unless File.exist?(bios_path)
+  warn "Error: BIOS file not found: #{bios_path}"
+  exit 1
+end
+
+puts "PSX-Ruby #{PSX::VERSION}"
+puts "Loading BIOS: #{bios_path}"
+puts "Target FPS: #{target_fps}"
+puts "Frame skip: #{frameskip ? 'enabled' : 'disabled'}"
+puts "YJIT: #{defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? 'enabled' : 'disabled'}"
+puts ""
+
+begin
+  emu = PSX::Emulator.new(bios_path)
+  emu.run_with_display(target_fps: target_fps, frameskip: frameskip)
+rescue Interrupt
+  puts "\nInterrupted by user"
+rescue => e
+  warn "\nError: #{e.message}"
+  warn e.backtrace.first(5).join("\n")
+  exit 1
+end
