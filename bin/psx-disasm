@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Boot the BIOS for N cycles, then dump disassembly around the given range
+# of physical addresses. Use this to see what code the BIOS is actually
+# executing, since the memory ranges in our notes go stale fast.
+#
+# Usage: psx-disasm [-b BIOS] [-c CYCLES] LO HI
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path = "SCPH1001.BIN"
+cycles    = 0
+addrs     = []
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios" then bios_path = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  else addrs << Integer(arg, 16)
+  end
+end
+
+abort "Need LO and HI hex addresses" if addrs.size < 2
+
+emu = PSX::Emulator.new(bios_path)
+emu.run(steps: cycles) if cycles.positive?
+
+lo, hi = addrs[0], addrs[1]
+(lo..hi).step(4) do |a|
+  instr = emu.memory.read32(a)
+  puts format("  %08X: %08X  %s", a, instr, PSX::Disasm.disassemble(a, instr))
+end

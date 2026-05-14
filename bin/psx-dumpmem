@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Boot the BIOS for N cycles, then hex-dump a range of memory. Used to
+# inspect what state the BIOS left in RAM after some work.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path = "SCPH1001.BIN"
+cycles    = 30_000_000
+addrs     = []
+length    = 64
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"   then bios_path = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  when "-l", "--length" then length = args.shift.to_i
+  else addrs << Integer(arg, 16)
+  end
+end
+
+abort "Provide at least one address" if addrs.empty?
+
+emu = PSX::Emulator.new(bios_path)
+emu.run(steps: cycles)
+
+addrs.each do |a|
+  puts format("---- %08X (%d bytes) ----", a, length)
+  (a...(a + length)).step(16) do |row|
+    line = format("%08X: ", row)
+    16.times do |i|
+      next if i + row >= a + length
+      b = emu.memory.read8(row + i)
+      line << format("%02x ", b)
+    end
+    line << " "
+    16.times do |i|
+      next if i + row >= a + length
+      b = emu.memory.read8(row + i)
+      line << ((b >= 0x20 && b < 0x7F) ? b.chr : ".")
+    end
+    puts line
+  end
+  v32 = emu.memory.read32(a)
+  v16 = emu.memory.read16(a)
+  puts format("  read32(%08X) = %08X  read16 = %04X", a, v32, v16)
+end

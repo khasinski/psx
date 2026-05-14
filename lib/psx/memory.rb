@@ -243,6 +243,12 @@ module PSX
       when 0x005A
         # SIO1 CTRL
         0
+      when 0x0070
+        # I_STAT (low halfword) — BIOS uses 16-bit access.
+        (@interrupts&.read_stat || 0) & 0xFFFF
+      when 0x0074
+        # I_MASK (low halfword) — BIOS uses 16-bit access.
+        (@interrupts&.read_mask || 0) & 0xFFFF
       when 0x0100...0x0130
         @timers&.read(offset - 0x0100) || 0
       when 0x0C80...0x0D00
@@ -313,6 +319,16 @@ module PSX
       case offset
       when 0x0040..0x004F
         @sio0&.write16(offset, value)
+      when 0x0070
+        # I_STAT ack via 16-bit write: the BIOS ack writes the low halfword.
+        # Preserve the upper bits of stat (real I_STAT is 11 bits anyway).
+        if @interrupts
+          high = @interrupts.stat & ~0xFFFF
+          @interrupts.write_stat((value & 0xFFFF) | high)
+        end
+      when 0x0074
+        # I_MASK via 16-bit write — BIOS uses this in SetIntMask.
+        @interrupts&.write_mask(value & 0xFFFF)
       when 0x0100...0x0130
         @timers&.write(offset - 0x0100, value)
       when 0x0C80...0x0D80

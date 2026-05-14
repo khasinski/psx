@@ -1,0 +1,75 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Run the BIOS while capturing what it would have written to its debug TTY
+# (B(0x3D) puts2 / B(0x39) putchar / B(0x3B) putc / A(0x3C) putchar / etc.).
+# This is the most direct way to see what the BIOS *thinks* it's doing —
+# real BIOS images print things like "BU init", "boot file = ...", and
+# "_96_init failed!" during boot.
+#
+# Usage: psx-puts-trace [-b BIOS] [-c CYCLES]
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path = "SCPH1001.BIN"
+cycles    = 100_000_000
+event_log = false
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"   then bios_path = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  when "--events"       then event_log = true
+  end
+end
+
+emu = PSX::Emulator.new(bios_path)
+cpu = emu.cpu
+
+events = []
+out = String.new
+
+original_step = cpu.method(:step)
+cpu.define_singleton_method(:step) do
+  phys = @pc & 0x1FFF_FFFF
+  if phys == 0xA0 || phys == 0xB0
+    num = @regs[9] & 0xFF
+    case [phys, num]
+    when [0xA0, 0x3C], [0xA0, 0x3D], [0xB0, 0x39], [0xB0, 0x3B], [0xB0, 0x3D]
+      out << (@regs[4] & 0xFF).chr
+    when [0xA0, 0x3E], [0xA0, 0x3F], [0xB0, 0x3E]
+      addr = @regs[4] & 0xFFFF_FFFF
+      str = String.new
+      256.times do
+        b = @memory.read8(addr + str.length)
+        break if b == 0
+        str << b.chr
+      end
+      out << str
+    end
+  end
+
+  if event_log && (phys == 0xA0 || phys == 0xB0 || phys == 0xC0)
+    num = @regs[9] & 0xFF
+    a0 = @regs[4] & 0xFFFF_FFFF
+    a1 = @regs[5] & 0xFFFF_FFFF
+    events << format("%s(0x%02X) a0=%08X a1=%08X",
+                     { 0xA0 => :A, 0xB0 => :B, 0xC0 => :C }[phys], num, a0, a1)
+  end
+
+  original_step.call
+end
+
+begin
+  emu.run(steps: cycles)
+rescue PSX::CPU::ExecutionError => e
+  warn "CPU error: #{e.message}"
+end
+
+print out.gsub("\r", "\n")
+warn "" if event_log
+warn "== distinct events (last 100) =="
+warn events.last(100).tally.sort_by { |_, c| -c }.first(20).map { |(e, c)| "  #{c.to_s.rjust(6)}  #{e}" } if event_log

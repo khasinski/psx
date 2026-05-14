@@ -285,4 +285,47 @@ class CPUSpec < Minitest::Test
 
     assert_equal 0, get_reg(10), "0xFFFFFFFF should not be less than 1 unsigned"
   end
+
+  # Regression: if an interrupt fires while the CPU is sitting on a branch
+  # delay slot, the exception must record EPC = branch address and CAUSE.BD =
+  # 1 so that RFE restarts the branch instead of skipping it. Skipping the
+  # branch leaves whatever the delay slot set in registers (e.g. $s0 = 0)
+  # but rejoins the non-taken path — which is what caused the BIOS shell to
+  # hang in a tight poll with $s0 = 0 in the GPU dispatcher loop.
+  def test_interrupt_in_delay_slot_records_branch_pc
+    interrupts = @env[:interrupts]
+    cop0 = @cpu.cop0
+
+    # Enable interrupts and unmask IRQ line 0 (= I_STAT bit 0 / hardware IRQ).
+    cop0.write(PSX::COP0::SR, PSX::COP0::SR_IEC | 0x0400)
+    interrupts.write_mask(PSX::Interrupts::IRQ_VBLANK)
+
+    # Lay out two instructions in RAM at 0x8000_0000:
+    #   0x8000_0000: beq $zero, $zero, +1     ; unconditional branch to 0x8000_0008
+    #   0x8000_0004: addiu $s0, $zero, 0      ; delay slot: $s0 = 0
+    # beq opcode 0x04, rs=0 rt=0 imm=1 -> 0x10000001
+    @memory.write32(0x8000_0000, 0x10000001)
+    @memory.write32(0x8000_0004, 0x24100000)  # addiu $s0,$zero,0
+
+    @cpu.pc = 0x8000_0000
+
+    # Step the branch instruction. After this, @pc=delay_slot, @next_pc=target.
+    @cpu.step
+    refute_equal 0, @cpu.instance_variable_get(:@next_pc) - @cpu.instance_variable_get(:@pc),
+                 "branch should have redirected @next_pc"
+
+    # Pre-bake a pending VBlank IRQ and force the interrupt check to fire on
+    # the very next step (the delay slot).
+    interrupts.request(PSX::Interrupts::IRQ_VBLANK)
+    @cpu.instance_variable_set(:@interrupt_check_counter, 64)
+
+    pc_before_delay_slot = @cpu.instance_variable_get(:@pc)
+    @cpu.step
+
+    # The CPU should have taken the exception with EPC pointing at the
+    # branch (= delay_slot - 4) and BD = 1.
+    assert_equal pc_before_delay_slot - 4, cop0.epc,
+                 "EPC must point at the branch, not the delay slot"
+    assert_equal 0x8000_0000, cop0.cause & 0x8000_0000, "CAUSE.BD must be set"
+  end
 end

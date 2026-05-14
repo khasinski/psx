@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "psx/version"
 require_relative "psx/bios"
 require_relative "psx/ram"
 require_relative "psx/cop0"
@@ -73,19 +74,26 @@ module PSX
 
       sio0 = @sio0
       dma = @dma
+      tick_threshold = 64
       while remaining > 0
         remaining -= 1
         cpu.step
 
-        # Inlined tick_devices
-        cycle_count += 1
-        if cycle_count & 63 == 0  # % 64 as bitmask
+        # Inlined tick_devices. cpu.step_cycles is the effective cycle cost
+        # of the instruction we just ran (1 for ALU, 2 for loads). Using it
+        # instead of a constant 1 keeps the VBlank period in line with the
+        # BIOS' own timing expectations, so VSync waits don't time out.
+        cycles = cpu.step_cycles
+        cycle_count += cycles
+        if cycle_count >= tick_threshold
+          tick_threshold = cycle_count + 64
           timers.tick(64)
           sio0.tick(64)
           dma.tick_cycles(64)
         end
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
+          tick_threshold = 64
           frame_count += 1
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank

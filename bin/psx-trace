@@ -1,0 +1,139 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# BIOS tracing/diagnostic tool. Runs the emulator for a configurable number
+# of cycles, collecting:
+#   - PC histogram (top hotspots by hit count)
+#   - Last-seen GP0/GP1 commands
+#   - I_STAT / I_MASK / CAUSE / SR after the run
+#   - VRAM coverage (non-zero pixels)
+#   - Optional periodic checkpoints with the same info
+#
+# Use this to figure out *where* the BIOS is spinning, not just *that* it is.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path     = "SCPH1001.BIN"
+total_cycles  = 100_000_000
+checkpoint    = nil
+ranges        = []
+trace_io      = false
+out_dir       = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"        then bios_path = args.shift
+  when "-c", "--cycles"      then total_cycles = args.shift.gsub("_", "").to_i
+  when "--checkpoint"        then checkpoint = args.shift.gsub("_", "").to_i
+  when "--range"             then ranges << args.shift  # "lo:hi"
+  when "--io"                then trace_io = true
+  when "--out"               then out_dir = args.shift
+  when "-h", "--help"
+    puts "Usage: psx-trace [-b BIOS] [-c CYCLES] [--checkpoint N] [--range LO:HI] [--io] [--out DIR]"
+    exit 0
+  else
+    bios_path = arg
+  end
+end
+
+abort "BIOS not found: #{bios_path}" unless File.exist?(bios_path)
+
+emu = PSX::Emulator.new(bios_path)
+cpu = emu.cpu
+memory = emu.memory
+
+# Patch CPU#step so we can sample PC. Sampling every step is too slow; sample
+# every 16th cycle for a representative histogram.
+hist = Hash.new(0)
+sample = 0
+SAMPLE_EVERY = 16
+
+original_step = cpu.method(:step)
+cpu.define_singleton_method(:step) do
+  sample = (sample + 1) & (SAMPLE_EVERY - 1)
+  hist[@pc & 0xFFFF_FFFF] += 1 if sample == 0
+  original_step.call
+end
+
+# Optional: count how many times each ranged window is visited
+range_hits = ranges.map do |r|
+  lo, hi = r.split(":").map { |x| Integer(x, 16) }
+  [lo, hi, 0]
+end
+
+# Optional: trace I/O. Wraps Memory#io_* using prepend; keep last N events.
+if trace_io
+  io_log = []
+  mod = Module.new do
+    [:io_read8, :io_read16, :io_read32, :io_write8, :io_write16, :io_write32].each do |sym|
+      define_method(sym) do |*a|
+        v = super(*a)
+        # cap to last 200 events
+        io_log << [sym, a, v]
+        io_log.shift if io_log.size > 200
+        v
+      end
+    end
+  end
+  memory.singleton_class.prepend(mod)
+  # Stash on object for later
+  memory.define_singleton_method(:_io_log) { io_log }
+end
+
+Dir.mkdir(out_dir) if out_dir && !Dir.exist?(out_dir)
+
+def dump_state(emu, hist, range_hits, label, out_dir, idx)
+  cpu = emu.cpu
+  ints = emu.interrupts
+  fb = emu.gpu.framebuffer
+  nz = fb[:rgba].each_byte.each_slice(4).count { |r, g, b, _| (r | g | b) != 0 }
+  top = hist.sort_by { |_, n| -n }.first(15)
+  warn "==== #{label} ===="
+  warn format("PC=%08X SR=%08X CAUSE=%08X EPC=%08X", cpu.pc, cpu.cop0.sr, cpu.cop0.cause, cpu.cop0.epc)
+  warn format("I_STAT=%011b I_MASK=%011b DICR=%08X", ints.stat, ints.mask, emu.dma.dicr)
+  warn format("VRAM non-zero pixels: %d", nz)
+  range_hits.each { |lo, hi, n| warn format("  range %08X..%08X: %d hits", lo, hi, n) }
+  warn "Top 15 PC samples:"
+  top.each { |pc, n| warn format("  %08X  %8d", pc, n) }
+  if out_dir
+    emu.save_screenshot(File.join(out_dir, format("chk_%03d.ppm", idx)))
+  end
+end
+
+chunk = 200_000
+ran = 0
+chk_idx = 0
+
+begin
+  while ran < total_cycles
+    step = [chunk, total_cycles - ran].min
+    emu.run(steps: step)
+
+    # Tally range hits in the histogram window
+    range_hits.each_with_index do |(lo, hi, _), i|
+      n = hist.each_pair.sum { |pc, c| (pc >= lo && pc <= hi) ? c : 0 }
+      range_hits[i][2] = n
+    end
+
+    ran += step
+    if checkpoint && (ran / checkpoint) > chk_idx
+      chk_idx = ran / checkpoint
+      dump_state(emu, hist, range_hits, "checkpoint cycles=#{ran}", out_dir, chk_idx)
+    end
+  end
+rescue PSX::CPU::ExecutionError => e
+  warn "[psx-trace] CPU error after #{ran} cycles: #{e.message}"
+end
+
+dump_state(emu, hist, range_hits, "final cycles=#{ran}", out_dir, chk_idx + 1)
+
+if trace_io
+  warn "Last 30 I/O events:"
+  memory._io_log.last(30).each do |sym, args, ret|
+    arg_str = args.map { |a| a.is_a?(Integer) ? format("0x%X", a) : a.inspect }.join(", ")
+    warn "  #{sym}(#{arg_str}) -> #{ret.is_a?(Integer) ? format("0x%X", ret) : ret.inspect}"
+  end
+end

@@ -1,0 +1,89 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Watch every read/write to a chosen set of addresses while the BIOS boots.
+# Useful for figuring out what the BIOS thinks the value of e.g. its VSync
+# counter is, who's writing it, and what PC reads it.
+#
+# Usage: psx-memwatch -c CYCLES ADDR[,ADDR,...]
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path = "SCPH1001.BIN"
+cycles    = 50_000_000
+addr_list = []
+max_log   = 4000
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"   then bios_path = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  when "--max"          then max_log = args.shift.to_i
+  else
+    arg.split(",").each { |a| addr_list << Integer(a, 16) }
+  end
+end
+
+abort "Provide at least one address (hex)" if addr_list.empty?
+
+# Match the raw 32-bit-aligned target word OR any byte within it (so a SB to
+# offset+3 still counts).
+expanded = addr_list.flat_map do |a|
+  word = a & ~3
+  [word, word, word + 1, word + 2, word + 3].flat_map do |w|
+    [w, w & 0x1FFF_FFFF]
+  end
+end
+addr_set = expanded.to_set
+
+emu = PSX::Emulator.new(bios_path)
+memory = emu.memory
+cpu = emu.cpu
+
+log = []
+cycle = 0
+
+mod = Module.new
+addr_words = addr_list.flat_map { |a| [a, a & ~3] }.uniq
+write_methods = %i[write8 write16 write32]
+read_methods  = %i[read32]  # only watching word reads here
+
+%i[write32 write16 write8].each do |sym|
+  mod.define_method(sym) do |addr, value|
+    phys = addr & 0x1FFF_FFFF
+    if addr_set.include?(phys) || addr_set.include?(phys & ~3)
+      log << [cycle, :W, sym, phys, value & 0xFFFF_FFFF, cpu.pc & 0xFFFF_FFFF]
+      log.shift while log.size > max_log
+    end
+    super(addr, value)
+  end
+end
+
+mod.define_method(:read32) do |addr|
+  v = super(addr)
+  phys = addr & 0x1FFF_FFFF
+  if addr_set.include?(phys)
+    log << [cycle, :R, :read32, phys, v & 0xFFFF_FFFF, cpu.pc & 0xFFFF_FFFF]
+    log.shift while log.size > max_log
+  end
+  v
+end
+
+memory.singleton_class.prepend(mod)
+
+original_step = cpu.method(:step)
+cpu.define_singleton_method(:step) do
+  cycle += 1
+  original_step.call
+end
+
+emu.run(steps: cycles)
+
+log.each do |cyc, kind, op, addr, val, pc|
+  warn format("cyc=%10d %s %-7s @%08X = %08X  (PC=%08X)",
+              cyc, kind, op, addr, val, pc)
+end
+warn "Total log entries: #{log.size}"

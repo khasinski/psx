@@ -1,0 +1,128 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Trace BIOS A/B/C jump-table calls. The PSX BIOS exposes its kernel API
+# via three software dispatch points at physical addresses 0xA0, 0xB0, 0xC0.
+# Software places the function number in $t1 and jumps. We hook the step
+# loop and emit (kind, num, args) for each call.
+#
+# Usage: psx-biostrace [-b BIOS] [-c CYCLES] [--from START] [--only NUM[,NUM]]
+#
+# `--from START` skips logging until that cycle has elapsed -- useful when
+# the noise during early init drowns out post-init activity.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+
+require_relative "../lib/psx"
+
+bios_path = "SCPH1001.BIN"
+cycles    = 50_000_000
+from      = 0
+only      = nil
+top       = 30
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"   then bios_path = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  when "--from"         then from = args.shift.gsub("_", "").to_i
+  when "--only"         then only = args.shift.split(",").map { |s| Integer(s, 16) }
+  when "--top"          then top = args.shift.to_i
+  end
+end
+
+# A/B/C names from nocash docs (most common ones).
+A_NAMES = {
+  0x00 => "open", 0x01 => "lseek", 0x02 => "read", 0x03 => "write",
+  0x04 => "close", 0x06 => "exit", 0x07 => "FileC0", 0x09 => "TestDevice",
+  0x13 => "setjmp", 0x14 => "longjmp", 0x18 => "strcat", 0x19 => "strncat",
+  0x1A => "strcmp", 0x1B => "strncmp", 0x1C => "strcpy", 0x1D => "strncpy",
+  0x25 => "toupper", 0x28 => "bzero", 0x2A => "memcpy", 0x2B => "memset",
+  0x33 => "malloc", 0x34 => "free", 0x39 => "InitHeap",
+  0x3C => "putchar", 0x3D => "puts", 0x3E => "printf", 0x3F => "SystemErrorUnresolvedException",
+  0x40 => "FlushCache", 0x44 => "FlushCache", 0x49 => "GPU_cw",
+  0x4A => "GPU_sync", 0x70 => "_bu_init", 0x72 => "CdRemove", 0x96 => "AddCDROMDevice",
+  0x98 => "AddDummyTtyDevice", 0xA0 => "SystemError", 0xA1 => "HookEntryInt",
+  0xB4 => "GetSystemInfo", 0xB5 => "_card_chan",
+}
+
+B_NAMES = {
+  0x00 => "alloc_kernel_memory", 0x07 => "DeliverEvent", 0x08 => "OpenEvent",
+  0x09 => "CloseEvent", 0x0A => "WaitEvent", 0x0B => "TestEvent",
+  0x0C => "EnableEvent", 0x0D => "DisableEvent", 0x0E => "OpenTh",
+  0x0F => "CloseTh", 0x10 => "ChangeTh", 0x12 => "InitPad", 0x13 => "StartPad",
+  0x14 => "StopPad", 0x15 => "OutdatedPadInitAndStart", 0x16 => "OutdatedPadGetButtons",
+  0x17 => "ReturnFromException", 0x18 => "SetDefaultExitFromException",
+  0x19 => "SetCustomExitFromException", 0x20 => "UnDeliverEvent",
+  0x32 => "open", 0x33 => "lseek", 0x34 => "read", 0x35 => "write",
+  0x36 => "close", 0x39 => "putchar", 0x3A => "puts", 0x3B => "putc",
+  0x3D => "puts2", 0x3F => "getc", 0x4A => "EnterCriticalSection",
+  0x4B => "ExitCriticalSection", 0x4C => "ChangeThreadSubFunction",
+  0x55 => "_get_b0_table",
+}
+
+C_NAMES = {
+  0x00 => "EnqueueTimerAndVblankIrqs", 0x01 => "EnqueueSyscallHandler",
+  0x02 => "SysEnqIntRP", 0x03 => "SysDeqIntRP", 0x07 => "InstallExceptionHandlers",
+  0x08 => "SysInitMemory", 0x09 => "SysInitKernelVariables",
+  0x0A => "ChangeClearRCnt", 0x0C => "InitDefInt", 0x12 => "InstallDevices",
+  0x13 => "FlushStdInOutPut", 0x15 => "_cdevinput", 0x16 => "_cdevscan",
+  0x17 => "_circgetc", 0x18 => "_circputc", 0x19 => "_ioabort",
+  0x1A => "set_card_find_mode",
+}
+
+emu = PSX::Emulator.new(bios_path)
+
+calls = Hash.new(0)
+trace = []
+TRACE_MAX = 1000
+
+cycle_counter = 0
+cpu = emu.cpu
+original_step = cpu.method(:step)
+cpu.define_singleton_method(:step) do
+  cycle_counter += 1
+  phys = @pc & 0x1FFF_FFFF
+  if phys == 0xA0 || phys == 0xB0 || phys == 0xC0
+    kind = { 0xA0 => :A, 0xB0 => :B, 0xC0 => :C }[phys]
+    num = @regs[9] & 0xFF
+    if cycle_counter >= from && (only.nil? || only.include?(num))
+      calls[[kind, num]] += 1
+      if trace.size < TRACE_MAX
+        a0 = @regs[4] & 0xFFFF_FFFF
+        a1 = @regs[5] & 0xFFFF_FFFF
+        ra = @regs[31] & 0xFFFF_FFFF
+        trace << [cycle_counter, kind, num, a0, a1, ra]
+      end
+    end
+  end
+  original_step.call
+end
+
+begin
+  emu.run(steps: cycles)
+rescue PSX::CPU::ExecutionError => e
+  warn "CPU error after #{cycle_counter} cycles: #{e.message}"
+end
+
+warn format("== BIOS call counts (after cycle %d) ==", from)
+calls.sort_by { |_, n| -n }.first(top).each do |(kind, num), n|
+  name = case kind
+         when :A then A_NAMES[num]
+         when :B then B_NAMES[num]
+         when :C then C_NAMES[num]
+         end
+  warn format("  %s(0x%02X) %6d  %s", kind, num, n, name || "")
+end
+
+warn "== Last 30 calls ==" unless trace.empty?
+trace.last(30).each do |cyc, kind, num, a0, a1, ra|
+  name = case kind
+         when :A then A_NAMES[num]
+         when :B then B_NAMES[num]
+         when :C then C_NAMES[num]
+         end
+  warn format("  cyc=%10d %s(0x%02X) a0=%08X a1=%08X ra=%08X  %s",
+              cyc, kind, num, a0, a1, ra, name || "")
+end

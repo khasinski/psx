@@ -118,6 +118,12 @@ module PSX
     end
 
     def execute_command(cmd)
+      # Drain any leftover response bytes from a prior command. Real hardware
+      # has an 8-deep response FIFO that the BIOS may not fully read after an
+      # error (e.g. INT5 on GetID with no disc returns 8 bytes but the BIOS
+      # only consumes a couple). Without this, our `tick` stays blocked
+      # forever waiting for `@response.empty?` and no further commands fire.
+      @response.clear
       case cmd
       when 0x01 # Getstat
         queue(3, [@stat])

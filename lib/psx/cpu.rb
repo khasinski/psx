@@ -14,13 +14,14 @@ module PSX
     BIOS_B_DISPATCH = 0x000000B0
     BIOS_C_DISPATCH = 0x000000C0
 
-    attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte
+    attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte, :step_cycles
     attr_accessor :tty_handler
 
     def pc=(value)
       @pc = value & 0xFFFF_FFFF
       @next_pc = (@pc + 4) & 0xFFFF_FFFF
       @branch_target = nil
+      @next_in_delay_slot = false
     end
 
     def initialize(memory, interrupts: nil)
@@ -48,39 +49,64 @@ module PSX
       # Interrupt check counter - only check every N cycles
       @interrupt_check_counter = 0
       @interrupt_check_interval = 64
+
+      # Cycles consumed by the most recent step. Defaults to 1 per
+      # instruction; loads bump it to reflect the R3000A load-delay slot plus
+      # main-RAM access latency (the BIOS code path is mostly uncached). The
+      # outer run loop reads this to drive VBlank/timer ticks at roughly the
+      # right rate, so wait loops in the BIOS (e.g. VSync) complete before
+      # their 0x8000-iteration timeout.
+      @step_cycles = 1
+
+      # Whether the previous step set up a branch — i.e. the *current* step
+      # is executing a delay-slot instruction. We can't infer this from
+      # @next_pc vs @pc+4 because short branches happen to have target ==
+      # delay_slot+4; only the branch instruction itself knows.
+      @next_in_delay_slot = false
     end
 
     def step
-      # Check for pending interrupts (only every N cycles for performance)
+      @step_cycles = 1
+      # Snapshot pre-execute state so a pending interrupt (or any exception
+      # raised during this step) records the right EPC/BD. The previous step
+      # set @next_in_delay_slot iff it was a taken branch; that means *this*
+      # step's instruction is in the delay slot.
+      pc = @pc
+      next_pc = @next_pc
+      @current_pc = pc
+      @in_delay_slot = @next_in_delay_slot
+      @next_in_delay_slot = false
+
+      # Check for pending interrupts (only every N cycles for performance).
+      # If this fires, @pc/@next_pc/@current_pc are clobbered to the vector
+      # and we continue with the vector's first instruction.
       @interrupt_check_counter += 1
       if @interrupt_check_counter >= @interrupt_check_interval
         @interrupt_check_counter = 0
         check_interrupts
+        if @pc != pc
+          # Exception was taken; rebind the loop variables to the vector.
+          pc = @pc
+          next_pc = @next_pc
+        end
       end
 
       # Optional TTY hook: intercept BIOS A-table entry so PS-EXE programs
       # built against the standard BIOS putchar/puts functions can be tested
       # without depending on a working CD-ROM/Shell. Returns true when the
       # call has been handled and PC was advanced to the caller.
-      if @tty_handler && intercept_bios_call(@pc)
+      if @tty_handler && intercept_bios_call(pc)
         return
       end
-
-      # Save current PC for exception handling
-      pc = @pc
-      @current_pc = pc
 
       # Fetch instruction
       instruction = @memory.read32(pc)
 
-      # Track if we're in a delay slot and get branch target
-      branch_target = @branch_target
-      @in_delay_slot = !branch_target.nil?
-
-      # Update PC (must use @next_pc which may have been modified by previous branch)
-      next_pc = @next_pc
+      # Advance PC (next_pc may have been redirected by a previous branch
+      # epilogue, which is exactly what makes the current instruction a
+      # delay slot — already captured in @in_delay_slot above).
       @pc = next_pc
-      @next_pc = next_pc + 4
+      @next_pc = (next_pc + 4) & 0xFFFF_FFFF
 
       # Apply pending load (inlined for performance)
       load_reg = @load_delay_reg
@@ -97,6 +123,7 @@ module PSX
       if new_branch
         @next_pc = new_branch
         @branch_target = nil
+        @next_in_delay_slot = true
       end
     end
 
@@ -696,7 +723,9 @@ module PSX
       jump((@pc & 0xF000_0000) | (target << 2))
     end
 
-    # Load operations (decode inlined)
+    # Load operations (decode inlined). Each load bumps @step_cycles by 1 to
+    # approximate the load-delay slot + RAM access cost — without this a tight
+    # poll loop runs faster than 1 VBlank period and BIOS VSync times out.
     def op_lb(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
@@ -704,6 +733,7 @@ module PSX
       addr = @regs[rs] + sign_extend16(imm)
       val = sign_extend8(@memory.read8(addr))
       set_reg_delayed(rt, val)
+      @step_cycles += 1
     end
 
     def op_lh(instruction)
@@ -713,6 +743,7 @@ module PSX
       addr = @regs[rs] + sign_extend16(imm)
       val = sign_extend16(@memory.read16(addr))
       set_reg_delayed(rt, val)
+      @step_cycles += 1
     end
 
     def op_lw(instruction)
@@ -721,6 +752,7 @@ module PSX
       imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
       set_reg_delayed(rt, @memory.read32(addr))
+      @step_cycles += 2
     end
 
     def op_lbu(instruction)
@@ -733,6 +765,7 @@ module PSX
       # Inline set_reg_delayed
       @load_delay_reg = rt
       @load_delay_value = @memory.read8(addr)
+      @step_cycles += 1
     end
 
     def op_lhu(instruction)
@@ -741,6 +774,7 @@ module PSX
       imm = instruction & 0xFFFF
       addr = @regs[rs] + sign_extend16(imm)
       set_reg_delayed(rt, @memory.read16(addr))
+      @step_cycles += 1
     end
 
     def op_lwl(instruction)
@@ -924,6 +958,7 @@ module PSX
       @pc = vector
       @next_pc = @pc + 4
       @branch_target = nil
+      @next_in_delay_slot = false
     end
   end
 end
