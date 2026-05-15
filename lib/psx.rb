@@ -9,6 +9,7 @@ require_relative "psx/dma"
 require_relative "psx/gpu"
 require_relative "psx/timers"
 require_relative "psx/disc"
+require_relative "psx/iso9660"
 require_relative "psx/cdrom"
 require_relative "psx/sio0"
 require_relative "psx/spu"
@@ -53,6 +54,29 @@ module PSX
     # Insert (or eject, with nil) a disc after construction.
     def load_disc(path)
       @cdrom.disc = path ? Disc.open(path) : nil
+    end
+
+    # Fast-boot: skip the BIOS shell's license screen, read the EXE
+    # straight from the disc image, and jump to its entry point. The BIOS
+    # kernel still gets a chance to set up the A/B/C jump tables and
+    # exception handlers via `boot_cycles` of normal execution before the
+    # hand-off; the PS-EXE relies on those for any kernel API call.
+    #
+    # Returns the parsed BOOT path from SYSTEM.CNF for diagnostics.
+    def fast_boot_from_disc(boot_cycles: 6_000_000)
+      raise "no disc loaded" unless @cdrom.disc
+
+      iso = ISO9660.new(@cdrom.disc)
+      cnf = iso.read_file("SYSTEM.CNF")
+      m = cnf.match(/^BOOT\s*=\s*cdrom:[\\\/]*(\S+?)(?:;\d+)?\s*$/m) ||
+          cnf.match(/^BOOT\s*=\s*([^\r\n]+?)(?:;\d+)?\s*$/m)
+      raise "SYSTEM.CNF has no BOOT= line: #{cnf.inspect}" unless m
+      exe_path = m[1].strip.sub(/\Acdrom:/i, "")
+      exe_bytes = iso.read_file(exe_path)
+
+      run(steps: boot_cycles)
+      load_psexe(exe_bytes)
+      exe_path
     end
 
     def run(steps: nil, debug: false)
@@ -245,8 +269,11 @@ module PSX
     # by the text/data section that must be copied to dest_addr. After load
     # the CPU is positioned at the executable's entry point with GP and SP
     # set per the header (or the conventional defaults if zero).
-    def load_psexe(path)
-      data = File.binread(path)
+    #
+    # `source` may be a filesystem path or an already-loaded binary string
+    # (e.g. EXE bytes read from a disc image).
+    def load_psexe(source)
+      data = source.is_a?(String) && source.bytesize >= 8 && source.byteslice(0, 8) == "PS-X EXE" ? source : File.binread(source)
       raise "PS-EXE smaller than header: #{data.bytesize} bytes" if data.bytesize < 0x800
       magic = data.byteslice(0, 8)
       raise "Not a PS-EXE (magic=#{magic.inspect})" unless magic == "PS-X EXE"

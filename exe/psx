@@ -17,6 +17,9 @@ def usage
     Options:
       -f, --fps N         Target FPS (default: 60)
       -n, --no-frameskip  Disable frame skipping
+          --fast-boot     Skip the BIOS shell + license check; load the
+                          disc's PSX.EXE directly. Required for synthetic
+                          test discs without a valid license image.
       -v, --version       Print version and exit
       -h, --help          Show this help
 
@@ -40,6 +43,7 @@ end
 
 target_fps = 60
 frameskip = true
+fast_boot = false
 positional = []
 
 args = ARGV.dup
@@ -50,6 +54,8 @@ while (arg = args.shift)
     usage if target_fps.nil? || target_fps <= 0
   when "-n", "--no-frameskip"
     frameskip = false
+  when "--fast-boot"
+    fast_boot = true
   when "-v", "--version"
     puts PSX::VERSION
     exit 0
@@ -83,6 +89,11 @@ puts ""
 
 begin
   emu = PSX::Emulator.new(bios_path, disc_path: disc_path)
+  if fast_boot
+    raise "--fast-boot requires a disc image" unless disc_path
+    boot = emu.fast_boot_from_disc
+    puts "Fast-boot: loaded #{boot} from #{disc_path}"
+  end
   emu.run_with_display(target_fps: target_fps, frameskip: frameskip)
 rescue Interrupt
   puts "\nInterrupted by user"

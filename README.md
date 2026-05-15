@@ -5,11 +5,13 @@
 
 A work-in-progress PlayStation 1 emulator written in pure Ruby.
 
-It boots the SCPH1001 BIOS into the **Memory Card / CD-ROM shell** and can
-run a chunk of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
-suite. There is no audio, the CD-ROM is a stub (no disc image loading yet),
-and the GPU is a software rasteriser with rough texture sampling — so don't
-expect to play games. Think of it as an executable spec for the PS1.
+It boots the SCPH1001 BIOS into the **Memory Card / CD-ROM shell**, reads
+`.bin`/`.cue` disc images via an emulated CD-ROM controller, and can
+fast-boot a PS-EXE out of an ISO9660 filesystem. It runs a chunk of the
+[JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests) suite.
+There is no audio, no PGXP, and the BIOS license check isn't bypassed yet
+(retail discs need `--fast-boot`), so don't expect to play full games.
+Think of it as an executable spec for the PS1.
 
 ![Memory Card menu rendered by the BIOS](docs/shell_menu.png)
 
@@ -31,8 +33,15 @@ You must supply your own BIOS ROM (typically `SCPH1001.BIN`, 512 KB). PSX
 does not ship one — BIOS images are copyrighted.
 
 ```sh
-psx path/to/SCPH1001.BIN
+psx path/to/SCPH1001.BIN                          # BIOS shell only
+psx path/to/SCPH1001.BIN game.cue                 # with a disc inserted
+psx --fast-boot path/to/SCPH1001.BIN homebrew.bin # skip license check
 ```
+
+`--fast-boot` skips the BIOS shell and license screen, reads `SYSTEM.CNF`
++ the PS-EXE straight out of the disc's ISO9660 filesystem, and jumps to
+the EXE's entry point after the BIOS kernel has finished init. Required
+for synthetic / homebrew discs that don't carry a Sony license image.
 
 Run `psx --help` for the option list. Keyboard controls (slot 1 digital pad):
 
@@ -57,11 +66,17 @@ the Memory Card / CD-ROM menu.
 ```ruby
 require "psx"
 
+# BIOS shell only
 emu = PSX::Emulator.new("SCPH1001.BIN")
-emu.run(steps: 300_000_000)            # boot to shell
-emu.controller_state_proc = -> { 0xEFFF }   # press Triangle
+emu.run(steps: 300_000_000)
+emu.controller_state_proc = -> { 0xEFFF }    # press Triangle
 emu.run(steps: 30_000_000)
 emu.save_screenshot("menu.ppm")
+
+# Fast-boot a PS-EXE from a CD image
+emu = PSX::Emulator.new("SCPH1001.BIN", disc_path: "homebrew.cue")
+emu.fast_boot_from_disc                       # loads the PS-EXE listed in SYSTEM.CNF
+emu.run(steps: 50_000_000)
 ```
 
 The emulator exposes the major components individually: `emu.cpu`,
@@ -82,15 +97,16 @@ the gem:
 
 | Script            | Purpose                                                                 |
 | ----------------- | ----------------------------------------------------------------------- |
-| `bin/psx-ruby`    | Headless boot of the BIOS (no SDL window).                              |
-| `bin/psx-test`    | Run a PS-EXE on top of the BIOS, diff against ps1-tests reference logs. |
-| `bin/psx-smoke`   | Boot the BIOS and dump PPM screenshots at intervals.                    |
-| `bin/psx-trace`   | PC histogram + I_STAT/I_MASK summary at checkpoints.                    |
-| `bin/psx-disasm`  | Disassemble a range of physical addresses after N cycles of boot.       |
-| `bin/psx-biostrace` | Tally A/B/C jump-table calls; dump the last N calls.                   |
-| `bin/psx-puts-trace` | Capture the kernel's debug TTY (`puts2`, `printf`, …).                |
-| `bin/psx-memwatch`| Log reads/writes to specific addresses with the PC that did them.       |
-| `bin/psx-dumpmem` | Hex-dump a range of memory after N cycles of boot.                      |
+| `bin/psx-ruby`        | Headless boot of the BIOS (no SDL window).                              |
+| `bin/psx-test`        | Run a PS-EXE on top of the BIOS, diff against ps1-tests reference logs. |
+| `bin/psx-smoke`       | Boot the BIOS and dump PPM screenshots at intervals.                    |
+| `bin/psx-trace`       | PC histogram + I_STAT/I_MASK summary at checkpoints.                    |
+| `bin/psx-disasm`      | Disassemble a range of physical addresses after N cycles of boot.       |
+| `bin/psx-biostrace`   | Tally A/B/C jump-table calls; dump the last N calls.                    |
+| `bin/psx-puts-trace`  | Capture the kernel's debug TTY (`puts2`, `printf`, …).                  |
+| `bin/psx-memwatch`    | Log reads/writes to specific addresses with the PC that did them.       |
+| `bin/psx-dumpmem`     | Hex-dump a range of memory after N cycles of boot.                      |
+| `bin/build-test-disc` | Wrap a PS-EXE in a minimal MODE2/2352 disc image (needs mkisofs).       |
 
 ### Running ps1-tests
 
@@ -110,16 +126,21 @@ What works:
 - GTE (passes the `gte/test-all` shape, several coverage gaps)
 - GPU: GP0 polygons / lines / rectangles, textured / shaded / semi-transparent
   primitives, CPU↔VRAM blits, mask bit. Software rasteriser, no PGXP.
-- DMA channels for OTC, GPU (block / linked list), SPU (stub), CDROM (stub)
+- DMA channels for OTC, GPU (block / linked list), SPU, CD-ROM
 - Interrupt controller, root counters
-- CD-ROM stub (responds to BIOS probe; no disc image support)
+- CD-ROM controller backed by `.bin`/`.cue` images, with SetLoc / ReadN /
+  Pause / SeekL / GetlocL / GetTN / GetTD / GetID / Init / SetMode and
+  cycle-paced INT1 sector delivery
+- ISO9660 reader for SYSTEM.CNF + PS-EXE extraction
+- Fast-boot: skip the BIOS shell + license check, run the disc's PS-EXE directly
 - SIO0 digital pad (slot 1)
 - SPU stub (mirrors SPUCNT → SPUSTAT; no actual audio synthesis)
 - Boots SCPH1001 into the Memory Card menu
 
 What doesn't:
 
-- No CD-ROM image loading — can't boot real games
+- BIOS license check isn't bypassed yet — full BIOS-shell boot of a disc
+  reaches the license screen but doesn't proceed unless you use `--fast-boot`
 - No SPU audio synthesis (no sound)
 - Several ps1-tests fail (CD-ROM timing, code-in-IO bus errors)
 - Texture sampling has visible glitches on the shell UI
