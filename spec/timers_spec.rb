@@ -143,6 +143,38 @@ class TimersTest < Minitest::Test
     assert t0 > 0
   end
 
+  # Clock-source selection
+  def test_timer2_default_mode_uses_sysclock_div8
+    # Default mode = 0, which selects src 0 (sysclock) on Timer 2.
+    # 16 cycles -> 16 counter increments at sysclock; default mode IS sysclock.
+    @timers.write(0x24, 0)  # Timer 2 mode = 0 (src 0 = sysclock)
+    @timers.tick(16)
+    assert_equal 16, @timers.read(0x20)
+  end
+
+  def test_timer2_clock_source_div8_when_src_is_2
+    # src bits 9..8 = 2 (or 3) -> sysclock/8
+    @timers.write(0x24, 0x0200)  # clock source = 2
+    @timers.tick(16)
+    assert_equal 2, @timers.read(0x20)
+  end
+
+  def test_timer2_clock_source_div8_when_src_is_3
+    @timers.write(0x24, 0x0300)  # clock source = 3
+    @timers.tick(64)
+    assert_equal 8, @timers.read(0x20)
+  end
+
+  def test_timer2_sysclock_mode_supports_single_cycle_resolution
+    # amidog psxtest_gte TIMING relies on this: write mode resetting Timer 2
+    # to 0, then read counter after exactly N cycles -> get N back.
+    @timers.write(0x24, 0)  # src=0 (sysclock), no IRQ, no reset
+    @timers.tick(1)
+    assert_equal 1, @timers.read(0x20)
+    @timers.tick(7)
+    assert_equal 8, @timers.read(0x20)
+  end
+
   # Invalid timer access
   def test_invalid_timer_returns_zero
     assert_equal 0, @timers.read(0x30)  # Timer 3 doesn't exist

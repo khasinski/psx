@@ -140,24 +140,36 @@ module PSX
     # Call this periodically to advance timers
     # cycles: number of CPU cycles elapsed
     def tick(cycles = 1)
-      @system_counter += cycles
-
-      # Timer 2 runs at system clock / 8
-      timer2_ticks = @system_counter / 8
-      if timer2_ticks > 0
-        if @timers[2].tick(timer2_ticks)
+      # Timer 2 clock source (mode bits 9..8): 0/1 = sysclock, 2/3 = sysclock/8.
+      # amidog's psxtest_gte TIMING column puts Timer 2 in raw sysclock mode
+      # so it can read per-instruction-grain deltas around GTE ops.
+      t2_src = (@timers[2].mode >> 8) & 3
+      if t2_src >= 2
+        @system_counter += cycles
+        timer2_ticks = @system_counter / 8
+        if timer2_ticks > 0
+          if @timers[2].tick(timer2_ticks)
+            @interrupts&.request(Interrupts::IRQ_TIMER2)
+          end
+          @system_counter %= 8
+        end
+      else
+        if @timers[2].tick(cycles)
           @interrupts&.request(Interrupts::IRQ_TIMER2)
         end
-        @system_counter %= 8
       end
 
-      # Timer 0 and 1 are typically synced to GPU
-      # For simplicity, run them at a fixed rate
-      if @timers[0].tick(cycles)
+      # Timer 0 / Timer 1 — sysclock when src is 0 or 2, otherwise dot/hblank.
+      # We have no real dot/hblank source, so for dotclock fall back to sysclock
+      # and for hblank approximate at sysclock/8 (the prior behaviour).
+      t0_src = (@timers[0].mode >> 8) & 3
+      if @timers[0].tick(cycles)  # both sysclock and dotclock paths tick on cycles for now
         @interrupts&.request(Interrupts::IRQ_TIMER0)
       end
 
-      if @timers[1].tick(cycles / 8)  # Slower for hblank timing
+      t1_src = (@timers[1].mode >> 8) & 3
+      t1_cycles = (t1_src.odd?) ? cycles / 8 : cycles
+      if @timers[1].tick(t1_cycles)
         @interrupts&.request(Interrupts::IRQ_TIMER1)
       end
     end
