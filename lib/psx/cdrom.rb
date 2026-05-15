@@ -76,6 +76,7 @@ module PSX
       @reading = false
       @sector_cycles = 0
       @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
+      @bfrd_active = false
       @want_seek = false
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
     end
@@ -140,16 +141,17 @@ module PSX
       when 3
         case @index
         when 0
-          # Request register: bit 7 BFRD enables data buffer read. When the
-          # BIOS sets BFRD after a sector arrives, the data buffer becomes
-          # available; when it clears it, the buffer empties.
+          # Request register: bit 7 BFRD gates access to the data buffer.
+          # OpenBIOS's `initiateDMA` writes 0 then 0x80 to "arm" the FIFO
+          # before kicking off DMA — clearing the buffer on the 0-write
+          # would mean DMA reads zeros. Real hardware preserves the sector
+          # data across BFRD toggles; the bit just opens/closes the read
+          # port. Rising edge resets the FIFO read pointer.
           bfrd = (v & 0x80) != 0
-          if bfrd
-            @data_pos = 0 unless @data_buffer
-          else
-            @data_buffer = nil
+          if bfrd && !@bfrd_active
             @data_pos = 0
           end
+          @bfrd_active = bfrd
         when 1
           @irq_flags &= ~(v & 0x1F)
           @parameters.clear if (v & 0x40) != 0

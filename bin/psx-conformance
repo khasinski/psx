@@ -1,0 +1,90 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Run the amidog CPU/CPx/GPU/GTE conformance tests through the BIOS and
+# tally per-subtest pass/fail markers. These tests are larger and more
+# thorough than the ps1-tests equivalents, and they print a clear
+# "name: PASS/FAIL ..." line per subtest, so we can build a real
+# coverage report from them.
+#
+# Use --bios=openbios-fast.bin to swap BIOSes; defaults to SCPH1001.BIN.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+CONFORMANCE = %w[psxtest_cpu psxtest_cpx psxtest_gte psxtest_gpu].freeze
+DEFAULT_CYCLES = 600_000_000
+
+bios = "SCPH1001.BIN"
+names = []
+max_cycles = DEFAULT_CYCLES
+fast_boot = false
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when /\A--bios=(.+)\z/ then bios = $1
+  when /\A--cycles=(.+)\z/ then max_cycles = $1.gsub("_", "").to_i
+  when "--fast-boot" then fast_boot = true
+  when "-h", "--help"
+    warn "Usage: psx-conformance [--bios=PATH] [--cycles=N] [--fast-boot] [NAME...]"
+    warn "       NAME is one of: #{CONFORMANCE.join(", ")}"
+    exit 1
+  else names << arg
+  end
+end
+
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+base = File.expand_path("../.tests-amidog", __dir__)
+names = CONFORMANCE if names.empty?
+unknown = names - CONFORMANCE
+abort "Unknown: #{unknown.inspect}; known: #{CONFORMANCE.inspect}" unless unknown.empty?
+
+names.each do |name|
+  dir = File.join(base, name)
+  abort "missing: #{dir} (run bin/fetch-amidog-tests #{name})" unless Dir.exist?(dir)
+  exe = Dir[File.join(dir, "*.exe")].first
+  cue = Dir[File.join(dir, "*.cue")].first
+
+  emu = PSX::Emulator.new(bios, disc_path: cue)
+  captured = String.new
+  emu.cpu.tty_handler = ->(kind, val) do
+    case kind
+    when :char then captured << val.chr
+    when :str  then captured << val
+    end
+  end
+
+  begin
+    if cue && fast_boot
+      emu.fast_boot_from_disc
+    elsif !cue
+      # No disc image — let the BIOS init, then load the bare EXE
+      emu.run(steps: 5_000_000)
+      emu.load_psexe(exe)
+    end
+    chunk = 5_000_000
+    remaining = max_cycles
+    until captured.include?("All done") || captured.include?("Done.") || remaining <= 0
+      emu.run(steps: chunk)
+      remaining -= chunk
+    end
+  rescue PSX::CPU::ExecutionError => e
+    warn "[#{name}] CPU error: #{e.message}"
+  end
+
+  # The amidog format prints lines like:
+  #   "<test name>: PASS"  /  "<test name>: FAIL ..."
+  # plus occasional "PASS"/"FAIL" alone. Count both flavours.
+  passes = captured.scan(/: PASS\b/).size + captured.scan(/^PASS\s*$/i).size
+  fails  = captured.scan(/: FAIL\b/).size + captured.scan(/^FAIL\s*$/i).size
+  total  = passes + fails
+
+  via = cue ? (fast_boot ? "fast-boot" : "BIOS-shell") : "direct EXE"
+  if total.zero?
+    printf "[%-12s %-10s] no PASS/FAIL markers — last: %s\n",
+           name, via, captured.lines.last(2).map(&:strip).join(" | ")[0, 80]
+  else
+    printf "[%-12s %-10s] %d/%d pass\n", name, via, passes, total
+  end
+end

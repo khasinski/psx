@@ -8,10 +8,14 @@
 *.ppm
 smoke*/
 
-# Local test-program checkouts/fetches (none are redistributed)
-.tests/         # JaCzekanski/ps1-tests
-.tests-amidog/  # psx.amidog.se test suite
-.tests-redux/   # PCSX-Redux MIPS sources (sparse)
+# Local test-program checkouts/fetches (none are redistributed).
+# .gitignore doesn't support inline comments — keep each pattern on its own line.
+# .tests/        — JaCzekanski/ps1-tests
+# .tests-amidog/ — psx.amidog.se test suite
+# .tests-redux/  — PCSX-Redux MIPS sources (sparse)
+.tests/
+.tests-amidog/
+.tests-redux/
 
 # Local development / IDE
 .idea/

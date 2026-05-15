@@ -162,8 +162,6 @@ What works:
 
 What doesn't:
 
-- BIOS license check isn't bypassed yet — full BIOS-shell boot of a disc
-  reaches the license screen but doesn't proceed unless you use `--fast-boot`
 - No SPU audio synthesis (no sound)
 - Several ps1-tests fail (CD-ROM timing, code-in-IO bus errors)
 - Texture sampling has visible glitches on the shell UI

@@ -17,7 +17,10 @@
 RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
 require_relative "../lib/psx"
 
+# By default exercise the real BIOS-shell boot path (no fast-boot). Set
+# PSX_FAST_BOOT=1 to skip the shell for quicker turnaround.
 BIOS = ENV["PSX_BIOS"] || "SCPH1001.BIN"
+FAST_BOOT = ENV["PSX_FAST_BOOT"] == "1"
 abort "BIOS not found: #{BIOS}" unless File.exist?(BIOS)
 
 base = File.expand_path("../.tests-amidog", __dir__)
@@ -65,18 +68,27 @@ names.each do |name|
     end
   end
 
-  via = (cue || bin) ? "disc" : "exe"
+  via =
+    if cue || bin
+      FAST_BOOT ? "fast" : "shell"
+    else
+      "exe"
+    end
   marker = EXPECTED[name]
 
   begin
     if cue || bin
-      emu.fast_boot_from_disc
+      emu.fast_boot_from_disc if FAST_BOOT
+      # Otherwise let the BIOS shell discover + load the disc itself.
     else
       emu.run(steps: 5_000_000)            # let the BIOS kernel init
       emu.load_psexe(exe)
     end
-    chunk = 1_000_000
-    remaining = 80_000_000
+    chunk = 5_000_000
+    # BIOS-shell boot needs more cycles than fast-boot — the shell does
+    # its own license screen, kernel re-init, and EXE load before the
+    # program even starts running.
+    remaining = (FAST_BOOT || (!cue && !bin)) ? 80_000_000 : 400_000_000
     until (marker && captured.include?(marker)) || remaining <= 0
       emu.run(steps: chunk)
       remaining -= chunk

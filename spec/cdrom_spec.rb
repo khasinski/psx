@@ -26,6 +26,34 @@ class CDROMSpec < Minitest::Test
     assert_equal 0x1F, @cdrom.instance_variable_get(:@irq_enable)
   end
 
+  # OpenBIOS's initiateDMA writes CDROM_REG3 = 0 then = 0x80 to gate the
+  # data FIFO before kicking off DMA. If clearing BFRD wipes the sector
+  # data, the subsequent DMA reads zeros and the BIOS' filesystem can't
+  # parse PVD/SYSTEM.CNF/PSX.EXE. Real hardware preserves the buffer
+  # across BFRD toggles; the bit just opens/closes the read port.
+  def test_bfrd_toggle_preserves_data_buffer
+    @cdrom.disc = build_one_sector_disc(("\xAA\xBB\xCC\xDD" + ("\x00" * 2044)).b)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)   # SetLoc LBA 0
+    drain_response
+    @cdrom.write8(1, 0x06)   # ReadN
+    drain_response
+    @cdrom.write8(1, 0x09)   # Pause -> deliver sector
+    drive_until_int(1, max_ticks: 200)
+
+    assert @cdrom.data_fifo_has_data?, "sector should be in FIFO before BFRD toggle"
+
+    # Simulate BIOS' arm-DMA sequence: REG0=0, REG3=0, REG3=0x80.
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x00)   # BFRD off
+    @cdrom.write8(3, 0x80)   # BFRD on (rising edge resets read pointer)
+
+    assert @cdrom.data_fifo_has_data?, "buffer must survive BFRD toggle"
+    assert_equal 0xDDCCBBAA, @cdrom.dma_read_word, "first word must be the original sector data"
+  end
+
   # ReadN + Pause back-to-back is the BIOS pattern for "read exactly one
   # sector". The Pause arrives well before the cycle-paced INT1 would have
   # delivered the sector, but the BIOS expects to still get one INT1 with
