@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Sparse-clone PCSX-Redux's MIPS sources into .tests-redux/. Pulls
+# src/mips/ (OpenBIOS source, in-tree test programs, libpsyqo bits, demos).
+# These are SOURCE only — they need a MIPS cross-toolchain to build into
+# PS-EXEs, so this is most useful as a reference for what hardware behaviour
+# our emulator needs to handle. See src/mips/README.md inside for build
+# instructions.
+#
+# Source: https://github.com/grumpycoders/pcsx-redux  (MIT/LGPL)
+
+require "fileutils"
+
+dest = File.expand_path("../.tests-redux", __dir__)
+FileUtils.mkdir_p(dest)
+
+if File.directory?(File.join(dest, ".git"))
+  warn "Already cloned at #{dest}; pulling latest..."
+  Dir.chdir(dest) { system("git", "pull", "-q") }
+else
+  Dir.chdir(dest) do
+    system("git", "init", "-q") or abort "git init failed"
+    system("git", "remote", "add", "origin", "https://github.com/grumpycoders/pcsx-redux.git") || true
+    system("git", "config", "core.sparseCheckout", "true")
+    FileUtils.mkdir_p(".git/info")
+    File.write(".git/info/sparse-checkout", <<~LIST)
+      src/mips/tests/
+      src/mips/openbios/
+      src/mips/common/
+      src/mips/helloworld/
+      src/mips/cube/
+      src/mips/cxxhello/
+      src/mips/scratchstack/
+      src/mips/ps-exe.ld
+      src/mips/nooverlay.ld
+      src/mips/common.mk
+    LIST
+    system("git", "fetch", "--depth=1", "origin", "main", "-q") or abort "git fetch failed"
+    system("git", "checkout", "-q", "FETCH_HEAD") or abort "git checkout failed"
+  end
+end
+
+warn "Done. Sparse PCSX-Redux at #{dest}/src/mips"
+warn "Test sources live under src/mips/tests/; build with the project's MIPS toolchain."

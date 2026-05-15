@@ -107,15 +107,38 @@ the gem:
 | `bin/psx-memwatch`    | Log reads/writes to specific addresses with the PC that did them.       |
 | `bin/psx-dumpmem`     | Hex-dump a range of memory after N cycles of boot.                      |
 | `bin/build-test-disc` | Wrap a PS-EXE in a minimal MODE2/2352 disc image (needs mkisofs).       |
+| `bin/fetch-amidog-tests` | Download and unpack the amidog test suite into `.tests-amidog/`.     |
+| `bin/fetch-redux-tests`  | Sparse-clone PCSX-Redux's `src/mips/` into `.tests-redux/`.          |
+| `bin/psx-amidog-smoke`   | Boot every amidog test, check it reaches its startup banner.         |
 
-### Running ps1-tests
+### Running test suites
 
-The `bin/psx-test` runner expects a local checkout of
-[JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests):
+Three test corpora are wired in; all live under `.tests*/` (gitignored).
+
+**JaCzekanski/ps1-tests** — pass/fail style, with reference `psx.log` files.
 
 ```sh
 git clone https://github.com/JaCzekanski/ps1-tests.git .tests
 bundle exec ruby bin/psx-test -e .tests/cpu/cop/psx.log .tests/cpu/cop/cop.exe
+```
+
+**amidog test programs** (https://psx.amidog.se) — CPU/GPU/GTE conformance
+plus a few weird-edge demos. Several ship as proper MODE2/2352 `.bin`/`.cue`
+discs with real Sony license sectors, so they exercise the CD-boot path.
+
+```sh
+bundle exec ruby bin/fetch-amidog-tests           # one-time download
+bundle exec ruby bin/psx-amidog-smoke             # boot-and-banner check
+```
+
+**PCSX-Redux** (https://github.com/grumpycoders/pcsx-redux) — source-only.
+Sparse-clones `src/mips/` (OpenBIOS, in-tree tests, demos). Building the
+PS-EXEs needs a MIPS cross-toolchain — see `src/mips/README.md` inside the
+clone for instructions. Useful as a reference for hardware behaviour even
+without building.
+
+```sh
+bundle exec ruby bin/fetch-redux-tests
 ```
 
 ## Status

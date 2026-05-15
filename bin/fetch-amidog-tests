@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Fetch and unpack Martin Korth's amidog PSX test programs into
+# .tests-amidog/. Each test is a small PS-EXE; several also ship as
+# proper MODE2/2352 .bin/.cue disc images with real Sony license
+# sectors, which makes them the best off-the-shelf fixture for the
+# CD-boot path.
+#
+# Source: https://psx.amidog.se — public collection, free for testing.
+#
+# Usage:
+#   bin/fetch-amidog-tests          # fetch everything
+#   bin/fetch-amidog-tests psxtest_gte resolution   # just these two
+#
+# .tests-amidog/ is gitignored; re-run any time.
+
+require "fileutils"
+require "open-uri"
+
+ALL_TESTS = %w[
+  psxtest_cpu psxtest_cpx psxtest_gpu psxtest_gte
+  resolution where_am_i pipe_line no_code irq tajmiing
+].freeze
+
+base = File.expand_path("../.tests-amidog", __dir__)
+FileUtils.mkdir_p(base)
+
+names = ARGV.empty? ? ALL_TESTS : ARGV
+unknown = names - ALL_TESTS
+abort "Unknown tests: #{unknown.inspect}; known: #{ALL_TESTS.inspect}" unless unknown.empty?
+
+names.each do |name|
+  zip_path = File.join(base, "#{name}.zip")
+  dir_path = File.join(base, name)
+  url = "https://psx.amidog.se/lib/exe/fetch.php?media=psx:download:#{name}.zip"
+
+  unless File.exist?(zip_path)
+    warn "Fetching #{name}.zip..."
+    URI.open(url) { |io| File.binwrite(zip_path, io.read) }
+  end
+
+  next if File.directory?(dir_path) && !Dir.empty?(dir_path)
+
+  warn "Unpacking #{name}.zip..."
+  FileUtils.rm_rf(dir_path)
+  FileUtils.mkdir_p(dir_path)
+  system("unzip", "-q", zip_path, "-d", dir_path) or
+    abort "unzip failed for #{name}.zip — is unzip installed?"
+end
+
+warn "Done. Tests under #{base}"

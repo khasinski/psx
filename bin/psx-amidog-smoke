@@ -1,0 +1,105 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Smoke-run each fetched amidog test through the emulator and report
+# which ones boot far enough to print their startup banner. Most amidog
+# tests are interactive (controller-driven), so this isn't a full
+# pass/fail rig — it's a regression detector: if a test that used to
+# emit "Running tests" stops doing so, something broke.
+#
+# Where a .bin/.cue is present we go through the CD path via fast-boot;
+# otherwise we load the bare PS-EXE through psx-test's loader.
+#
+# Usage:
+#   bin/psx-amidog-smoke
+#   bin/psx-amidog-smoke psxtest_cpu where_am_i
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+BIOS = ENV["PSX_BIOS"] || "SCPH1001.BIN"
+abort "BIOS not found: #{BIOS}" unless File.exist?(BIOS)
+
+base = File.expand_path("../.tests-amidog", __dir__)
+abort "No .tests-amidog/ — run bin/fetch-amidog-tests first" unless File.directory?(base)
+
+names = ARGV.empty? ? Dir.children(base).select { |c| File.directory?(File.join(base, c)) }.sort : ARGV
+
+# Expected startup markers — strings the test prints after its startup
+# banner. Picked empirically; if a new amidog release changes them,
+# update here. Tests that don't print text (e.g. pure graphics demos)
+# map to nil and we check the EXE got loaded + PC moved off the BIOS
+# vector instead.
+EXPECTED = {
+  "psxtest_cpu" => "Running tests",
+  "psxtest_cpx" => "Running tests",
+  "psxtest_gpu" => "Running tests",
+  "psxtest_gte" => "Running tests",
+  "resolution"  => "Running",
+  "where_am_i"  => "Running tests",
+  "pipe_line"   => "Running",
+  "no_code"     => "Running",
+  "irq"         => "Running",
+  "tajmiing"    => nil  # pure GPU demo — no TTY output
+}.freeze
+
+passed = 0
+failed = 0
+
+names.each do |name|
+  dir = File.join(base, name)
+  exe = Dir[File.join(dir, "*.exe")].first
+  cue = Dir[File.join(dir, "*.cue")].first
+  bin = Dir[File.join(dir, "*.bin")].first
+  unless exe
+    warn "[#{name}] no .exe — skipping"
+    next
+  end
+
+  emu = PSX::Emulator.new(BIOS, disc_path: cue || bin)
+  captured = String.new
+  emu.cpu.tty_handler = ->(kind, val) do
+    case kind
+    when :char then captured << val.chr
+    when :str  then captured << val
+    end
+  end
+
+  via = (cue || bin) ? "disc" : "exe"
+  marker = EXPECTED[name]
+
+  begin
+    if cue || bin
+      emu.fast_boot_from_disc
+    else
+      emu.run(steps: 5_000_000)            # let the BIOS kernel init
+      emu.load_psexe(exe)
+    end
+    chunk = 1_000_000
+    remaining = 80_000_000
+    until (marker && captured.include?(marker)) || remaining <= 0
+      emu.run(steps: chunk)
+      remaining -= chunk
+    end
+  rescue PSX::CPU::ExecutionError => e
+    warn "[#{name}] CPU error: #{e.message}"
+  end
+
+  pc_in_exe = emu.cpu.pc < 0xBFC00000 && emu.cpu.pc >= 0x80010000
+  if marker && captured.include?(marker)
+    printf "PASS %-15s (%s) — saw %p\n", name, via, marker
+    passed += 1
+  elsif marker.nil? && pc_in_exe
+    printf "PASS %-15s (%s) — running in EXE, PC=%08X (no TTY expected)\n",
+           name, via, emu.cpu.pc
+    passed += 1
+  else
+    last = captured.lines.last(3).map(&:strip).join(" | ")
+    printf "FAIL %-15s last: %s\n", name, last
+    failed += 1
+  end
+end
+
+puts ""
+puts "amidog smoke: #{passed} booted, #{failed} did not"
+exit(failed.zero? ? 0 : 1)

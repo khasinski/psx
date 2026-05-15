@@ -8,8 +8,10 @@
 *.ppm
 smoke*/
 
-# Local copy of JaCzekanski/ps1-tests checkout used by bin/psx-test
-.tests/
+# Local test-program checkouts/fetches (none are redistributed)
+.tests/         # JaCzekanski/ps1-tests
+.tests-amidog/  # psx.amidog.se test suite
+.tests-redux/   # PCSX-Redux MIPS sources (sparse)
 
 # Local development / IDE
 .idea/
