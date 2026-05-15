@@ -8,6 +8,7 @@ require_relative "psx/interrupts"
 require_relative "psx/dma"
 require_relative "psx/gpu"
 require_relative "psx/timers"
+require_relative "psx/disc"
 require_relative "psx/cdrom"
 require_relative "psx/sio0"
 require_relative "psx/spu"
@@ -26,15 +27,16 @@ module PSX
     CYCLES_PER_FRAME = CPU_FREQ / 60  # ~560K cycles per frame at 60Hz
     CYCLES_PER_SCANLINE = CYCLES_PER_FRAME / 263  # NTSC has 263 scanlines
 
-    def initialize(bios_path)
+    def initialize(bios_path, disc_path: nil)
       bios = BIOS.new(bios_path)
       ram = RAM.new
       @interrupts = Interrupts.new
       @spu = SPU.new
-      @dma = DMA.new(interrupts: @interrupts, spu: @spu)
+      disc = disc_path ? Disc.open(disc_path) : nil
+      @cdrom = CDROM.new(interrupts: @interrupts, disc: disc)
+      @dma = DMA.new(interrupts: @interrupts, spu: @spu, cdrom: @cdrom)
       @gpu = GPU.new(interrupts: @interrupts)
       @timers = Timers.new(interrupts: @interrupts)
-      @cdrom = CDROM.new(interrupts: @interrupts)
       @controller_state_proc = -> { 0xFFFF }
       @sio0 = SIO0.new(interrupts: @interrupts, controller_state: -> { @controller_state_proc.call })
       @memory = Memory.new(
@@ -46,6 +48,11 @@ module PSX
 
       @cycle_count = 0
       @frame_count = 0
+    end
+
+    # Insert (or eject, with nil) a disc after construction.
+    def load_disc(path)
+      @cdrom.disc = path ? Disc.open(path) : nil
     end
 
     def run(steps: nil, debug: false)
@@ -74,6 +81,7 @@ module PSX
 
       sio0 = @sio0
       dma = @dma
+      cdrom = @cdrom
       tick_threshold = 64
       while remaining > 0
         remaining -= 1
@@ -90,6 +98,7 @@ module PSX
           timers.tick(64)
           sio0.tick(64)
           dma.tick_cycles(64)
+          cdrom.tick(64)
         end
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
@@ -97,7 +106,6 @@ module PSX
           frame_count += 1
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank
-          @cdrom.tick
         end
       end
 
@@ -339,6 +347,7 @@ module PSX
         @timers.tick(64)
         @sio0.tick(64)
         @dma.tick_cycles(64)
+        @cdrom.tick(64)
       end
 
       # VBlank every frame
@@ -347,7 +356,6 @@ module PSX
         @frame_count += 1
         @interrupts.request(Interrupts::IRQ_VBLANK)
         @gpu.vblank  # Toggle interlace field
-        @cdrom.tick
       end
     end
   end

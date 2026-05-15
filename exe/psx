@@ -12,7 +12,7 @@ def usage
   warn <<~USAGE
     PSX — PlayStation 1 emulator (#{PSX::VERSION})
 
-    Usage: psx [options] <bios.bin>
+    Usage: psx [options] <bios.bin> [disc.cue|disc.bin]
 
     Options:
       -f, --fps N         Target FPS (default: 60)
@@ -40,7 +40,7 @@ end
 
 target_fps = 60
 frameskip = true
-bios_path = nil
+positional = []
 
 args = ARGV.dup
 while (arg = args.shift)
@@ -56,10 +56,11 @@ while (arg = args.shift)
   when "-h", "--help"
     usage
   else
-    bios_path = arg
+    positional << arg
   end
 end
 
+bios_path, disc_path = positional
 usage unless bios_path
 
 unless File.exist?(bios_path)
@@ -67,15 +68,21 @@ unless File.exist?(bios_path)
   exit 1
 end
 
+if disc_path && !File.exist?(disc_path)
+  warn "Error: disc image not found: #{disc_path}"
+  exit 1
+end
+
 puts "PSX-Ruby #{PSX::VERSION}"
 puts "Loading BIOS: #{bios_path}"
+puts "Disc: #{disc_path || '(none — shell only)'}"
 puts "Target FPS: #{target_fps}"
 puts "Frame skip: #{frameskip ? 'enabled' : 'disabled'}"
 puts "YJIT: #{defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? 'enabled' : 'disabled'}"
 puts ""
 
 begin
-  emu = PSX::Emulator.new(bios_path)
+  emu = PSX::Emulator.new(bios_path, disc_path: disc_path)
   emu.run_with_display(target_fps: target_fps, frameskip: frameskip)
 rescue Interrupt
   puts "\nInterrupted by user"

@@ -1,0 +1,98 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Build a minimal MODE2/2352 PSX disc image from a PS-EXE, for use as an
+# end-to-end CD-boot fixture. Output: <out>.bin + <out>.cue.
+#
+# Usage:
+#   bin/build-test-disc <ps_exe_path> [out_basename]
+#
+# Defaults to .tests/cpu/cop/cop.exe → .tests/__boot/test.{bin,cue}.
+#
+# Approach: mkisofs builds a cooked ISO9660 image (2048 B/sector). We reframe
+# each cooked sector into raw MODE2 Form 1 (2352 B/sector) by prepending the
+# sync/header/sub-header bytes and zero-padding the ECC area. Our emulator
+# doesn't verify ECC so the trailing 280 bytes can stay zero.
+
+require "fileutils"
+require "tmpdir"
+
+def bcd(n)
+  ((n / 10) << 4) | (n % 10)
+end
+
+# Build a single 2352-byte MODE2 Form 1 sector from a 2048-byte payload at
+# the given LBA. PSX MSF starts at 00:02:00 for LBA 0.
+def wrap_mode2_form1(payload, lba)
+  raise "payload must be 2048 bytes" if payload.bytesize != 2048
+  sync = "\x00\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00".b
+  abs = lba + 150
+  m = abs / 4500
+  s = (abs / 75) % 60
+  f = abs % 75
+  msf_header = [bcd(m), bcd(s), bcd(f)].pack("C*")
+  mode = "\x02".b
+  # Sub-header (form 1 data): file=0, channel=0, submode=0x08 (data),
+  # coding=0. Duplicated per CD-XA layout.
+  sub_header = "\x00\x00\x08\x00\x00\x00\x08\x00".b
+  ecc_pad = ("\x00" * 280).b
+  sync + msf_header + mode + sub_header + payload + ecc_pad
+end
+
+EXE_DEFAULT = ".tests/cpu/cop/cop.exe"
+OUT_DEFAULT = ".tests/__boot/test"
+
+exe_path = ARGV[0] || EXE_DEFAULT
+out_base = ARGV[1] || OUT_DEFAULT
+
+abort "Source PS-EXE not found: #{exe_path}" unless File.exist?(exe_path)
+abort "Source is not a PS-EXE (#{exe_path})" unless File.binread(exe_path, 8) == "PS-X EXE"
+
+FileUtils.mkdir_p(File.dirname(out_base))
+
+Dir.mktmpdir do |stage|
+  exe_dst = File.join(stage, "PSX.EXE")
+  FileUtils.cp(exe_path, exe_dst)
+  File.write(File.join(stage, "SYSTEM.CNF"), <<~CNF)
+    BOOT=cdrom:\\PSX.EXE;1
+    TCB=4
+    EVENT=10
+    STACK=801FFFF0
+  CNF
+
+  iso_path = "#{out_base}.iso.tmp"
+  cmd = [
+    "mkisofs", "-quiet",
+    "-iso-level", "1",
+    "-V", "PSXTEST",
+    "-publisher", "psx-ruby",
+    "-preparer", "psx-ruby",
+    "-no-pad",
+    "-o", iso_path,
+    stage
+  ]
+  system(*cmd) or abort "mkisofs failed (is it installed? on macOS: brew install cdrtools)"
+
+  begin
+    cooked = File.binread(iso_path)
+    raise "iso size #{cooked.bytesize} not aligned to 2048" if cooked.bytesize % 2048 != 0
+
+    sectors = cooked.bytesize / 2048
+    File.open("#{out_base}.bin", "wb") do |bin|
+      sectors.times do |lba|
+        bin.write(wrap_mode2_form1(cooked.byteslice(lba * 2048, 2048), lba))
+      end
+    end
+
+    bin_basename = File.basename("#{out_base}.bin")
+    File.write("#{out_base}.cue", <<~CUE)
+      FILE "#{bin_basename}" BINARY
+        TRACK 01 MODE2/2352
+          INDEX 01 00:00:00
+    CUE
+
+    warn "Wrote #{out_base}.bin (#{sectors} sectors, #{sectors * 2352} bytes) + #{out_base}.cue"
+  ensure
+    File.unlink(iso_path) if File.exist?(iso_path)
+  end
+end

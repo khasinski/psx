@@ -96,11 +96,12 @@ module PSX
     end
 
     attr_reader :channels, :dpcr, :dicr
-    attr_accessor :spu
+    attr_accessor :spu, :cdrom
 
-    def initialize(interrupts: nil, spu: nil)
+    def initialize(interrupts: nil, spu: nil, cdrom: nil)
       @interrupts = interrupts
       @spu = spu
+      @cdrom = cdrom
       @channels = Array.new(NUM_CHANNELS) { Channel.new }
       @dpcr = 0x0765_4321  # Default: all channels enabled with default priorities
       @dicr = 0
@@ -253,6 +254,8 @@ module PSX
           transfer_gpu(memory, gpu)
         when SPU
           transfer_spu(memory)
+        when CDROM
+          transfer_cdrom(memory)
         when OTC
           transfer_otc(memory)
         # Other channels can be added as needed
@@ -330,6 +333,31 @@ module PSX
 
       channel.finish!
       set_irq_flag(GPU)
+    end
+
+    # CD-ROM data FIFO -> RAM. The BIOS configures channel 3 in SyncMode 1
+    # (request-sync block transfer): block_size words per block, block_count
+    # blocks. Each word comes from `cdrom.dma_read_word`.
+    def transfer_cdrom(memory)
+      channel = @channels[CDROM]
+
+      size = channel.block_size
+      size = 0x10000 if size == 0
+      count = channel.block_count
+      count = 1 if count == 0
+      total = size * count
+
+      addr = channel.base_addr
+      step = channel.step
+
+      total.times do
+        word = @cdrom ? @cdrom.dma_read_word : 0
+        memory.write32(addr & 0x1F_FFFC, word)
+        addr = (addr + step) & 0xFFFF_FFFF
+      end
+
+      channel.finish!
+      set_irq_flag(CDROM)
     end
 
     def transfer_spu(memory)
