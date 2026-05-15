@@ -35,3 +35,4 @@ benchmark_cpu.rb
 .bundle/
 vendor/bundle/
 pkg/
+conformance-shots/
