@@ -546,8 +546,15 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      # TODO: overflow trap
-      set_reg(rd, @regs[rs] + @regs[rt])
+      a = sign_extend32(@regs[rs])
+      b = sign_extend32(@regs[rt])
+      sum = a + b
+      # Signed overflow: result doesn't fit in 32 bits signed.
+      if sum > 0x7FFF_FFFF || sum < -0x8000_0000
+        exception(COP0::EXC_OV)
+        return
+      end
+      set_reg(rd, sum)
     end
 
     def op_addu(instruction)
@@ -561,8 +568,14 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      # TODO: overflow trap
-      set_reg(rd, @regs[rs] - @regs[rt])
+      a = sign_extend32(@regs[rs])
+      b = sign_extend32(@regs[rt])
+      diff = a - b
+      if diff > 0x7FFF_FFFF || diff < -0x8000_0000
+        exception(COP0::EXC_OV)
+        return
+      end
+      set_reg(rd, diff)
     end
 
     def op_subu(instruction)
@@ -621,8 +634,15 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      # TODO: overflow trap
-      set_reg(rt, @regs[rs] + sign_extend16(imm))
+      a = sign_extend32(@regs[rs])
+      # imm is a signed 16-bit value; treat the top bit as sign.
+      b = (imm & 0x8000) != 0 ? imm - 0x10000 : imm
+      sum = a + b
+      if sum > 0x7FFF_FFFF || sum < -0x8000_0000
+        exception(COP0::EXC_OV)
+        return
+      end
+      set_reg(rt, sum)
     end
 
     def op_addiu(instruction)
@@ -740,7 +760,11 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      addr = @regs[rs] + sign_extend16(imm)
+      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      if (addr & 1) != 0
+        exception(COP0::EXC_ADEL, bad_addr: addr)
+        return
+      end
       val = sign_extend16(@memory.read16(addr))
       set_reg_delayed(rt, val)
       @step_cycles += 1
@@ -751,6 +775,10 @@ module PSX
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      if (addr & 3) != 0
+        exception(COP0::EXC_ADEL, bad_addr: addr)
+        return
+      end
       set_reg_delayed(rt, @memory.read32(addr))
       @step_cycles += 2
     end
@@ -772,7 +800,11 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      addr = @regs[rs] + sign_extend16(imm)
+      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      if (addr & 1) != 0
+        exception(COP0::EXC_ADEL, bad_addr: addr)
+        return
+      end
       set_reg_delayed(rt, @memory.read16(addr))
       @step_cycles += 1
     end
@@ -830,6 +862,10 @@ module PSX
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      if (addr & 1) != 0
+        exception(COP0::EXC_ADES, bad_addr: addr)
+        return
+      end
       @memory.write16(addr, @regs[rt])
     end
 
@@ -838,6 +874,10 @@ module PSX
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
       addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      if (addr & 3) != 0
+        exception(COP0::EXC_ADES, bad_addr: addr)
+        return
+      end
       @memory.write32(addr, @regs[rt])
     end
 
