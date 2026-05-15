@@ -45,6 +45,7 @@ module PSX
         dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0, spu: @spu
       )
       @memory.gpu = @gpu
+      @dma.memory = @memory  # so tick_cycles can retry deferred CDROM transfers
       @cpu = CPU.new(@memory, interrupts: @interrupts)
 
       @cycle_count = 0

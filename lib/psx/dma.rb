@@ -96,12 +96,13 @@ module PSX
     end
 
     attr_reader :channels, :dpcr, :dicr
-    attr_accessor :spu, :cdrom
+    attr_accessor :spu, :cdrom, :memory
 
     def initialize(interrupts: nil, spu: nil, cdrom: nil)
       @interrupts = interrupts
       @spu = spu
       @cdrom = cdrom
+      @memory = nil  # set by Emulator after Memory is constructed
       @channels = Array.new(NUM_CHANNELS) { Channel.new }
       @dpcr = 0x0765_4321  # Default: all channels enabled with default priorities
       @dicr = 0
@@ -225,6 +226,14 @@ module PSX
     # Execute pending DMA transfers
     # Returns true if any transfer was performed
     def tick_cycles(cycles)
+      # Retry any CDROM DMA that was waiting for data — the BIOS sets channel 3
+      # BUSY before the drive's DRQ goes high, and transfer_cdrom defers when
+      # the data FIFO is empty.
+      if @memory && @cdrom&.data_fifo_has_data? && channel_enabled?(CDROM) &&
+         @channels[CDROM].active?(needs_trigger: false)
+        transfer_cdrom(@memory)
+      end
+
       return unless @pending_completions && !@pending_completions.empty?
 
       @pending_completions.reject! do |n|
@@ -336,10 +345,14 @@ module PSX
     end
 
     # CD-ROM data FIFO -> RAM. The BIOS configures channel 3 in SyncMode 1
-    # (request-sync block transfer): block_size words per block, block_count
-    # blocks. Each word comes from `cdrom.dma_read_word`.
+    # (request-sync block transfer). Real hardware doesn't drain until the
+    # drive's DRQ goes high (sector data ready); if we transfer eagerly when
+    # BUSY is set the BIOS reads zeros and falls back to LBA 0. So if the
+    # CDROM's data FIFO isn't populated yet, leave the channel BUSY and let
+    # `tick_cycles` retry once the CDROM tick fires its INT1.
     def transfer_cdrom(memory)
       channel = @channels[CDROM]
+      return false unless @cdrom&.data_fifo_has_data?
 
       size = channel.block_size
       size = 0x10000 if size == 0
@@ -351,13 +364,14 @@ module PSX
       step = channel.step
 
       total.times do
-        word = @cdrom ? @cdrom.dma_read_word : 0
+        word = @cdrom.dma_read_word
         memory.write32(addr & 0x1F_FFFC, word)
         addr = (addr + step) & 0xFFFF_FFFF
       end
 
       channel.finish!
       set_irq_flag(CDROM)
+      true
     end
 
     def transfer_spu(memory)

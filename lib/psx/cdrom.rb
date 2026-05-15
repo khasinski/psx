@@ -75,6 +75,7 @@ module PSX
       @whole_sector = false  # SetMode bit 5 — read 2340 bytes vs 2048
       @reading = false
       @sector_cycles = 0
+      @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
       @want_seek = false
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
     end
@@ -193,6 +194,7 @@ module PSX
       @data_buffer = data
       @data_pos = 0
       @read_lba += 1
+      @sectors_since_read += 1
       @sector_cycles += @speed_2x ? CYCLES_PER_SECTOR_2X : CYCLES_PER_SECTOR_1X
       # INT1 immediately: sector ready.
       @response.clear
@@ -273,6 +275,7 @@ module PSX
       @read_lba = @want_seek ? @seek_lba : @read_lba
       @want_seek = false
       @reading = true
+      @sectors_since_read = 0
       @stat |= SF_READING
       @stat &= ~SF_SEEKING
       # First sector lands quickly — see CYCLES_FIRST_SECTOR. After it the
@@ -296,18 +299,44 @@ module PSX
 
     def cmd_pause
       was_reading = @reading
+      # If we were streaming and the BIOS hadn't yet received ANY sector
+      # for this ReadN, force one delivery before stopping — the BIOS
+      # commonly issues ReadN + Pause back-to-back to read a single sector.
+      # Once at least one sector has been delivered we leave it alone so
+      # we don't double-deliver.
+      if was_reading && @disc && @sectors_since_read.zero?
+        deliver_pending_sector
+      end
       @reading = false
       @stat &= ~SF_READING
       queue_response(0, 3, [@stat])
-      # Real Pause has a longer second-response delay than most other
-      # commands (the drive needs to finish the current sector). Use the
-      # full 1× period so any in-flight INT1 lands before the INT2.
+      # Pause's INT2 lands after the current sector finishes. Give the BIOS
+      # time to drain the data FIFO before INT2 arrives.
       delay = was_reading ? CYCLES_PER_SECTOR_1X : CYCLES_PER_RESPONSE
       queue_response(delay, 2, [@stat])
     end
 
+    def deliver_pending_sector
+      lba = @read_lba
+      track = @disc.track_for_lba(lba)
+      return if track.nil? || track.audio?
+      @data_buffer = @disc.read_data(lba)
+      @data_pos = 0
+      @read_lba += 1
+      @sectors_since_read += 1
+      @pending << [CYCLES_FIRST_SECTOR, 1, [@stat]]
+    end
+
     def cmd_init
+      # Init resets the drive's FIFOs, mode, and current operation, but
+      # NOT the IRQ-enable mask. Real hardware preserves @irq_enable across
+      # Init — a full reset(){@irq_enable=0} after BIOS init means subsequent
+      # INT3/INT2 from this very Init never raise IRQ_CDROM, and the BIOS'
+      # license-init poll on [0x800091C4] never sees its callback. Save and
+      # restore.
+      saved_enable = @irq_enable
       reset
+      @irq_enable = saved_enable
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
       queue_response(0, 3, [@stat])
       queue_response(CYCLES_PER_RESPONSE * 4, 2, [@stat])
