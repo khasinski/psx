@@ -264,6 +264,37 @@ module PSX
 
     # --- Command dispatch ---------------------------------------------------
 
+    # Per-opcode cycle counts from nocash. Bumped into CPU.step_cycles after
+    # each GTE command so timer-sensitive code (and amidog's psxtest_gte
+    # OFFICIAL.TIMING column) sees realistic GTE durations. Unimplemented
+    # opcodes default to 1 cycle.
+    OPCODE_CYCLES = {
+      0x01 => 15,  # RTPS
+      0x06 => 8,   # NCLIP
+      0x0C => 6,   # OP
+      0x10 => 8,   # DPCS
+      0x11 => 8,   # INTPL
+      0x12 => 8,   # MVMVA
+      0x13 => 19,  # NCDS
+      0x14 => 13,  # CDP
+      0x16 => 44,  # NCDT
+      0x1B => 17,  # NCCS
+      0x1C => 11,  # CC
+      0x1E => 14,  # NCS
+      0x20 => 30,  # NCT
+      0x28 => 5,   # SQR
+      0x29 => 8,   # DCPL
+      0x2A => 17,  # DPCT
+      0x2D => 5,   # AVSZ3
+      0x2E => 6,   # AVSZ4
+      0x30 => 23,  # RTPT
+      0x3D => 5,   # GPF
+      0x3E => 5,   # GPL
+      0x3F => 39   # NCCT
+    }.freeze
+
+    attr_reader :op_cycles
+
     # Run a GTE command instruction (the lower 26 bits of the COP2 imm25 op).
     def execute(instruction)
       @flag = 0  # cleared at the start of each command
@@ -304,6 +335,8 @@ module PSX
 
       # Auto-set bit 31 (error flag)
       @flag |= (1 << 31) if (@flag & FLAG_ERROR_MASK) != 0
+
+      @op_cycles = OPCODE_CYCLES[opcode] || 1
     end
 
     # --- Helpers: bit-width conversion --------------------------------------

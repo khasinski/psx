@@ -113,14 +113,16 @@ module PSX
         cpu.step
 
         # Inlined tick_devices. cpu.step_cycles is the effective cycle cost
-        # of the instruction we just ran (1 for ALU, 2 for loads). Using it
-        # instead of a constant 1 keeps the VBlank period in line with the
-        # BIOS' own timing expectations, so VSync waits don't time out.
+        # of the instruction we just ran (1 for ALU, 2 for loads, plus the
+        # per-opcode count for GTE commands). Timers tick with exact cycles
+        # every step so Timer 2's CPU-clock/8 cadence is cycle-accurate —
+        # amidog's psxtest_gte TIMING reads Timer 2 around each GTE op.
+        # Other devices stay on the 64-cycle batched poll.
         cycles = cpu.step_cycles
         cycle_count += cycles
+        timers.tick(cycles)
         if cycle_count >= tick_threshold
           tick_threshold = cycle_count + 64
-          timers.tick(64)
           sio0.tick(64)
           dma.tick_cycles(64)
           cdrom.tick(64)

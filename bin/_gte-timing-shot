@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# One-off: run psxtest_gte long enough for the OFFICIAL.TIMING block to
+# finish rendering, then save a screenshot. Used to verify the Timer 2
+# clock-source fix.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+bios = "SCPH1001.BIN"
+exe  = ".tests-amidog/psxtest_gte/psxtest_gte.exe"
+out  = "conformance-shots/psxtest_gte-timer-fix.ppm"
+cycles_total = Integer(ENV["PSX_CYCLES"] || 600_000_000)
+chunk = Integer(ENV["PSX_CHUNK"] || 5_000_000)
+snap_every = Integer(ENV["PSX_SNAP_EVERY"] || 4)
+
+abort "missing BIOS"  unless File.exist?(bios)
+abort "missing EXE: #{exe}" unless File.exist?(exe)
+
+START_PRESSED = 0xFFFF & ~(1 << 3)  # bit 3 = START, active-low
+
+emu = PSX::Emulator.new(bios)
+emu.run(steps: 5_000_000)
+emu.load_psexe(exe)
+
+# Run long enough to draw the menu
+emu.run(steps: 30_000_000)
+puts "menu PC=#{format("%08X", emu.cpu.pc)}; tapping START"
+
+# Tap START — one VBlank's worth is enough to register, and a quick
+# release prevents the post-test "press any to return to menu" prompt
+# from immediately bouncing us back.
+emu.controller_state_proc = -> { START_PRESSED }
+emu.run(steps: 1_000_000)
+emu.controller_state_proc = -> { 0xFFFF }
+puts "post-START PC=#{format("%08X", emu.cpu.pc)}"
+
+remaining = cycles_total - 31_000_000
+idx = 0
+until remaining <= 0
+  emu.run(steps: chunk)
+  remaining -= chunk
+  idx += 1
+  printf "PC=%08X cyc_remaining=%d\n", emu.cpu.pc, remaining
+  # Snapshot every few chunks so we can pick whichever frame caught the
+  # test mid-display.
+  if (idx % snap_every) == 0
+    snap = "conformance-shots/psxtest_gte-timer-fix-#{idx.to_s.rjust(2, "0")}.ppm"
+    emu.save_screenshot(snap)
+  end
+end
+
+emu.save_screenshot(out)
+puts "wrote #{out}"

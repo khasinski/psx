@@ -164,7 +164,10 @@ What doesn't:
 
 - No SPU audio synthesis (no sound)
 - Several ps1-tests fail (CD-ROM timing, code-in-IO bus errors)
-- Texture sampling has visible glitches on the shell UI
+- GTE op timing matches nocash per-opcode cycle counts when measured
+  through Timer 2 in sysclock mode (see `spec/gte_timing_spec.rb`);
+  visual verification against amidog's psxtest_gte OFFICIAL.TIMING
+  column hasn't been completed
 
 ## License
 

@@ -388,6 +388,7 @@ module PSX
 
       if (instruction & (1 << 25)) != 0
         @gte.execute(instruction)
+        @step_cycles += @gte.op_cycles - 1  # base ALU cycle already counted
         return
       end
 
