@@ -1,0 +1,40 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Headless emulation throughput bench. No profiler — just wall-clock
+# cycles/sec for the BIOS boot path. Works on any Ruby implementation
+# that can load the emulator (so you can compare CRuby/YJIT vs JRuby
+# vs TruffleRuby).
+#
+# Usage:
+#   bundle exec bin/_psx-bench
+#   PSX_CYCLES=200_000_000 bundle exec bin/_psx-bench
+#   PSX_WARMUP=20_000_000 bundle exec bin/_psx-bench
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+bios   = ENV["PSX_BIOS"]   || "SCPH1001.BIN"
+cycles = Integer((ENV["PSX_CYCLES"] || "100_000_000").gsub("_", ""))
+warmup = Integer((ENV["PSX_WARMUP"] || "5_000_000").gsub("_", ""))
+
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+
+ruby = "#{RUBY_ENGINE} #{RUBY_ENGINE_VERSION} (#{RUBY_PLATFORM})"
+yjit_on = defined?(RubyVM::YJIT) && RubyVM::YJIT.respond_to?(:enabled?) && RubyVM::YJIT.enabled?
+puts "ruby:    #{ruby}#{yjit_on ? " +YJIT" : ""}"
+puts "warmup:  #{warmup} cycles"
+puts "measure: #{cycles} cycles"
+
+emu = PSX::Emulator.new(bios)
+emu.run(steps: warmup)
+
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+emu.run(steps: cycles)
+elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+
+mhz = (cycles / elapsed) / 1_000_000.0
+ips = cycles / elapsed
+puts format("elapsed: %.2fs", elapsed)
+puts format("speed:   %.2f MHz (%.0f cycles/s)", mhz, ips)
+puts format("PC:      %08X", emu.cpu.pc)

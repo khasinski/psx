@@ -10,6 +10,7 @@ GEM
     minitest (5.27.0)
     rake (13.4.2)
     ruby-sdl2 (0.3.7)
+    stackprof (0.2.28)
 
 PLATFORMS
   arm64-darwin-25
@@ -19,12 +20,14 @@ DEPENDENCIES
   minitest (~> 5)
   psx!
   rake (~> 13)
+  stackprof (~> 0.2)
 
 CHECKSUMS
   minitest (5.27.0) sha256=2d3b17f8a36fe7801c1adcffdbc38233b938eb0b4966e97a6739055a45fa77d5
   psx (0.1.0)
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   ruby-sdl2 (0.3.7) sha256=16f9be9c6883ed5054d34af0a5bedecaa7bf2746d344b8f7729350c5bcff5bc6
+  stackprof (0.2.28) sha256=4ec2ace02f386012b40ca20ef80c030ad711831f59511da12e83b34efb0f9a04
 
 BUNDLED WITH
   4.0.8

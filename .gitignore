@@ -36,3 +36,6 @@ benchmark_cpu.rb
 vendor/bundle/
 pkg/
 conformance-shots/
+
+.claude/
+tmp/

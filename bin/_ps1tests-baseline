@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Run every JaCzekanski/ps1-tests test that ships a psx.log reference and
+# tally pass/fail. Tab-separated output so the result is easy to diff
+# between commits.
+set -u
+shopt -s nullglob
+
+cd "$(dirname "$0")/.." || exit 1
+
+bios=${PSX_BIOS:-SCPH1001.BIN}
+total=0
+ok=0
+fail=0
+
+while IFS= read -r logpath; do
+  dir=${logpath%/psx.log}
+  name=${dir#.tests/}
+  exes=("$dir"/*.exe)
+  if (( ${#exes[@]} == 0 )); then
+    printf "%-40s\tNO_EXE\n" "$name"
+    continue
+  fi
+  exe=${exes[0]}
+  total=$((total + 1))
+  # 90s wall-clock cap per test so an infinite-loop emulator bug can't
+  # eat the whole night. 100M cycles at ~2.3 MHz is ~43s; 90s is ~2x.
+  out=$(timeout 90 bundle exec bin/psx-test -b "$bios" -e "$logpath" --max-cycles 100000000 "$exe" 2>&1 >/dev/null)
+  rc=$?
+  if [[ $out == *"OK --"* ]]; then
+    summary=$(echo "$out" | grep -m1 "psx-test\] OK")
+    printf "%-40s\tOK\t%s\n" "$name" "${summary##*]}"
+    ok=$((ok + 1))
+  elif [[ $rc -eq 124 ]]; then
+    printf "%-40s\tTIMEOUT\t(emulator hung past 90s wall-clock)\n" "$name"
+    fail=$((fail + 1))
+  else
+    last=$(echo "$out" | tail -3 | tr '\n' ' | ' | sed 's/ | $//')
+    printf "%-40s\tFAIL\t%s\n" "$name" "${last}"
+    fail=$((fail + 1))
+  fi
+done < <(find .tests -name psx.log | sort)
+
+printf "TOTAL %d  OK %d  FAIL %d\n" "$total" "$ok" "$fail"

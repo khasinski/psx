@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Profile a BIOS-boot run with stackprof and print a flat report. Hands
+# you the hot loop without dragging in any new gem dependency — install
+# stackprof manually if it's missing (gem install stackprof).
+#
+# Usage:
+#   bundle exec bin/_psx-profile                       # 100M cycles, default BIOS
+#   PSX_CYCLES=50_000_000 bundle exec bin/_psx-profile
+#   bundle exec bin/_psx-profile --no-yjit             # baseline interpreter
+#
+# Writes the raw stackprof dump to tmp/psx-profile.dump so you can
+# follow up with:
+#   stackprof tmp/psx-profile.dump --files
+#   stackprof tmp/psx-profile.dump --method 'PSX::CPU#step'
+
+require "stackprof"
+require "fileutils"
+
+bios = ENV["PSX_BIOS"] || "SCPH1001.BIN"
+cycles = Integer((ENV["PSX_CYCLES"] || "100_000_000").gsub("_", ""))
+yjit = !ARGV.include?("--no-yjit")
+out = ENV["PSX_PROFILE_OUT"] || "tmp/psx-profile.dump"
+
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+FileUtils.mkdir_p(File.dirname(out))
+
+RubyVM::YJIT.enable if yjit && defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+emu = PSX::Emulator.new(bios)
+
+# Warm-up so the profile reflects steady-state, not boot-from-cold init.
+emu.run(steps: 5_000_000)
+
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+StackProf.run(mode: :cpu, raw: true, interval: 1000, out: out) do
+  emu.run(steps: cycles)
+end
+elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+
+mhz = (cycles / elapsed) / 1_000_000.0
+puts "Ran #{cycles} CPU cycles in #{format("%.2fs", elapsed)} (#{format("%.2f MHz", mhz)})"
+puts "PC=#{format("%08X", emu.cpu.pc)} after profile"
+puts "Profile dump: #{out}"
+puts
+
+report = StackProf::Report.new(Marshal.load(IO.binread(out)))
+puts "=== Top 30 by self-time ==="
+report.print_text(false, 30, nil, nil, nil, nil, $stdout)
+puts
+puts "=== Top 30 by total-time ==="
+report.print_text(true, 30, nil, nil, nil, nil, $stdout)
+puts
+puts "=== Hot lines in PSX::CPU#step ==="
+report.print_method(/PSX::CPU#step\b/, $stdout)
