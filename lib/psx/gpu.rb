@@ -829,37 +829,31 @@ module PSX
     end
 
     def draw_rect(x, y, w, h, color)
+      cr = color[:r]; cg = color[:g]; cb = color[:b]
       h.times do |dy|
         w.times do |dx|
-          draw_pixel(x + dx, y + dy, color[:r], color[:g], color[:b])
+          draw_pixel(x + dx, y + dy, cr, cg, cb)
         end
       end
     end
 
     def draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, base_color, raw_texture)
+      br = base_color[:r]; bg = base_color[:g]; bb = base_color[:b]
+      tpx = @texture_page_x; tpy = @texture_page_y; tdp = @texture_depth
       h.times do |dy|
         w.times do |dx|
-          # Calculate texture coordinates
           u = (tex_u + dx) & 0xFF
           v = (tex_v + dy) & 0xFF
-
-          # Sample texture
-          texel = sample_texture(u, v, clut_x, clut_y, @texture_page_x, @texture_page_y, @texture_depth)
-
-          # Skip transparent texels
+          texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp)
           next if texel_transparent?(texel)
-
-          # Convert to RGB
           tex_color = vram_to_rgb(texel)
-
+          tr = tex_color[:r]; tg = tex_color[:g]; tb = tex_color[:b]
           if raw_texture
-            # Raw texture - use texture color directly
-            draw_pixel(x + dx, y + dy, tex_color[:r], tex_color[:g], tex_color[:b])
+            draw_pixel(x + dx, y + dy, tr, tg, tb)
           else
-            # Modulate with base color
-            r = ((tex_color[:r] * base_color[:r]) >> 7).clamp(0, 255)
-            g = ((tex_color[:g] * base_color[:g]) >> 7).clamp(0, 255)
-            b = ((tex_color[:b] * base_color[:b]) >> 7).clamp(0, 255)
+            r = (tr * br) >> 7; r = 255 if r > 255
+            g = (tg * bg) >> 7; g = 255 if g > 255
+            b = (tb * bb) >> 7; b = 255 if b > 255
             draw_pixel(x + dx, y + dy, r, g, b)
           end
         end
@@ -953,14 +947,23 @@ module PSX
         x_start = [x1.to_i, @draw_area_left].max
         x_end = [x2.to_i, @draw_area_right].min
 
-        (x_start..x_end).each do |x|
-          if gouraud && x2 != x1
-            t = (x - x1) / (x2 - x1)
-            color = interp_color(c_left, c_right, t)
-          else
-            color = c_left
+        if gouraud && x2 != x1
+          inv_w = 1.0 / (x2 - x1)
+          lr = c_left[:r]; lg = c_left[:g]; lb = c_left[:b]
+          rr = c_right[:r]; rg = c_right[:g]; rb = c_right[:b]
+          dr = rr - lr; dg = rg - lg; db = rb - lb
+          (x_start..x_end).each do |x|
+            t = (x - x1) * inv_w
+            r = (lr + dr * t).to_i; r = 0 if r < 0; r = 255 if r > 255
+            g = (lg + dg * t).to_i; g = 0 if g < 0; g = 255 if g > 255
+            b = (lb + db * t).to_i; b = 0 if b < 0; b = 255 if b > 255
+            draw_pixel(x, y, r, g, b)
           end
-          draw_pixel(x, y, color[:r], color[:g], color[:b])
+        else
+          cr = c_left[:r]; cg = c_left[:g]; cb = c_left[:b]
+          (x_start..x_end).each do |x|
+            draw_pixel(x, y, cr, cg, cb)
+          end
         end
       end
     end
@@ -1084,29 +1087,26 @@ module PSX
         x_end = [x2.to_i, @draw_area_right].min
         x_span = x2 - x1
 
+        inv_span = x_span > 0 ? 1.0 / x_span : 0
+        du = u2 - u1
+        dv = v2_tex - v1_tex
+        br = base_color[:r]; bg = base_color[:g]; bb = base_color[:b]
         (x_start..x_end).each do |x|
-          # Interpolate UV
-          t = x_span > 0 ? (x - x1) / x_span : 0
-          u = (u1 + (u2 - u1) * t).to_i & 0xFF
-          v_coord = (v1_tex + (v2_tex - v1_tex) * t).to_i & 0xFF
+          t = (x - x1) * inv_span
+          u = (u1 + du * t).to_i & 0xFF
+          v_coord = (v1_tex + dv * t).to_i & 0xFF
 
-          # Sample texture
           texel = sample_texture(u, v_coord, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth)
-
-          # Skip transparent texels
           next if texel_transparent?(texel)
 
-          # Convert to RGB
           tex_color = vram_to_rgb(texel)
-
+          tr = tex_color[:r]; tg = tex_color[:g]; tb = tex_color[:b]
           if raw_texture
-            # Raw texture - use texture color directly
-            draw_pixel(x, y, tex_color[:r], tex_color[:g], tex_color[:b])
+            draw_pixel(x, y, tr, tg, tb)
           else
-            # Modulate with base color
-            r = ((tex_color[:r] * base_color[:r]) >> 7).clamp(0, 255)
-            g = ((tex_color[:g] * base_color[:g]) >> 7).clamp(0, 255)
-            b = ((tex_color[:b] * base_color[:b]) >> 7).clamp(0, 255)
+            r = (tr * br) >> 7; r = 255 if r > 255
+            g = (tg * bg) >> 7; g = 255 if g > 255
+            b = (tb * bb) >> 7; b = 255 if b > 255
             draw_pixel(x, y, r, g, b)
           end
         end
