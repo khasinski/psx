@@ -22,16 +22,18 @@ expected     = nil
 max_cycles   = 200_000_000
 boot_cycles  = 5_000_000
 exe_path     = nil
+disc_path    = nil
 
 args = ARGV.dup
 while (arg = args.shift)
   case arg
   when "-b", "--bios"          then bios_path   = args.shift
   when "-e", "--expected"      then expected    = args.shift
+  when "-d", "--disc"          then disc_path   = args.shift
   when "--max-cycles"          then max_cycles  = args.shift.to_i
   when "--boot-cycles"         then boot_cycles = args.shift.to_i
   when "-h", "--help"
-    puts "Usage: psx-test [-b BIOS] [-e EXPECTED] [--max-cycles N] [--boot-cycles N] EXE"
+    puts "Usage: psx-test [-b BIOS] [-e EXPECTED] [-d DISC.cue] [--max-cycles N] [--boot-cycles N] EXE"
     exit 0
   else
     exe_path = arg
@@ -46,8 +48,12 @@ unless File.exist?(bios_path)
   warn "BIOS not found: #{bios_path}"
   exit 2
 end
+if disc_path && !File.exist?(disc_path)
+  warn "Disc not found: #{disc_path}"
+  exit 2
+end
 
-emu = PSX::Emulator.new(bios_path)
+emu = PSX::Emulator.new(bios_path, disc_path: disc_path)
 
 # Let the BIOS initialise its A/B/C tables and exception vectors.
 emu.run(steps: boot_cycles)
