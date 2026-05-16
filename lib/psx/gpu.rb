@@ -960,9 +960,13 @@ module PSX
           c_left, c_right = c_right, c_left
         end
 
-        # Draw scanline
+        # Draw scanline — inline draw_pixel to skip method-call overhead.
         x_start = [x1.to_i, @draw_area_left].max
         x_end = [x2.to_i, @draw_area_right].min
+        next if y < 0 || y >= VRAM_HEIGHT
+        row = y * VRAM_WIDTH
+        cmb = @check_mask_bit; smb = @set_mask_bit
+        vram = @vram
 
         if gouraud && x2 != x1
           inv_w = 1.0 / (x2 - x1)
@@ -970,16 +974,26 @@ module PSX
           rr = c_right[:r]; rg = c_right[:g]; rb = c_right[:b]
           dr = rr - lr; dg = rg - lg; db = rb - lb
           (x_start..x_end).each do |x|
+            next if x < 0 || x >= VRAM_WIDTH
+            idx = row + x
+            next if cmb && (vram[idx] & 0x8000) != 0
             t = (x - x1) * inv_w
             r = (lr + dr * t).to_i; r = 0 if r < 0; r = 255 if r > 255
             g = (lg + dg * t).to_i; g = 0 if g < 0; g = 255 if g > 255
             b = (lb + db * t).to_i; b = 0 if b < 0; b = 255 if b > 255
-            draw_pixel(x, y, r, g, b)
+            pixel = ((r >> 3) & 0x1F) | (((g >> 3) & 0x1F) << 5) | (((b >> 3) & 0x1F) << 10)
+            pixel |= 0x8000 if smb
+            vram[idx] = pixel
           end
         else
           cr = c_left[:r]; cg = c_left[:g]; cb = c_left[:b]
+          pixel = ((cr >> 3) & 0x1F) | (((cg >> 3) & 0x1F) << 5) | (((cb >> 3) & 0x1F) << 10)
+          pixel |= 0x8000 if smb
           (x_start..x_end).each do |x|
-            draw_pixel(x, y, cr, cg, cb)
+            next if x < 0 || x >= VRAM_WIDTH
+            idx = row + x
+            next if cmb && (vram[idx] & 0x8000) != 0
+            vram[idx] = pixel
           end
         end
       end
