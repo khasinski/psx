@@ -322,26 +322,18 @@ module PSX
 
     # Word counts for multi-word commands
     def polygon_word_count(cmd)
-      # Bit 0: Gouraud (adds colors for each vertex)
-      # Bit 2: Textured (adds UV + clut for each vertex)
-      # Bit 3: Quad (4 vertices instead of 3)
+      # Bit 4: Gouraud (adds a color word for each vertex past the first)
+      # Bit 2: Textured (adds UV+CLUT/UV+TexPage/UV word per vertex)
+      # Bit 3: Quad (4 vertices vs 3)
       gouraud = (cmd & 0x10) != 0
       textured = (cmd & 0x04) != 0
       quad = (cmd & 0x08) != 0
 
       vertices = quad ? 4 : 3
-      words = 1  # Command + color
-
-      if textured
-        # Each vertex has position + texcoord
-        words += vertices * 2
-        words += 1 if gouraud  # Extra colors if gouraud
-        words += (vertices - 1) if gouraud  # Colors for other vertices
-      else
-        words += vertices  # Just positions
-        words += (vertices - 1) if gouraud  # Colors for other vertices
-      end
-
+      words = 1                              # cmd + first vertex colour
+      words += vertices                      # one position word per vertex
+      words += vertices if textured          # one texcoord word per vertex
+      words += (vertices - 1) if gouraud     # one extra colour for verts 2..N
       words
     end
 
