@@ -830,9 +830,23 @@ module PSX
 
     def draw_rect(x, y, w, h, color)
       cr = color[:r]; cg = color[:g]; cb = color[:b]
+      pixel = ((cr >> 3) & 0x1F) | (((cg >> 3) & 0x1F) << 5) | (((cb >> 3) & 0x1F) << 10)
+      smb = @set_mask_bit
+      pixel |= 0x8000 if smb
+      cmb = @check_mask_bit
+      al = @draw_area_left; ar = @draw_area_right
+      at = @draw_area_top; ab = @draw_area_bottom
+      vram = @vram
       h.times do |dy|
+        py = y + dy
+        next if py < at || py > ab || py < 0 || py >= VRAM_HEIGHT
+        row = py * VRAM_WIDTH
         w.times do |dx|
-          draw_pixel(x + dx, y + dy, cr, cg, cb)
+          px = x + dx
+          next if px < al || px > ar || px < 0 || px >= VRAM_WIDTH
+          idx = row + px
+          next if cmb && (vram[idx] & 0x8000) != 0
+          vram[idx] = pixel
         end
       end
     end
