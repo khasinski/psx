@@ -39,12 +39,14 @@ module PSX
 
     class Channel
       attr_accessor :base_addr, :block_ctrl, :channel_ctrl, :busy_cycles
+      attr_reader :suspended
 
       def initialize
         @base_addr = 0
         @block_ctrl = 0
         @channel_ctrl = 0
         @busy_cycles = 0
+        @suspended = false
       end
 
       def active?(needs_trigger: false)
@@ -54,12 +56,20 @@ module PSX
         # ...) auto-start when BUSY is set.
         enabled = (@channel_ctrl & CTRL_START_BUSY) != 0
         return false unless enabled
+        return false if @suspended
 
         if needs_trigger
           (@channel_ctrl & CTRL_START_TRIGGER) != 0
         else
           true
         end
+      end
+
+      # Mark a runaway chain as stuck: the BUSY bit stays set, but tick
+      # won't re-enter the transfer. Software typically polls the BUSY
+      # bit and aborts the channel by clearing it.
+      def suspend!
+        @suspended = true
       end
 
       def direction
@@ -157,6 +167,9 @@ module PSX
           else
             channel.channel_ctrl = value
           end
+          # Any new CHCR write clears a prior runaway-chain suspension
+          # (software has either re-armed the channel or aborted it).
+          channel.instance_variable_set(:@suspended, false)
         end
       elsif offset == 0x70
         @dpcr = value
@@ -329,6 +342,7 @@ module PSX
       #                bits 24..31 = word count
       #   followed by `word_count` data words forwarded to GP0.
       addr = channel.base_addr & 0x1F_FFFC
+      reached_end = false
 
       MAX_CHAIN_NODES.times do
         header = memory.read32(addr)
@@ -341,13 +355,25 @@ module PSX
 
         # Bit 23 of the next-address field marks end-of-chain (any addr
         # with bit 23 set, conventionally 0x00FFFFFF).
-        break if (header & 0x80_0000) != 0
+        if (header & 0x80_0000) != 0
+          reached_end = true
+          break
+        end
 
         addr = header & 0x1F_FFFC
       end
 
-      channel.finish!
-      set_irq_flag(GPU)
+      if reached_end
+        channel.finish!
+        set_irq_flag(GPU)
+      else
+        # Self-referential / runaway chain. Real hardware would walk
+        # forever; we walked MAX_CHAIN_NODES nodes for safety. Leave
+        # the channel BUSY without raising IRQ so software sees the
+        # same "stuck" signature (ps1-tests dma/chain-looping checks
+        # finished=false, irq=false on a self-ref chain).
+        channel.suspend!
+      end
     end
 
     # CD-ROM data FIFO -> RAM. The BIOS configures channel 3 in SyncMode 1
