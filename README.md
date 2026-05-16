@@ -157,13 +157,25 @@ What works:
 - ISO9660 reader for SYSTEM.CNF + PS-EXE extraction
 - Fast-boot: skip the BIOS shell + license check, run the disc's PS-EXE directly
 - SIO0 digital pad (slot 1)
-- SPU stub (mirrors SPUCNT → SPUSTAT; no actual audio synthesis)
+- SPU stub (mirrors SPUCNT → SPUSTAT, register window read-back; no
+  actual audio synthesis)
 - Boots SCPH1001 into the Memory Card menu
+- Bus-error on instruction fetch from forbidden regions (scratchpad,
+  IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
+  space goes through (matches real hardware)
+- 18/18 of the JaCzekanski/ps1-tests cases that have a `psx.log`
+  reference and don't require a disc image (cpu/, dma/, gpu/, gte/,
+  mdec/, spu/, timers/) — see `bin/_ps1tests-baseline`
 
 What doesn't:
 
 - No SPU audio synthesis (no sound)
-- CD-ROM ps1-tests can't run via `bin/psx-test` (no disc image wired)
+- CD-ROM ps1-tests (`cdrom/disc-swap`, `cdrom/getloc`, `cdrom/timing`)
+  can't run via `bin/psx-test` because no disc image is wired into
+  the bare-EXE loader path
+- DMA timing isn't cycle-accurate — `dma/chopping` runs but reports
+  `29 CPU cycles` for every block size where real hardware sees
+  thousands; structural test pass, not bit-perfect timing
 - GTE op timing matches nocash per-opcode cycle counts when measured
   through Timer 2 in sysclock mode (see `spec/gte_timing_spec.rb`);
   visual verification against amidog's psxtest_gte OFFICIAL.TIMING
