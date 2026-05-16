@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Boot Ridge Racer (EU) headlessly and dump a screenshot every N cycles
+# so we can see how far it gets. Ridge Racer is known to load the whole
+# game into RAM at boot — the loader is long, so we have to be patient.
+#
+# Usage:
+#   bin/_ridge-boot                       # BIOS-shell boot path
+#   bin/_ridge-boot --fast-boot           # skip license check
+#   PSX_CYCLES=2_000_000_000 bin/_ridge-boot
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require "fileutils"
+require_relative "../lib/psx"
+
+# Unbuffered output — long boot runs are useless if progress lines stay
+# trapped in stdout buffer.
+$stdout.sync = true
+$stderr.sync = true
+
+bios       = ENV["PSX_BIOS"] || "SCPH1001.BIN"
+cue        = ENV["PSX_DISC"] || File.expand_path("~/Downloads/Ridge Racer (Europe)/Ridge Racer (Europe)/Ridge Racer (Europe).cue")
+cycles_tot = Integer((ENV["PSX_CYCLES"] || "2_000_000_000").gsub("_", ""))
+chunk      = Integer((ENV["PSX_CHUNK"] || "25_000_000").gsub("_", ""))
+out_dir    = ENV["PSX_OUT"] || "conformance-shots/ridge"
+fast_boot  = ARGV.include?("--fast-boot")
+
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+abort "Disc not found: #{cue}"  unless File.exist?(cue)
+
+FileUtils.mkdir_p(out_dir)
+
+emu = PSX::Emulator.new(bios, disc_path: cue)
+captured = String.new
+emu.cpu.tty_handler = ->(kind, val) do
+  captured << (kind == :char ? val.chr : val)
+end
+
+if fast_boot
+  emu.fast_boot_from_disc
+  puts "fast-booted PS-EXE from disc"
+else
+  puts "BIOS-shell boot — letting BIOS license + boot path run"
+end
+
+started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+ran = 0
+idx = 0
+last_pc = 0
+stuck_for = 0
+while ran < cycles_tot
+  step = [chunk, cycles_tot - ran].min
+  begin
+    emu.run(steps: step)
+  rescue PSX::CPU::ExecutionError => e
+    warn "CPU ERROR at #{ran} cycles: #{e.message}"
+    break
+  end
+  ran += step
+  idx += 1
+
+  pc = emu.cpu.pc
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  printf "[%6.1fs ran=%11d PC=%08X] last tty: %s\n",
+         elapsed, ran, pc,
+         captured.lines.last(1).map(&:strip).join("")[0, 70]
+
+  # Snapshot every N chunks
+  if (idx % 4) == 0 || ran >= cycles_tot
+    name = format("%s/ridge-%03d.ppm", out_dir, idx)
+    emu.save_screenshot(name)
+    if system("which magick >/dev/null 2>&1")
+      system("magick #{name} #{name.sub(/\.ppm$/, ".png")} >/dev/null 2>&1")
+    end
+  end
+
+  # Sanity: if PC isn't moving for a long stretch, log it
+  stuck_for = (pc == last_pc) ? stuck_for + 1 : 0
+  last_pc = pc
+  if stuck_for >= 5
+    warn "PC stuck at #{format("%08X", pc)} for #{stuck_for} chunks — likely an idle loop or hang"
+  end
+end
+
+puts "\n=== final captured TTY (last 40 lines) ==="
+puts captured.lines.last(40).join

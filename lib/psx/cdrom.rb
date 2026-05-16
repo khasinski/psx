@@ -224,6 +224,11 @@ module PSX
       params = @parameters.dup
       @parameters.clear
 
+      if ENV["PSX_TRACE_CDROM"]
+        $stderr.puts format("[cdrom] cmd=%02X params=[%s] stat=%02X",
+                            cmd, params.map { |p| "%02X" % p }.join(" "), @stat)
+      end
+
       case cmd
       when 0x01 then cmd_getstat
       when 0x02 then cmd_setloc(params)
@@ -248,6 +253,9 @@ module PSX
       when 0x1B then cmd_read
       when 0x1E then cmd_read_toc
       else
+        if ENV["PSX_TRACE_CDROM"]
+          $stderr.puts format("[cdrom] UNHANDLED cmd=%02X — sending generic ack", cmd)
+        end
         queue_response(0, 3, [@stat])  # default ack to keep BIOS moving
       end
     end
