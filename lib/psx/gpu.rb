@@ -840,22 +840,39 @@ module PSX
     def draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, base_color, raw_texture)
       br = base_color[:r]; bg = base_color[:g]; bb = base_color[:b]
       tpx = @texture_page_x; tpy = @texture_page_y; tdp = @texture_depth
+      al = @draw_area_left; ar = @draw_area_right
+      at = @draw_area_top; ab = @draw_area_bottom
+      cmb = @check_mask_bit; smb = @set_mask_bit
+      vram = @vram
       h.times do |dy|
+        py = y + dy
+        next if py < at || py > ab || py < 0 || py >= VRAM_HEIGHT
+        row = py * VRAM_WIDTH
         w.times do |dx|
+          px = x + dx
+          next if px < al || px > ar || px < 0 || px >= VRAM_WIDTH
+
           u = (tex_u + dx) & 0xFF
           v = (tex_v + dy) & 0xFF
           texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp)
-          next if texel_transparent?(texel)
-          tex_color = vram_to_rgb(texel)
-          tr = tex_color[:r]; tg = tex_color[:g]; tb = tex_color[:b]
+          next if texel == 0
+
+          idx = row + px
+          next if cmb && (vram[idx] & 0x8000) != 0
+
           if raw_texture
-            draw_pixel(x + dx, y + dy, tr, tg, tb)
+            out = texel
           else
-            r = (tr * br) >> 7; r = 255 if r > 255
-            g = (tg * bg) >> 7; g = 255 if g > 255
-            b = (tb * bb) >> 7; b = 255 if b > 255
-            draw_pixel(x + dx, y + dy, r, g, b)
+            tr = (texel & 0x001F)
+            tg = (texel & 0x03E0) >> 5
+            tb = (texel & 0x7C00) >> 10
+            r5 = ((tr * br) >> 7); r5 = 0x1F if r5 > 0x1F
+            g5 = ((tg * bg) >> 7); g5 = 0x1F if g5 > 0x1F
+            b5 = ((tb * bb) >> 7); b5 = 0x1F if b5 > 0x1F
+            out = r5 | (g5 << 5) | (b5 << 10)
           end
+          out |= 0x8000 if smb
+          vram[idx] = out
         end
       end
     end
@@ -1091,24 +1108,37 @@ module PSX
         du = u2 - u1
         dv = v2_tex - v1_tex
         br = base_color[:r]; bg = base_color[:g]; bb = base_color[:b]
+        next if y < @draw_area_top || y > @draw_area_bottom || y < 0 || y >= VRAM_HEIGHT
+        row = y * VRAM_WIDTH
+        al = @draw_area_left; ar = @draw_area_right
+        cmb = @check_mask_bit; smb = @set_mask_bit
+        vram = @vram
         (x_start..x_end).each do |x|
+          next if x < al || x > ar || x < 0 || x >= VRAM_WIDTH
+
           t = (x - x1) * inv_span
           u = (u1 + du * t).to_i & 0xFF
           v_coord = (v1_tex + dv * t).to_i & 0xFF
 
           texel = sample_texture(u, v_coord, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth)
-          next if texel_transparent?(texel)
+          next if texel == 0
 
-          tex_color = vram_to_rgb(texel)
-          tr = tex_color[:r]; tg = tex_color[:g]; tb = tex_color[:b]
+          idx = row + x
+          next if cmb && (vram[idx] & 0x8000) != 0
+
           if raw_texture
-            draw_pixel(x, y, tr, tg, tb)
+            out = texel
           else
-            r = (tr * br) >> 7; r = 255 if r > 255
-            g = (tg * bg) >> 7; g = 255 if g > 255
-            b = (tb * bb) >> 7; b = 255 if b > 255
-            draw_pixel(x, y, r, g, b)
+            tr = (texel & 0x001F)
+            tg = (texel & 0x03E0) >> 5
+            tb = (texel & 0x7C00) >> 10
+            r5 = ((tr * br) >> 7); r5 = 0x1F if r5 > 0x1F
+            g5 = ((tg * bg) >> 7); g5 = 0x1F if g5 > 0x1F
+            b5 = ((tb * bb) >> 7); b5 = 0x1F if b5 > 0x1F
+            out = r5 | (g5 << 5) | (b5 << 10)
           end
+          out |= 0x8000 if smb
+          vram[idx] = out
         end
       end
     end
