@@ -181,9 +181,16 @@ module PSX
                      [BIOS_B_DISPATCH, 0x3B], [BIOS_B_DISPATCH, 0x3D]
                   @tty_handler.call(:char, @regs[4] & 0xFF)
                   true
-                when [BIOS_A_DISPATCH, 0x3E], [BIOS_A_DISPATCH, 0x3F],
-                     [BIOS_B_DISPATCH, 0x3E], [BIOS_B_DISPATCH, 0x3F]
-                  @tty_handler.call(:str, read_cstring(@regs[4]))
+                when [BIOS_A_DISPATCH, 0x3E], [BIOS_B_DISPATCH, 0x3E]
+                  # puts(): raw string + newline.
+                  @tty_handler.call(:str, "#{read_cstring(@regs[4])}\n")
+                  true
+                when [BIOS_A_DISPATCH, 0x3F], [BIOS_B_DISPATCH, 0x3F]
+                  # printf(fmt, ...): expand %s/%d/%u/%x/%X/%c/%% with
+                  # a1..a3 then stack-passed varargs. ps1-tests rely on
+                  # this for human-readable PASS/FAIL markers.
+                  @tty_handler.call(:str, format_bios_printf(@regs[4]))
+                  true
                 else
                   false
                 end
@@ -205,6 +212,82 @@ module PSX
         b = @memory.read8((addr + out.length) & 0xFFFF_FFFF)
         break if b == 0
         out << b.chr
+      end
+      out
+    end
+
+    # Substitute %-specifiers in a BIOS-printf format string. Args 0..2
+    # come from $a1..$a3; remaining args read from the caller's stack
+    # at sp+16, sp+20, ... (MIPS o32 ABI layout). Supports %d/%i/%u/%x/
+    # /%X/%c/%s and the field-width / zero-pad / # alternates we see in
+    # ps1-tests log strings (e.g. "%08X", "%2u").
+    def format_bios_printf(fmt_addr)
+      fmt = read_cstring(fmt_addr)
+      out = String.new(capacity: fmt.bytesize + 32)
+      i = 0
+      arg_idx = 0
+      stack_base = @regs[29]  # $sp at call site
+
+      next_arg = lambda do
+        word = if arg_idx < 3
+                 @regs[5 + arg_idx]   # $a1=5, $a2=6, $a3=7
+               else
+                 # MIPS o32: caller reserves a1..a3 spill space at sp+0..12,
+                 # so args 4+ live at sp+16, sp+20, ...
+                 @memory.read32((stack_base + 16 + (arg_idx - 3) * 4) & 0xFFFF_FFFF)
+               end
+        arg_idx += 1
+        word & 0xFFFF_FFFF
+      end
+
+      while i < fmt.bytesize
+        c = fmt.getbyte(i)
+        if c != 0x25  # '%'
+          out << c.chr
+          i += 1
+          next
+        end
+
+        # Parse "%[#0-9]*[diuxXcs%]"
+        i += 1
+        flags = String.new
+        while i < fmt.bytesize && "#-+ ".include?(fmt[i])
+          flags << fmt[i]
+          i += 1
+        end
+        width = String.new
+        while i < fmt.bytesize && (fmt[i] >= "0" && fmt[i] <= "9")
+          width << fmt[i]
+          i += 1
+        end
+        spec = i < fmt.bytesize ? fmt[i] : ""
+        i += 1
+
+        rb_fmt = "%#{flags}#{width}"
+        case spec
+        when "d", "i"
+          v = next_arg.call
+          v -= 0x1_0000_0000 if v >= 0x8000_0000
+          out << format("#{rb_fmt}d", v)
+        when "u"
+          out << format("#{rb_fmt}d", next_arg.call)
+        when "x"
+          out << format("#{rb_fmt}x", next_arg.call)
+        when "X"
+          out << format("#{rb_fmt}X", next_arg.call)
+        when "c"
+          out << (next_arg.call & 0xFF).chr
+        when "s"
+          out << read_cstring(next_arg.call)
+        when "%"
+          out << "%"
+        when ""
+          # trailing '%' with nothing after; emit as-is
+          out << "%"
+        else
+          # Unknown specifier — emit raw so we don't lose information.
+          out << "%" << flags << width << spec
+        end
       end
       out
     end
