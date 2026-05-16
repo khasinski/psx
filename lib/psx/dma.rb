@@ -317,26 +317,32 @@ module PSX
       set_irq_flag(GPU)
     end
 
+    # Cap on linked-list chain walks so a self-referential chain (the case
+    # tested by ps1-tests dma/chain-looping) can't hang the emulator. 64K
+    # nodes is far beyond any real workload — a frame's worth of GP0
+    # commands fits in well under 10K nodes.
+    MAX_CHAIN_NODES = 65_536
+
     def transfer_gpu_linked_list(memory, gpu, channel)
-      # Linked list mode - used for GPU command lists
-      # Each node: [header][data...]
-      # Header: bits 0-23 = next pointer (or 0xFFFFFF for end), bits 24-31 = word count
+      # Linked list mode for GPU command lists. Each node:
+      #   header word: bits 0..23 = next pointer, bit 23 = end-of-list,
+      #                bits 24..31 = word count
+      #   followed by `word_count` data words forwarded to GP0.
       addr = channel.base_addr & 0x1F_FFFC
 
-      loop do
+      MAX_CHAIN_NODES.times do
         header = memory.read32(addr)
         word_count = header >> 24
 
-        # Send data words to GPU
         word_count.times do |i|
           word = memory.read32((addr + 4 + i * 4) & 0x1F_FFFC)
           gpu&.gp0(word)
         end
 
-        # Check for end of list
+        # Bit 23 of the next-address field marks end-of-chain (any addr
+        # with bit 23 set, conventionally 0x00FFFFFF).
         break if (header & 0x80_0000) != 0
 
-        # Next node
         addr = header & 0x1F_FFFC
       end
 

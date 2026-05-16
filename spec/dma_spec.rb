@@ -168,4 +168,47 @@ class DMASpec < Minitest::Test
     assert_equal 0x0000_00F8, ram.read32(0xFC), "Entry at 0xFC should point to 0xF8"
     assert_equal 0x0000_00F4, ram.read32(0xF8), "Entry at 0xF8 should point to 0xF4"
   end
+
+  # === GPU linked-list chain bound ===
+
+  def test_gpu_linked_list_does_not_hang_on_self_reference
+    # ps1-tests dma/chain-looping plants a chain whose next-pointer points
+    # back to itself with bit 23 clear, forming an infinite loop. We must
+    # bound the walk and finish so the channel doesn't hang the emulator.
+    ram = PSX::RAM.new
+    bios_data = "\x00" * 512 * 1024
+    bios = PSX::BIOS.allocate
+    bios.instance_variable_set(:@data, bios_data)
+    memory = PSX::Memory.new(
+      bios: bios,
+      ram: ram,
+      interrupts: @interrupts,
+      dma: @dma,
+      timers: PSX::Timers.new(interrupts: @interrupts)
+    )
+
+    # Self-referential header at 0x1000: word_count=0, next=0x001000.
+    # Bit 23 of next is 0, so this is NOT an end marker.
+    ram.write32(0x1000, 0x0000_1000)
+
+    # Stub GPU that just counts gp0 calls.
+    gpu_counter = Class.new do
+      attr_reader :calls
+      def initialize = @calls = 0
+      def gp0(_) = (@calls += 1)
+    end.new
+
+    # Enable + start GPU channel in linked-list mode at 0x1000.
+    @dma.write(0x70, @dma.dpcr | (1 << 11))   # enable channel 2
+    @dma.write(0x20, 0x0000_1000)              # base
+    @dma.write(0x24, 0x0)
+    @dma.write(0x28, PSX::DMA::CTRL_START_BUSY | (PSX::DMA::SYNC_LINKED << 9))
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @dma.tick(memory, gpu: gpu_counter)
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+    assert elapsed < 5.0, "transfer_gpu_linked_list ran for #{elapsed}s on a self-loop"
+    refute @dma.channels[2].active?, "GPU channel should be marked finished after the bounded walk"
+  end
 end
