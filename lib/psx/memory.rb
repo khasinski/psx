@@ -44,6 +44,30 @@ module PSX
       @dma&.tick(self, gpu: @gpu)
     end
 
+    # Whether instruction fetch is permitted at this virtual address. Real
+    # hardware raises a bus-error exception on instruction fetch from most
+    # I/O ranges and from the scratchpad (which lives where the data cache
+    # would be on a normal MIPS chip). A handful of IO regions do respond
+    # to 32-bit reads (DMA, SPU, GPU); fetch from those returns garbage but
+    # doesn't trap.
+    #
+    # Match the expectations of ps1-tests cpu/code-in-io:
+    #   scratchpad / IRQ / MDEC / Timers / SIO -> bus error
+    #   DMA / SPU / GPU register space         -> no exception
+    def fetchable?(addr)
+      phys = addr & REGION_MASK[(addr >> 29) & 0x7]
+      return true if phys < 0x0080_0000                              # RAM
+      return true if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000       # BIOS
+      if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+        # Specific IO sub-ranges that DO respond to instruction fetch.
+        return true if phys >= 0x1F80_1080 && phys < 0x1F80_1100      # DMA
+        return true if phys >= 0x1F80_1810 && phys < 0x1F80_1820      # GPU
+        return true if phys >= 0x1F80_1C00 && phys < 0x1F80_2000      # SPU
+        return false                                                  # IRQ/MDEC/Timer/SIO/etc
+      end
+      false                                                          # Scratchpad, expansion, cache control
+    end
+
     def read8(addr)
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
@@ -296,6 +320,18 @@ module PSX
       when 0x0814
         # GPU GPUSTAT - return ready, display enabled
         @gpu&.status || 0x1C00_0000
+      when 0x0C00...0x1000
+        # SPU register window. Real hardware reads back the most recent
+        # 32-bit value; our SPU stub keeps a shadow so writes survive.
+        # ps1-tests cpu/code-in-io's testCodeInSPU relies on this so the
+        # `jr ra` instruction it writes into voice 0 reads back via fetch.
+        if @spu
+          lo = @spu.read16(offset)
+          hi = @spu.read16(offset + 2)
+          (hi << 16) | lo
+        else
+          0
+        end
       else
         # warn format("IO read32 at 0x%08X", IO_START + offset)
         0
@@ -374,6 +410,11 @@ module PSX
       when 0x0814
         # GPU GP1
         @gpu&.gp1(value)
+      when 0x0C00...0x1000
+        # SPU register window. Treat 32-bit writes as two halfword writes
+        # so the SPU stub's shadow stays in sync (see io_read32 for SPU).
+        @spu&.write16(offset, value & 0xFFFF)
+        @spu&.write16(offset + 2, (value >> 16) & 0xFFFF)
       else
         # warn format("IO write32 at 0x%08X = 0x%08X", IO_START + offset, value)
       end

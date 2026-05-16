@@ -29,6 +29,13 @@ module PSX
       @stat = 0
       @dtc = 0
       @fifo = []
+      # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
+      # Real hardware preserves register-write values across reads (most
+      # voice/reverb regs aren't write-only); ps1-tests cpu/code-in-io
+      # writes a `jr ra` instruction into voice 0's volume registers and
+      # expects to read it back via instruction fetch. Specific registers
+      # below override this with their own semantics.
+      @regs = ("\x00" * 0x400).b
     end
 
     def read16(offset)
@@ -37,12 +44,20 @@ module PSX
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
       when SPUSTAT           then @stat
-      else 0
+      else
+        idx = offset - 0xC00
+        return 0 unless idx >= 0 && idx < 0x400 - 1
+        @regs.getbyte(idx) | (@regs.getbyte(idx + 1) << 8)
       end
     end
 
     def write16(offset, value)
       v = value & 0xFFFF
+      idx = offset - 0xC00
+      if idx >= 0 && idx < 0x400 - 1
+        @regs.setbyte(idx, v & 0xFF)
+        @regs.setbyte(idx + 1, (v >> 8) & 0xFF)
+      end
       case offset
       when SPU_TRANSFER_ADDR
         @transfer_addr = (v * 8) & (RAM_SIZE - 1)

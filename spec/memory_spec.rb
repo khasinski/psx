@@ -11,6 +11,51 @@ class MemorySpec < Minitest::Test
     @ram = @env[:ram]
   end
 
+  # === Instruction-fetch permission ===
+
+  def test_fetchable_allows_ram
+    assert @memory.fetchable?(0x0000_0000)
+    assert @memory.fetchable?(0x0010_0000)
+    assert @memory.fetchable?(0x801F_FFF0)  # KSEG0 RAM mirror
+    assert @memory.fetchable?(0xA000_0000)  # KSEG1 RAM mirror
+  end
+
+  def test_fetchable_allows_bios
+    assert @memory.fetchable?(0xBFC0_0000)  # KSEG1 BIOS
+    assert @memory.fetchable?(0x9FC0_4000)  # KSEG0 BIOS
+  end
+
+  def test_fetchable_blocks_scratchpad
+    refute @memory.fetchable?(0x1F80_0000)
+    refute @memory.fetchable?(0x1F80_03FC)
+  end
+
+  def test_fetchable_blocks_irq_mdec_timer_sio
+    refute @memory.fetchable?(0x1F80_1070)  # IRQ I_STAT
+    refute @memory.fetchable?(0x1F80_1820)  # MDEC0 data
+    refute @memory.fetchable?(0x1F80_1100)  # Timer 0
+    refute @memory.fetchable?(0x1F80_1040)  # JOY/SIO
+  end
+
+  def test_fetchable_allows_dma_spu_gpu
+    assert @memory.fetchable?(0x1F80_1080)  # DMA channel 0 base
+    assert @memory.fetchable?(0x1F80_10F0)  # DPCR
+    assert @memory.fetchable?(0x1F80_1810)  # GPU GP0 read
+    assert @memory.fetchable?(0x1F80_1C00)  # SPU voice 0
+    assert @memory.fetchable?(0x1F80_1FFC)  # SPU end
+  end
+
+  # === SPU register shadow (read-back) ===
+
+  def test_spu_register_writes_round_trip_via_io_read32
+    # Real hardware preserves SPU register writes; cpu/code-in-io's
+    # testCodeInSPU writes a `jr ra` (0x03E0_0008) to voice 0 and reads
+    # it back via instruction fetch. We need the same.
+    @memory.spu = PSX::SPU.new
+    @memory.write32(0x1F80_1C00, 0x03E0_0008)
+    assert_equal 0x03E0_0008, @memory.read32(0x1F80_1C00)
+  end
+
   # === Address Translation ===
 
   def test_kseg0_maps_to_physical

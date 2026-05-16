@@ -99,7 +99,18 @@ module PSX
         return
       end
 
-      # Fetch instruction
+      # Fetch instruction. Misaligned PC -> address-error; fetch from a
+      # region the bus doesn't service (scratchpad, IRQ, MDEC, timers,
+      # JOY/SIO, expansion) -> instruction bus error. Both leave EPC
+      # pointing at the offending PC.
+      if (pc & 3) != 0
+        exception(COP0::EXC_ADEL, bad_addr: pc)
+        return
+      end
+      unless @memory.fetchable?(pc)
+        exception(COP0::EXC_IBE, bad_addr: pc)
+        return
+      end
       instruction = @memory.read32(pc)
 
       # Advance PC (next_pc may have been redirected by a previous branch
