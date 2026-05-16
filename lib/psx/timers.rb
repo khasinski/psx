@@ -102,10 +102,17 @@ module PSX
       end
     end
 
+    # NTSC HBLANK rate: 33.8688 MHz / (60 * 263) ≈ 2146 CPU cycles per HBLANK.
+    # Used when Timer 0/1 is sourced from "HBLANK" or "dotclock" (we currently
+    # approximate dotclock with HBLANK rate too).
+    CYCLES_PER_HBLANK = 2146
+
     def initialize(interrupts: nil)
       @interrupts = interrupts
       @timers = Array.new(NUM_TIMERS) { Timer.new }
       @system_counter = 0
+      @t0_partial = 0
+      @t1_partial = 0
     end
 
     def read(offset)
@@ -159,17 +166,34 @@ module PSX
         end
       end
 
-      # Timer 0 / Timer 1 — sysclock when src is 0 or 2, otherwise dot/hblank.
-      # We have no real dot/hblank source, so for dotclock fall back to sysclock
-      # and for hblank approximate at sysclock/8 (the prior behaviour).
+      # Timer 0 / Timer 1: sysclock (src 0/2) ticks at CPU cycles; HBLANK /
+      # dotclock (src 1/3) ticks at a coarser rate, but our run loop calls
+      # tick() with single-cycle granularity, so naive integer division loses
+      # all the sub-quantum cycles. Accumulate the remainder so the counter
+      # actually advances.
       t0_src = (@timers[0].mode >> 8) & 3
-      if @timers[0].tick(cycles)  # both sysclock and dotclock paths tick on cycles for now
+      t0_ticks = if t0_src.odd?
+        @t0_partial += cycles
+        n = @t0_partial / CYCLES_PER_HBLANK
+        @t0_partial -= n * CYCLES_PER_HBLANK
+        n
+      else
+        cycles
+      end
+      if t0_ticks > 0 && @timers[0].tick(t0_ticks)
         @interrupts&.request(Interrupts::IRQ_TIMER0)
       end
 
       t1_src = (@timers[1].mode >> 8) & 3
-      t1_cycles = (t1_src.odd?) ? cycles / 8 : cycles
-      if @timers[1].tick(t1_cycles)
+      t1_ticks = if t1_src.odd?
+        @t1_partial += cycles
+        n = @t1_partial / CYCLES_PER_HBLANK
+        @t1_partial -= n * CYCLES_PER_HBLANK
+        n
+      else
+        cycles
+      end
+      if t1_ticks > 0 && @timers[1].tick(t1_ticks)
         @interrupts&.request(Interrupts::IRQ_TIMER1)
       end
     end

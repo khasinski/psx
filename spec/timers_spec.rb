@@ -175,6 +175,29 @@ class TimersTest < Minitest::Test
     assert_equal 8, @timers.read(0x20)
   end
 
+  # Timer 1 HBLANK clock source must advance even when tick() is called with
+  # single-cycle granularity (the main emulator loop calls timers.tick(1..2)
+  # per CPU step). Without a sub-cycle accumulator, integer-truncating to
+  # the HBLANK rate would lose every increment and the counter would stay
+  # at 0 forever — which is what stalled Ridge Racer's loader on the first
+  # VSync-spin loop.
+  def test_timer1_hblank_source_accumulates_sub_cycle_ticks
+    @timers.write(0x14, 0x0100)  # Timer 1 mode: src=1 (HBLANK)
+    # 2146 cycles per HBLANK; 8 should not yet bump the counter, but the
+    # remainder must be retained across calls.
+    8.times { @timers.tick(1) }
+    assert_equal 0, @timers.read(0x10)
+    # 2146 single-cycle ticks total should land us at exactly 1 HBLANK.
+    (PSX::Timers::CYCLES_PER_HBLANK - 8).times { @timers.tick(1) }
+    assert_equal 1, @timers.read(0x10)
+  end
+
+  def test_timer0_hblank_source_accumulates_sub_cycle_ticks
+    @timers.write(0x04, 0x0100)  # Timer 0 mode: src=1 (HBLANK approximation)
+    PSX::Timers::CYCLES_PER_HBLANK.times { @timers.tick(1) }
+    assert_equal 1, @timers.read(0x00)
+  end
+
   # Invalid timer access
   def test_invalid_timer_returns_zero
     assert_equal 0, @timers.read(0x30)  # Timer 3 doesn't exist
