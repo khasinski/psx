@@ -466,10 +466,10 @@ module PSX
         end
       else
         if quad
-          draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud)
-          draw_triangle(points[1], points[2], points[3], colors[1], colors[2], colors[3], gouraud)
+          draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud, semi_transparent)
+          draw_triangle(points[1], points[2], points[3], colors[1], colors[2], colors[3], gouraud, semi_transparent)
         else
-          draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud)
+          draw_triangle(points[0], points[1], points[2], colors[0], colors[1], colors[2], gouraud, semi_transparent)
         end
       end
     end
@@ -921,7 +921,7 @@ module PSX
       end
     end
 
-    def draw_triangle(p0, p1, p2, c0, c1, c2, gouraud)
+    def draw_triangle(p0, p1, p2, c0, c1, c2, gouraud, semi = false)
       # Simple scanline triangle rasterization
       # Sort vertices by Y
       verts = [[p0, c0], [p1, c1], [p2, c2]].sort_by { |v, _| v[:y] }
@@ -974,6 +974,8 @@ module PSX
         cmb = @check_mask_bit; smb = @set_mask_bit
         vram = @vram
 
+        stp_mode = semi ? @semi_transparency : -1
+
         if gouraud && x2 != x1
           inv_w = 1.0 / (x2 - x1)
           lr = c_left[:r]; lg = c_left[:g]; lb = c_left[:b]
@@ -982,26 +984,68 @@ module PSX
           (x_start..x_end).each do |x|
             next if x < 0 || x >= VRAM_WIDTH
             idx = row + x
-            next if cmb && (vram[idx] & 0x8000) != 0
+            bg = vram[idx]
+            next if cmb && (bg & 0x8000) != 0
             t = (x - x1) * inv_w
             r = (lr + dr * t).to_i; r = 0 if r < 0; r = 255 if r > 255
             g = (lg + dg * t).to_i; g = 0 if g < 0; g = 255 if g > 255
             b = (lb + db * t).to_i; b = 0 if b < 0; b = 255 if b > 255
-            pixel = ((r >> 3) & 0x1F) | (((g >> 3) & 0x1F) << 5) | (((b >> 3) & 0x1F) << 10)
+            fr = (r >> 3) & 0x1F; fg = (g >> 3) & 0x1F; fb = (b >> 3) & 0x1F
+            if stp_mode >= 0
+              fr, fg, fb = stp_blend5(bg, fr, fg, fb, stp_mode)
+            end
+            pixel = fr | (fg << 5) | (fb << 10)
             pixel |= 0x8000 if smb
             vram[idx] = pixel
           end
         else
           cr = c_left[:r]; cg = c_left[:g]; cb = c_left[:b]
-          pixel = ((cr >> 3) & 0x1F) | (((cg >> 3) & 0x1F) << 5) | (((cb >> 3) & 0x1F) << 10)
-          pixel |= 0x8000 if smb
+          fr_const = (cr >> 3) & 0x1F; fg_const = (cg >> 3) & 0x1F; fb_const = (cb >> 3) & 0x1F
+          opaque_pixel = fr_const | (fg_const << 5) | (fb_const << 10)
+          opaque_pixel |= 0x8000 if smb
           (x_start..x_end).each do |x|
             next if x < 0 || x >= VRAM_WIDTH
             idx = row + x
-            next if cmb && (vram[idx] & 0x8000) != 0
-            vram[idx] = pixel
+            bg = vram[idx]
+            next if cmb && (bg & 0x8000) != 0
+            if stp_mode >= 0
+              r5, g5, b5 = stp_blend5(bg, fr_const, fg_const, fb_const, stp_mode)
+              pixel = r5 | (g5 << 5) | (b5 << 10)
+              pixel |= 0x8000 if smb
+              vram[idx] = pixel
+            else
+              vram[idx] = opaque_pixel
+            end
           end
         end
+      end
+    end
+
+    # 5-bit-per-channel semi-transparency blend. Returns [r5, g5, b5].
+    # Mode 0: B/2 + F/2     (50% mix)
+    # Mode 1: B + F         (additive, clamp to 31)
+    # Mode 2: B - F         (subtractive, clamp at 0)
+    # Mode 3: B + F/4       (25% additive)
+    def stp_blend5(bg, fr, fg, fb, mode)
+      br = bg & 0x1F; bgg = (bg >> 5) & 0x1F; bb = (bg >> 10) & 0x1F
+      case mode
+      when 0
+        [(br + fr) >> 1, (bgg + fg) >> 1, (bb + fb) >> 1]
+      when 1
+        r = br + fr; r = 0x1F if r > 0x1F
+        g = bgg + fg; g = 0x1F if g > 0x1F
+        b = bb + fb; b = 0x1F if b > 0x1F
+        [r, g, b]
+      when 2
+        r = br - fr; r = 0 if r < 0
+        g = bgg - fg; g = 0 if g < 0
+        b = bb - fb; b = 0 if b < 0
+        [r, g, b]
+      else
+        r = br + (fr >> 2); r = 0x1F if r > 0x1F
+        g = bgg + (fg >> 2); g = 0x1F if g > 0x1F
+        b = bb + (fb >> 2); b = 0x1F if b > 0x1F
+        [r, g, b]
       end
     end
 
