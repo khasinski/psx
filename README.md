@@ -163,7 +163,7 @@ What works:
 What doesn't:
 
 - No SPU audio synthesis (no sound)
-- Several ps1-tests fail (CD-ROM timing, code-in-IO bus errors)
+- CD-ROM ps1-tests can't run via `bin/psx-test` (no disc image wired)
 - GTE op timing matches nocash per-opcode cycle counts when measured
   through Timer 2 in sysclock mode (see `spec/gte_timing_spec.rb`);
   visual verification against amidog's psxtest_gte OFFICIAL.TIMING
