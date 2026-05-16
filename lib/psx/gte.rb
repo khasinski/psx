@@ -508,8 +508,13 @@ module PSX
     # overflow. Real hardware uses an 8-bit Newton-Raphson approximation table;
     # we just divide normally, which is close enough for boot.
     def unr_divide
+      # nocash: N = ((H * 20000h / SZ3) + 1) / 2, clamped to 17-bit.
+      # The trailing /2 is the part that takes N from a 2.16 quotient back
+      # into the 1.16 fixed point the projection formula expects — without
+      # it every projected vertex was twice as far from OFX/OFY as it
+      # should be, which made the BIOS PS logo render at 2x scale.
       if @h < @sz[3] * 2 && @sz[3] != 0
-        n = ((@h.to_i * 0x20000 + (@sz[3] / 2)) / @sz[3])
+        n = ((@h.to_i * 0x20000 / @sz[3]) + 1) / 2
         return [n, 0x1FFFF].min
       end
       @flag |= FLAG_DIVIDE_OVERFLOW
