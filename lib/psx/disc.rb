@@ -60,6 +60,7 @@ module PSX
       current_file = nil       # currently active FILE handle + path
       current_file_lba = 0     # cumulative LBA of the FILE's start
       tracks = []
+      track_files = []         # parallel to tracks: { io:, lba_start:, length: }
       pending_track = nil
       pending_indexes = nil
 
@@ -73,6 +74,11 @@ module PSX
         pending_track[:lba_start] = file_lba
         pending_track[:file] = current_file[:io]
         tracks << Track.new(**pending_track, lba_length: 0) # length filled in below
+        track_files << {
+          io: current_file[:io],
+          lba_start: current_file_lba,
+          length: current_file[:length_in_lba]
+        }
         pending_track = nil
         pending_indexes = nil
       end
@@ -107,15 +113,18 @@ module PSX
       end
       flush.call
 
-      # Fill in lba_length: each track's length is (next track's lba_start -
-      # this track's lba_start) within the same FILE, or (end of FILE) if it's
-      # the last track in its FILE.
+      # Fill in lba_length: each track ends at the next track's start within
+      # the same FILE, or at the end of its own FILE if it's the last track
+      # in that FILE. (Important for multi-bin cues like Ridge Racer where
+      # every track has its own .bin — without this, every track inherits
+      # the LAST file's end and they all overlap.)
       tracks.each_with_index do |t, i|
         next_t = tracks[i + 1]
         if next_t && next_t.file == t.file
           t.lba_length = next_t.lba_start - t.lba_start
         else
-          file_lba_end = current_file_lba + current_file[:length_in_lba]
+          tf = track_files[i]
+          file_lba_end = tf[:lba_start] + tf[:length]
           t.lba_length = file_lba_end - t.lba_start
         end
       end
