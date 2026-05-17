@@ -455,14 +455,14 @@ module PSX
         if quad
           draw_textured_triangle(points[0], points[1], points[2],
                                  texcoords[0], texcoords[1], texcoords[2],
-                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
           draw_textured_triangle(points[1], points[2], points[3],
                                  texcoords[1], texcoords[2], texcoords[3],
-                                 colors[1], clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+                                 colors[1], clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
         else
           draw_textured_triangle(points[0], points[1], points[2],
                                  texcoords[0], texcoords[1], texcoords[2],
-                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
         end
       else
         if quad
@@ -512,6 +512,7 @@ module PSX
       cmd = @current_cmd
       textured = (cmd & 0x04) != 0
       raw_texture = (cmd & 0x01) != 0
+      semi_transparent = (cmd & 0x02) != 0
       size_mode = (cmd >> 3) & 0x3
 
       c = @cmd_buffer[0]
@@ -558,9 +559,9 @@ module PSX
       end
 
       if textured
-        draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, color, raw_texture)
+        draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, color, raw_texture, semi_transparent)
       else
-        draw_rect(x, y, w, h, color)
+        draw_rect(x, y, w, h, color, semi_transparent)
       end
     end
 
@@ -820,15 +821,17 @@ module PSX
       (((b >> 3) & 0x1F) << 10)
     end
 
-    def draw_rect(x, y, w, h, color)
+    def draw_rect(x, y, w, h, color, semi = false)
       cr = color[:r]; cg = color[:g]; cb = color[:b]
-      pixel = ((cr >> 3) & 0x1F) | (((cg >> 3) & 0x1F) << 5) | (((cb >> 3) & 0x1F) << 10)
+      fr5 = (cr >> 3) & 0x1F; fg5 = (cg >> 3) & 0x1F; fb5 = (cb >> 3) & 0x1F
+      pixel_opaque = fr5 | (fg5 << 5) | (fb5 << 10)
       smb = @set_mask_bit
-      pixel |= 0x8000 if smb
+      pixel_opaque |= 0x8000 if smb
       cmb = @check_mask_bit
       al = @draw_area_left; ar = @draw_area_right
       at = @draw_area_top; ab = @draw_area_bottom
       vram = @vram
+      stp_mode = semi ? @semi_transparency : -1
       h.times do |dy|
         py = y + dy
         next if py < at || py > ab || py < 0 || py >= VRAM_HEIGHT
@@ -837,19 +840,28 @@ module PSX
           px = x + dx
           next if px < al || px > ar || px < 0 || px >= VRAM_WIDTH
           idx = row + px
-          next if cmb && (vram[idx] & 0x8000) != 0
-          vram[idx] = pixel
+          bg = vram[idx]
+          next if cmb && (bg & 0x8000) != 0
+          if stp_mode >= 0
+            r5, g5, b5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
+            pix = r5 | (g5 << 5) | (b5 << 10)
+            pix |= 0x8000 if smb
+            vram[idx] = pix
+          else
+            vram[idx] = pixel_opaque
+          end
         end
       end
     end
 
-    def draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, base_color, raw_texture)
-      br = base_color[:r]; bg = base_color[:g]; bb = base_color[:b]
+    def draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, base_color, raw_texture, semi = false)
+      br = base_color[:r]; bg_c = base_color[:g]; bb = base_color[:b]
       tpx = @texture_page_x; tpy = @texture_page_y; tdp = @texture_depth
       al = @draw_area_left; ar = @draw_area_right
       at = @draw_area_top; ab = @draw_area_bottom
       cmb = @check_mask_bit; smb = @set_mask_bit
       vram = @vram
+      stp_mode = semi ? @semi_transparency : -1
       h.times do |dy|
         py = y + dy
         next if py < at || py > ab || py < 0 || py >= VRAM_HEIGHT
@@ -864,19 +876,29 @@ module PSX
           next if texel == 0
 
           idx = row + px
-          next if cmb && (vram[idx] & 0x8000) != 0
+          bg = vram[idx]
+          next if cmb && (bg & 0x8000) != 0
 
           if raw_texture
-            out = texel
+            fr5 = texel & 0x1F
+            fg5 = (texel >> 5) & 0x1F
+            fb5 = (texel >> 10) & 0x1F
           else
             tr = (texel & 0x001F)
             tg = (texel & 0x03E0) >> 5
             tb = (texel & 0x7C00) >> 10
-            r5 = ((tr * br) >> 7); r5 = 0x1F if r5 > 0x1F
-            g5 = ((tg * bg) >> 7); g5 = 0x1F if g5 > 0x1F
-            b5 = ((tb * bb) >> 7); b5 = 0x1F if b5 > 0x1F
-            out = r5 | (g5 << 5) | (b5 << 10)
+            fr5 = ((tr * br) >> 7); fr5 = 0x1F if fr5 > 0x1F
+            fg5 = ((tg * bg_c) >> 7); fg5 = 0x1F if fg5 > 0x1F
+            fb5 = ((tb * bb) >> 7); fb5 = 0x1F if fb5 > 0x1F
           end
+
+          # Texel STP bit (bit 15) gates semi-transparency on a per-pixel
+          # basis for textured primitives.
+          if stp_mode >= 0 && (texel & 0x8000) != 0
+            fr5, fg5, fb5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
+          end
+
+          out = fr5 | (fg5 << 5) | (fb5 << 10)
           out |= 0x8000 if smb
           vram[idx] = out
         end
@@ -1119,7 +1141,7 @@ module PSX
     end
 
     # Draw textured triangle with UV interpolation
-    def draw_textured_triangle(p0, p1, p2, t0, t1, t2, base_color, clut, tex_page_x, tex_page_y, tex_depth, raw_texture)
+    def draw_textured_triangle(p0, p1, p2, t0, t1, t2, base_color, clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi = false)
       # Extract CLUT position
       clut_x = (clut & 0x3F) * 16
       clut_y = (clut >> 6) & 0x1FF
@@ -1171,12 +1193,13 @@ module PSX
         inv_span = x_span > 0 ? 1.0 / x_span : 0
         du = u2 - u1
         dv = v2_tex - v1_tex
-        br = base_color[:r]; bg = base_color[:g]; bb = base_color[:b]
+        br = base_color[:r]; bg_c = base_color[:g]; bb = base_color[:b]
         next if y < @draw_area_top || y > @draw_area_bottom || y < 0 || y >= VRAM_HEIGHT
         row = y * VRAM_WIDTH
         al = @draw_area_left; ar = @draw_area_right
         cmb = @check_mask_bit; smb = @set_mask_bit
         vram = @vram
+        stp_mode = semi ? @semi_transparency : -1
         (x_start..x_end).each do |x|
           next if x < al || x > ar || x < 0 || x >= VRAM_WIDTH
 
@@ -1188,19 +1211,27 @@ module PSX
           next if texel == 0
 
           idx = row + x
-          next if cmb && (vram[idx] & 0x8000) != 0
+          bg = vram[idx]
+          next if cmb && (bg & 0x8000) != 0
 
           if raw_texture
-            out = texel
+            fr5 = texel & 0x1F
+            fg5 = (texel >> 5) & 0x1F
+            fb5 = (texel >> 10) & 0x1F
           else
             tr = (texel & 0x001F)
             tg = (texel & 0x03E0) >> 5
             tb = (texel & 0x7C00) >> 10
-            r5 = ((tr * br) >> 7); r5 = 0x1F if r5 > 0x1F
-            g5 = ((tg * bg) >> 7); g5 = 0x1F if g5 > 0x1F
-            b5 = ((tb * bb) >> 7); b5 = 0x1F if b5 > 0x1F
-            out = r5 | (g5 << 5) | (b5 << 10)
+            fr5 = ((tr * br) >> 7); fr5 = 0x1F if fr5 > 0x1F
+            fg5 = ((tg * bg_c) >> 7); fg5 = 0x1F if fg5 > 0x1F
+            fb5 = ((tb * bb) >> 7); fb5 = 0x1F if fb5 > 0x1F
           end
+
+          if stp_mode >= 0 && (texel & 0x8000) != 0
+            fr5, fg5, fb5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
+          end
+
+          out = fr5 | (fg5 << 5) | (fb5 << 10)
           out |= 0x8000 if smb
           vram[idx] = out
         end
