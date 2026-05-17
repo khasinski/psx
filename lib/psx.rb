@@ -17,6 +17,7 @@ require_relative "psx/memory"
 require_relative "psx/cpu"
 require_relative "psx/disasm"
 require_relative "psx/display"
+require_relative "psx/audio"
 
 module PSX
   class Emulator
@@ -55,6 +56,20 @@ module PSX
     # Insert (or eject, with nil) a disc after construction.
     def load_disc(path)
       @cdrom.disc = path ? Disc.open(path) : nil
+    end
+
+    # Open the host audio device (44.1 kHz S16LE stereo) and wire the
+    # CDROM to push CDDA sectors into it. No-op if audio init fails —
+    # the emulator still runs, just silent. Idempotent.
+    def enable_cdda_audio!
+      return if @audio_dev
+      SDL2.init(SDL2::INIT_AUDIO) if defined?(SDL2)
+      @audio_dev = Audio.open_device(freq: 44_100, channels: 2)
+      if @audio_dev
+        @cdrom.cdda_sink = ->(bytes) { Audio.queue(@audio_dev, bytes) }
+      else
+        warn "Audio: failed to open device, running silent"
+      end
     end
 
     # Fast-boot: get a PS-EXE running on top of the BIOS without making the
@@ -214,6 +229,11 @@ module PSX
       display = Display.new(title: "PSX-Ruby - Loading BIOS...")
       @controller_state_proc = -> { display.controller_state }
       render_interval = 1.0 / target_fps
+
+      # Audio output. Failure is non-fatal — we just run silent if no
+      # audio device is available. CDDA samples are 44.1 kHz S16LE stereo,
+      # which is exactly what SDL queues without resampling.
+      enable_cdda_audio!
 
       # Run many cycles between renders for speed
       cycles_per_chunk = 100_000  # Smaller chunks for better responsiveness

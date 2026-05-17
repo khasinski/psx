@@ -174,6 +174,33 @@ module PSX
       data
     end
 
+    # Read the raw 2352 bytes of an AUDIO sector at the given LBA. Format
+    # is interleaved 16-bit signed stereo at 44.1 kHz — exactly the SDL
+    # AUDIO_S16LSB byte stream we feed into the host audio queue, no
+    # conversion needed.
+    #
+    # Returns 2352 zero bytes (silence) for LBAs that fall in a pregap
+    # between two audio tracks — real CD hardware plays silence through
+    # those gaps rather than stopping. Returns nil only when the LBA is
+    # past the last track on the disc, or on a data track.
+    SILENT_SECTOR = ("\x00" * 2352).b.freeze
+    def read_audio_sector(lba)
+      track = track_for_lba(lba)
+      if track.nil?
+        # Could be a between-track pregap or off the disc. Distinguish.
+        return nil if lba >= total_sectors
+        return SILENT_SECTOR
+      end
+      return nil unless track.audio?
+
+      file_lba = track.file_lba_start + (lba - track.lba_start)
+      offset = file_lba * track.sector_size
+      track.file.seek(offset)
+      data = track.file.read(track.sector_size)
+      return nil unless data && data.bytesize == track.sector_size
+      data
+    end
+
     # 2048-byte user-data slice of a sector. For MODE2/2352 (the default)
     # the layout is:
     #   [12 sync][3 header MSF][1 mode][8 sub-header][2048 user][280 ECC]

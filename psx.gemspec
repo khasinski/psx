@@ -43,6 +43,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "ruby-sdl2", "~> 0.3"
+  spec.add_dependency "ffi", "~> 1.16"
 
   spec.add_development_dependency "minitest", "~> 5"
   spec.add_development_dependency "rake", "~> 13"

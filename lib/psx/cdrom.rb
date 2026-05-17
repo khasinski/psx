@@ -44,10 +44,12 @@ module PSX
     DEFAULT_STAT_NO_DISC = SF_SHELL_OPEN
 
     attr_reader :stat
+    attr_accessor :cdda_sink   # callable: receives 2352-byte stereo S16LE chunks
 
     def initialize(interrupts:, disc: nil)
       @interrupts = interrupts
       @disc = disc
+      @cdda_sink = nil
       reset
     end
 
@@ -79,6 +81,13 @@ module PSX
       @bfrd_active = false
       @want_seek = false
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
+
+      # CDDA (redbook audio) playback state. Independent of @reading so a
+      # game can stream both data and audio if it ever needs to — the data
+      # streamer ignores audio tracks anyway.
+      @cdda_playing = false
+      @cdda_lba = 0
+      @cdda_cycles = 0
     end
 
     # --- Bus interface ------------------------------------------------------
@@ -175,7 +184,12 @@ module PSX
         end
       end
 
-      # 2. Streaming reads (INT1 sectors).
+      # 2. CDDA audio streaming. Independent of data reads and IRQs — audio
+      # samples flow into the host audio queue regardless of what the
+      # command path is doing.
+      tick_cdda(cycles)
+
+      # 3. Streaming reads (INT1 sectors).
       return unless @reading && @disc && @irq_flags == 0
       @sector_cycles -= cycles
       return if @sector_cycles > 0
@@ -205,6 +219,27 @@ module PSX
       @interrupts&.request(Interrupts::IRQ_CDROM) if (@irq_enable & @irq_flags) != 0
     end
 
+    # Advance CDDA playback by `cycles` CPU cycles. Reads one audio sector
+    # per CYCLES_PER_SECTOR (1×/2× depending on @speed_2x) and forwards it
+    # to the host audio sink as 2352 bytes of S16LE stereo PCM.
+    def tick_cdda(cycles)
+      return unless @cdda_playing && @disc
+
+      period = @speed_2x ? CYCLES_PER_SECTOR_2X : CYCLES_PER_SECTOR_1X
+      @cdda_cycles -= cycles
+      while @cdda_cycles <= 0
+        bytes = @disc.read_audio_sector(@cdda_lba)
+        if bytes.nil?
+          @cdda_playing = false
+          @stat &= ~SF_PLAYING_CDDA
+          break
+        end
+        @cdda_sink&.call(bytes)
+        @cdda_lba += 1
+        @cdda_cycles += period
+      end
+    end
+
     private
 
     def status
@@ -232,6 +267,7 @@ module PSX
       case cmd
       when 0x01 then cmd_getstat
       when 0x02 then cmd_setloc(params)
+      when 0x03 then cmd_play(params)
       when 0x06 then cmd_read
       when 0x07 then cmd_motor_on
       when 0x08 then cmd_stop
@@ -294,6 +330,38 @@ module PSX
       queue_response(0, 3, [@stat])
     end
 
+    # CdlPlay — start streaming CDDA audio. With a parameter byte: play
+    # from the start of that track number (BCD). With no parameter: play
+    # from the LBA last given to SetLoc, or continue from where we left
+    # off. We don't drop data reads (the @reading streamer just stops on
+    # its own when the LBA hits an audio track).
+    def cmd_play(params)
+      if @disc.nil?
+        queue_response(0, 3, [@stat])
+        queue_response(CYCLES_PER_RESPONSE * 2, 5, [SF_ERROR | @stat, 0x80])
+        return
+      end
+
+      if !params.empty? && params[0] != 0
+        track_no = Disc.from_bcd(params[0])
+        track = @disc.tracks.find { |t| t.number == track_no }
+        @cdda_lba = track ? track.lba_start : @seek_lba
+      else
+        # No param: play from the position last given to SetLoc. Real
+        # hardware doesn't care about @want_seek here — intermediate data
+        # reads / pauses may have consumed it but the laser-target LBA is
+        # still the seek_lba value.
+        @cdda_lba = @seek_lba
+        @want_seek = false
+      end
+
+      @cdda_playing = true
+      @cdda_cycles = CYCLES_FIRST_SECTOR
+      @stat |= SF_MOTOR_ON | SF_PLAYING_CDDA
+      @stat &= ~SF_READING
+      queue_response(0, 3, [@stat])
+    end
+
     def cmd_motor_on
       @stat |= SF_MOTOR_ON
       queue_response(0, 3, [@stat])
@@ -302,7 +370,8 @@ module PSX
 
     def cmd_stop
       @reading = false
-      @stat &= ~(SF_READING | SF_MOTOR_ON)
+      @cdda_playing = false
+      @stat &= ~(SF_READING | SF_MOTOR_ON | SF_PLAYING_CDDA)
       queue_response(0, 3, [@stat])
       queue_response(CYCLES_PER_RESPONSE * 2, 2, [@stat])
     end
@@ -318,7 +387,8 @@ module PSX
         deliver_pending_sector
       end
       @reading = false
-      @stat &= ~SF_READING
+      @cdda_playing = false
+      @stat &= ~(SF_READING | SF_PLAYING_CDDA)
       queue_response(0, 3, [@stat])
       # Pause's INT2 lands after the current sector finishes. Give the BIOS
       # time to drain the data FIFO before INT2 arrives.
