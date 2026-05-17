@@ -57,14 +57,25 @@ module PSX
       @cdrom.disc = path ? Disc.open(path) : nil
     end
 
-    # Fast-boot: skip the BIOS shell's license screen, read the EXE
-    # straight from the disc image, and jump to its entry point. The BIOS
-    # kernel still gets a chance to set up the A/B/C jump tables and
-    # exception handlers via `boot_cycles` of normal execution before the
-    # hand-off; the PS-EXE relies on those for any kernel API call.
+    # Fast-boot: get a PS-EXE running on top of the BIOS without making the
+    # user sit through the Sony splash. Two strategies, picked at runtime:
+    #
+    # 1. Retail disc with a valid Sony license image. The BIOS bootstrap
+    #    loader will reach "Execute !" all on its own and call Exec(),
+    #    which sets up the kernel's CD callbacks and event hooks before
+    #    handing control to the disc's PS-EXE. We just run the BIOS in
+    #    chunks until that marker hits the TTY, then return -- the BIOS
+    #    has already done everything load_psexe would do, but with the
+    #    full kernel state the disc expects.
+    #
+    # 2. Synthetic / homebrew disc with no license image. The BIOS won't
+    #    boot it, so "Execute !" never appears. We fall back to running
+    #    `boot_cycles` of BIOS init and then manually loading the EXE.
+    #    Kernel state is bare, but homebrew tests (amidog, ps1-tests,
+    #    PCSX-Redux demos) don't use the BIOS kernel CD library anyway.
     #
     # Returns the parsed BOOT path from SYSTEM.CNF for diagnostics.
-    def fast_boot_from_disc(boot_cycles: 6_000_000)
+    def fast_boot_from_disc(boot_cycles: 6_000_000, max_bios_cycles: 300_000_000)
       raise "no disc loaded" unless @cdrom.disc
 
       iso = ISO9660.new(@cdrom.disc)
@@ -75,7 +86,37 @@ module PSX
       exe_path = m[1].strip.sub(/\Acdrom:/i, "")
       exe_bytes = iso.read_file(exe_path)
 
-      run(steps: boot_cycles)
+      # Watch TTY for the bootstrap loader's "Execute !" marker.
+      saw_execute = false
+      tty_buf = +""
+      orig_handler = @cpu.tty_handler
+      @cpu.tty_handler = ->(kind, val) do
+        s = (kind == :char ? val.chr : val.to_s)
+        tty_buf << s
+        saw_execute ||= tty_buf.include?("Execute !")
+        orig_handler&.call(kind, val)
+      end
+
+      cycles_run = 0
+      chunk = 1_000_000
+      while cycles_run < max_bios_cycles && !saw_execute
+        step = [chunk, max_bios_cycles - cycles_run].min
+        run(steps: step)
+        cycles_run += step
+      end
+      @cpu.tty_handler = orig_handler
+
+      if saw_execute
+        # BIOS reached Exec(); it has set up the kernel CD events and is
+        # about to jump to the disc's PS-EXE. Nothing more to do.
+        return exe_path
+      end
+
+      # No license image (or BIOS gave up before max_bios_cycles).
+      # Top up to at least boot_cycles, then inject the EXE manually.
+      if cycles_run < boot_cycles
+        run(steps: boot_cycles - cycles_run)
+      end
       load_psexe(exe_bytes)
       exe_path
     end
