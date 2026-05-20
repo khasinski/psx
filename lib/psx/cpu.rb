@@ -504,14 +504,16 @@ module PSX
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
       shamt = (instruction >> 6) & 0x1F
-      set_reg(rd, @regs[rt] << shamt)
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rt] << shamt) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_srl(instruction)
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
       shamt = (instruction >> 6) & 0x1F
-      set_reg(rd, @regs[rt] >> shamt)
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rt] >> shamt) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_sra(instruction)
@@ -656,7 +658,8 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, @regs[rs] + @regs[rt])
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rs] + @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_sub(instruction)
@@ -677,51 +680,58 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, @regs[rs] - @regs[rt])
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rs] - @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_and(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, @regs[rs] & @regs[rt])
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rs] & @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_or(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, @regs[rs] | @regs[rt])
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rs] | @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_xor(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, @regs[rs] ^ @regs[rt])
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rs] ^ @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_nor(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, ~(@regs[rs] | @regs[rt]))
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (~(@regs[rs] | @regs[rt])) & 0xFFFF_FFFF if rd != 0
     end
 
     def op_slt(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      a = sign_extend32(@regs[rs])
-      b = sign_extend32(@regs[rt])
-      set_reg(rd, a < b ? 1 : 0)
+      a = @regs[rs]; a -= 0x1_0000_0000 if (a & 0x8000_0000) != 0
+      b = @regs[rt]; b -= 0x1_0000_0000 if (b & 0x8000_0000) != 0
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (a < b ? 1 : 0) if rd != 0
     end
 
     def op_sltu(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      set_reg(rd, @regs[rs] < @regs[rt] ? 1 : 0)
+      @load_delay_reg = 0 if @load_delay_reg == rd
+      @regs[rd] = (@regs[rs] < @regs[rt] ? 1 : 0) if rd != 0
     end
 
     # I-type operations (decode inlined for performance)
@@ -791,22 +801,29 @@ module PSX
     def op_lui(instruction)
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      set_reg(rt, imm << 16)
+      @load_delay_reg = 0 if @load_delay_reg == rt
+      @regs[rt] = (imm << 16) & 0xFFFF_FFFF if rt != 0
     end
 
     # Branch operations (decode inlined)
     def op_beq(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
-      imm = instruction & 0xFFFF
-      branch(sign_extend16(imm) << 2) if @regs[rs] == @regs[rt]
+      if @regs[rs] == @regs[rt]
+        imm = instruction & 0xFFFF
+        imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+        @branch_target = (@pc + (imm << 2)) & 0xFFFF_FFFF
+      end
     end
 
     def op_bne(instruction)
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
-      imm = instruction & 0xFFFF
-      branch(sign_extend16(imm) << 2) if @regs[rs] != @regs[rt]
+      if @regs[rs] != @regs[rt]
+        imm = instruction & 0xFFFF
+        imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+        @branch_target = (@pc + (imm << 2)) & 0xFFFF_FFFF
+      end
     end
 
     def op_blez(instruction)
@@ -869,12 +886,14 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0  # sign-extend
+      addr = (@regs[rs] + imm) & 0xFFFF_FFFF
       if (addr & 3) != 0
         exception(COP0::EXC_ADEL, bad_addr: addr)
         return
       end
-      set_reg_delayed(rt, @memory.read32(addr))
+      @load_delay_reg = rt
+      @load_delay_value = @memory.read32(addr) & 0xFFFF_FFFF
       @step_cycles += 2
     end
 
@@ -968,7 +987,8 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      addr = (@regs[rs] + sign_extend16(imm)) & 0xFFFF_FFFF
+      imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0  # sign-extend
+      addr = (@regs[rs] + imm) & 0xFFFF_FFFF
       if (addr & 3) != 0
         exception(COP0::EXC_ADES, bad_addr: addr)
         return
