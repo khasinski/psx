@@ -959,10 +959,21 @@ module PSX
         col2 = col0
       end
 
-      # Rasterize
-      (v0[:y].to_i..v2[:y].to_i).each do |y|
-        next if y < @draw_area_top || y > @draw_area_bottom
+      # Rasterize. Pre-clamp y to the draw area + VRAM bounds so the inner
+      # loops can drop their per-scanline bounds checks. The `while (y += 1)`
+      # idiom keeps `next` semantics from the original each-block.
+      y_lo = v0[:y].to_i
+      y_hi = v2[:y].to_i
+      y_lo = @draw_area_top    if y_lo < @draw_area_top
+      y_hi = @draw_area_bottom if y_hi > @draw_area_bottom
+      y_lo = 0                 if y_lo < 0
+      y_hi = VRAM_HEIGHT - 1   if y_hi > VRAM_HEIGHT - 1
+      cmb = @check_mask_bit; smb = @set_mask_bit
+      vram = @vram
+      stp_mode = semi ? @semi_transparency : -1
 
+      y = y_lo - 1
+      while (y += 1) <= y_hi
         # Find X bounds for this scanline
         if y < v1[:y]
           # Upper part of triangle
@@ -989,22 +1000,19 @@ module PSX
         end
 
         # Draw scanline — inline draw_pixel to skip method-call overhead.
+        # x_start/x_end clamp to [draw_area_left, draw_area_right], which
+        # are themselves in [0, VRAM_WIDTH); no per-pixel bounds check.
         x_start = [x1.to_i, @draw_area_left].max
         x_end = [x2.to_i, @draw_area_right].min
-        next if y < 0 || y >= VRAM_HEIGHT
         row = y * VRAM_WIDTH
-        cmb = @check_mask_bit; smb = @set_mask_bit
-        vram = @vram
-
-        stp_mode = semi ? @semi_transparency : -1
 
         if gouraud && x2 != x1
           inv_w = 1.0 / (x2 - x1)
           lr = c_left[:r]; lg = c_left[:g]; lb = c_left[:b]
           rr = c_right[:r]; rg = c_right[:g]; rb = c_right[:b]
           dr = rr - lr; dg = rg - lg; db = rb - lb
-          (x_start..x_end).each do |x|
-            next if x < 0 || x >= VRAM_WIDTH
+          x = x_start - 1
+          while (x += 1) <= x_end
             idx = row + x
             bg = vram[idx]
             next if cmb && (bg & 0x8000) != 0
@@ -1025,8 +1033,8 @@ module PSX
           fr_const = (cr >> 3) & 0x1F; fg_const = (cg >> 3) & 0x1F; fb_const = (cb >> 3) & 0x1F
           opaque_pixel = fr_const | (fg_const << 5) | (fb_const << 10)
           opaque_pixel |= 0x8000 if smb
-          (x_start..x_end).each do |x|
-            next if x < 0 || x >= VRAM_WIDTH
+          x = x_start - 1
+          while (x += 1) <= x_end
             idx = row + x
             bg = vram[idx]
             next if cmb && (bg & 0x8000) != 0
@@ -1154,10 +1162,23 @@ module PSX
 
       return if v2[:y] == v0[:y]  # Degenerate triangle
 
-      # Rasterize with UV interpolation
-      (v0[:y].to_i..v2[:y].to_i).each do |y|
-        next if y < @draw_area_top || y > @draw_area_bottom
+      # Rasterize with UV interpolation. y pre-clamped so the per-scanline
+      # y bounds check is gone; inner x loop's bounds check is also dead
+      # because x_start/x_end are already clamped to [draw_area_left,
+      # draw_area_right] which sits inside [0, VRAM_WIDTH).
+      y_lo = v0[:y].to_i
+      y_hi = v2[:y].to_i
+      y_lo = @draw_area_top    if y_lo < @draw_area_top
+      y_hi = @draw_area_bottom if y_hi > @draw_area_bottom
+      y_lo = 0                 if y_lo < 0
+      y_hi = VRAM_HEIGHT - 1   if y_hi > VRAM_HEIGHT - 1
+      cmb = @check_mask_bit; smb = @set_mask_bit
+      vram = @vram
+      stp_mode = semi ? @semi_transparency : -1
+      br = base_color[:r]; bg_c = base_color[:g]; bb = base_color[:b]
 
+      y = y_lo - 1
+      while (y += 1) <= y_hi
         # Find X bounds and interpolate UVs for this scanline
         if y < v1[:y]
           next if v1[:y] == v0[:y]
@@ -1193,16 +1214,10 @@ module PSX
         inv_span = x_span > 0 ? 1.0 / x_span : 0
         du = u2 - u1
         dv = v2_tex - v1_tex
-        br = base_color[:r]; bg_c = base_color[:g]; bb = base_color[:b]
-        next if y < @draw_area_top || y > @draw_area_bottom || y < 0 || y >= VRAM_HEIGHT
         row = y * VRAM_WIDTH
-        al = @draw_area_left; ar = @draw_area_right
-        cmb = @check_mask_bit; smb = @set_mask_bit
-        vram = @vram
-        stp_mode = semi ? @semi_transparency : -1
-        (x_start..x_end).each do |x|
-          next if x < al || x > ar || x < 0 || x >= VRAM_WIDTH
 
+        x = x_start - 1
+        while (x += 1) <= x_end
           t = (x - x1) * inv_span
           u = (u1 + du * t).to_i & 0xFF
           v_coord = (v1_tex + dv * t).to_i & 0xFF
