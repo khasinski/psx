@@ -1,0 +1,283 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Visualize where time goes during a BIOS boot run (the window that
+# covers power-on through the Sony logo). Runs the emulator twice:
+#
+#   Pass 1 (host):  stackprof CPU sampler -> tmp/bios-boot.dump
+#                   + d3 flame graph        -> tmp/bios-boot-flame.html
+#   Pass 2 (guest): tally PC region buckets and MIPS primary opcodes
+#                   while the emulator runs (no stackprof overhead).
+#
+# Both passes feed into a single markdown report at
+# tmp/bios-boot-report.md with ASCII bar charts. The flame graph is the
+# headline artifact -- the markdown is the at-a-glance summary.
+#
+# Defaults to 80M emulated cycles, which on this emulator comfortably
+# covers boot through the Sony-logo fade. Tune via PSX_CYCLES.
+#
+# Usage:
+#   bundle exec bin/_psx-bootmap
+#   PSX_CYCLES=120_000_000 bundle exec bin/_psx-bootmap
+#   PSX_BIOS=SCPH7502.BIN  bundle exec bin/_psx-bootmap
+
+require "stackprof"
+require "fileutils"
+require "shellwords"
+
+bios   = ENV["PSX_BIOS"]   || "SCPH1001.BIN"
+cycles = Integer((ENV["PSX_CYCLES"] || "80_000_000").gsub("_", ""))
+out_dir = ENV["PSX_BOOTMAP_DIR"] || "tmp"
+dump_path   = File.join(out_dir, "bios-boot.dump")
+flame_path  = File.join(out_dir, "bios-boot-flame.html")
+report_path = File.join(out_dir, "bios-boot-report.md")
+
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+FileUtils.mkdir_p(out_dir)
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+# ---------------------------------------------------------------------------
+# Pass 1: stackprof host profile.
+# ---------------------------------------------------------------------------
+warn "[1/2] stackprof pass: #{cycles} cycles…"
+emu = PSX::Emulator.new(bios)
+
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+StackProf.run(mode: :cpu, raw: true, interval: 1000, out: dump_path) do
+  emu.run(steps: cycles)
+end
+pass1_secs = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+pass1_mhz = (cycles / pass1_secs) / 1_000_000.0
+pass1_pc  = emu.cpu.pc
+
+# Render the d3 flame graph to a standalone HTML file.
+flame_ok = system("bundle exec stackprof #{dump_path.shellescape} --d3-flamegraph > #{flame_path.shellescape}")
+warn "  flame graph: #{flame_path}" if flame_ok
+
+# Parse the dump for the markdown report's text tables.
+report = StackProf::Report.new(Marshal.load(IO.binread(dump_path)))
+total_samples = report.data[:samples].to_i
+
+# Sort frames by self/total samples to pick top-N for the markdown. The
+# total-time view filters to frames inside the emulator -- otherwise it's
+# saturated with Bundler/Stackprof boilerplate that adds no information.
+frames = report.data[:frames].values
+emu_frames = frames.select { |f| (f[:file] || "").include?("/lib/psx") }
+by_self  = frames.sort_by { |f| -f[:samples].to_i }.first(20)
+by_total = emu_frames.sort_by { |f| -f[:total_samples].to_i }.first(20)
+
+# ---------------------------------------------------------------------------
+# Pass 2: guest-side PC + opcode tally.
+# ---------------------------------------------------------------------------
+warn "[2/2] guest tally pass: #{cycles} cycles…"
+
+# Fresh emulator -- pass 1 already consumed cycles and we want the same
+# boot window measured both ways.
+emu2 = PSX::Emulator.new(bios)
+cpu  = emu2.cpu
+mem  = emu2.memory
+
+pc_buckets = Hash.new(0)   # key: pc>>16 (64KB chunk), val: count
+opcode_hist = Array.new(64, 0)
+special_hist = Array.new(64, 0)  # SPECIAL func field when primary==0
+regimm_hist  = Array.new(32, 0)  # REGIMM rt   field when primary==1
+
+# Stash the original step then wrap it. Using define_singleton_method so
+# we don't have to muck with the class definition; the cost is real but
+# pass 2 does NOT feed into stackprof so the slowdown is acceptable.
+orig_step = cpu.method(:step)
+cpu.define_singleton_method(:step) do
+  pc = @pc
+  pc_buckets[pc >> 16] += 1
+  instr = mem.fetch32(pc)
+  # Skip NOPs (instruction word 0 = canonical SLL r0,r0,0) -- step() does
+  # not dispatch them, so counting them buries every other SPECIAL stat.
+  if instr && instr != 0
+    primary = (instr >> 26) & 0x3F
+    opcode_hist[primary] += 1
+    case primary
+    when 0x00 then special_hist[instr & 0x3F] += 1
+    when 0x01 then regimm_hist[(instr >> 16) & 0x1F] += 1
+    end
+  end
+  orig_step.call
+end
+
+t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+emu2.run(steps: cycles)
+pass2_secs = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t1
+
+# ---------------------------------------------------------------------------
+# Helpers for the markdown report.
+# ---------------------------------------------------------------------------
+def bar(pct, width: 36)
+  filled = (pct / 100.0 * width).round
+  "█" * filled + "·" * (width - filled)
+end
+
+def fmt_pct(n, total)
+  return "0.00%" if total.zero?
+  format("%5.2f%%", 100.0 * n / total)
+end
+
+# 64KB bucket -> human-readable region label. PSX KUSEG/KSEG0/KSEG1 alias
+# the same physical memory, so we mask the top bits to canonicalize.
+def label_pc_bucket(bucket)
+  base = bucket << 16
+  phys = base & 0x1FFF_FFFF
+  case phys
+  when 0x0000_0000..0x007F_FFFF
+    seg = (base >> 29) & 0x7
+    seg_name = { 0 => "KUSEG", 4 => "KSEG0", 5 => "KSEG1" }[seg] || "seg#{seg}"
+    format("RAM   %08X..%08X  (%s)", base, base | 0xFFFF, seg_name)
+  when 0x1FC0_0000..0x1FC7_FFFF
+    seg = (base >> 29) & 0x7
+    seg_name = { 4 => "KSEG0", 5 => "KSEG1" }[seg] || "seg#{seg}"
+    format("BIOS  %08X..%08X  (%s)", base, base | 0xFFFF, seg_name)
+  else
+    format("?     %08X..%08X", base, base | 0xFFFF)
+  end
+end
+
+OPCODE_NAMES = {
+  0x00 => "SPECIAL", 0x01 => "REGIMM", 0x02 => "J",     0x03 => "JAL",
+  0x04 => "BEQ",     0x05 => "BNE",    0x06 => "BLEZ",  0x07 => "BGTZ",
+  0x08 => "ADDI",    0x09 => "ADDIU",  0x0A => "SLTI",  0x0B => "SLTIU",
+  0x0C => "ANDI",    0x0D => "ORI",    0x0E => "XORI",  0x0F => "LUI",
+  0x10 => "COP0",    0x11 => "COP1",   0x12 => "COP2",  0x13 => "COP3",
+  0x20 => "LB",      0x21 => "LH",     0x22 => "LWL",   0x23 => "LW",
+  0x24 => "LBU",     0x25 => "LHU",    0x26 => "LWR",
+  0x28 => "SB",      0x29 => "SH",     0x2A => "SWL",   0x2B => "SW",
+  0x2E => "SWR",     0x32 => "LWC2",   0x3A => "SWC2"
+}.freeze
+
+SPECIAL_NAMES = {
+  0x00 => "SLL",     0x02 => "SRL",    0x03 => "SRA",
+  0x04 => "SLLV",    0x06 => "SRLV",   0x07 => "SRAV",
+  0x08 => "JR",      0x09 => "JALR",   0x0C => "SYSCALL", 0x0D => "BREAK",
+  0x10 => "MFHI",    0x11 => "MTHI",   0x12 => "MFLO",   0x13 => "MTLO",
+  0x18 => "MULT",    0x19 => "MULTU",  0x1A => "DIV",    0x1B => "DIVU",
+  0x20 => "ADD",     0x21 => "ADDU",   0x22 => "SUB",    0x23 => "SUBU",
+  0x24 => "AND",     0x25 => "OR",     0x26 => "XOR",    0x27 => "NOR",
+  0x2A => "SLT",     0x2B => "SLTU"
+}.freeze
+
+# ---------------------------------------------------------------------------
+# Build the markdown report.
+# ---------------------------------------------------------------------------
+md = String.new
+md << <<~HEADER
+  # BIOS boot hot-path map
+
+  - BIOS:                #{bios}
+  - Cycles measured:     #{cycles} (~#{(cycles / 33_868_800.0).round(2)} s emulated)
+  - Pass 1 (stackprof):  #{format("%.2fs wall, %.2f MHz", pass1_secs, pass1_mhz)}
+  - Pass 2 (guest tally):#{format(" %.2fs wall", pass2_secs)}
+  - End PC after pass 1: #{format("0x%08X", pass1_pc)}
+  - Flame graph (HTML):  `#{flame_path}`
+  - Stackprof dump:      `#{dump_path}`
+
+  ## Host-side hotspots (Ruby self-time)
+
+  Where the host VM actually spent its sampling intervals. These are the
+  methods to optimize in the emulator.
+
+  | %      |  samples | method                                                  | file:line |
+  | -----: | -------: | :------------------------------------------------------ | :-------- |
+HEADER
+
+by_self.each do |f|
+  pct = total_samples.zero? ? 0.0 : 100.0 * f[:samples].to_i / total_samples
+  loc = "#{(f[:file] || "").sub(Dir.pwd + "/", "")}:#{f[:line]}"
+  md << format("| %5.2f%% | %8d | `%s` | `%s` |\n",
+               pct, f[:samples].to_i, f[:name], loc)
+end
+
+md << "\n## Host-side hotspots (Ruby total-time, callers included)\n\n"
+md << "| %      |   total | method |\n| -----: | ------: | :----- |\n"
+by_total.each do |f|
+  pct = total_samples.zero? ? 0.0 : 100.0 * f[:total_samples].to_i / total_samples
+  md << format("| %5.2f%% | %7d | `%s` |\n", pct, f[:total_samples].to_i, f[:name])
+end
+
+# ---- Guest PC region bar chart -------------------------------------------------
+md << "\n## Guest PC distribution (64KB buckets)\n\n"
+md << "Where the *emulated* MIPS program counter spent its time. Big BIOS\n"
+md << "buckets mean lots of kernel code; RAM buckets mean code that the\n"
+md << "BIOS copied to and is now executing from RAM (typical for the boot\n"
+md << "shell, dispatch table thunks, etc.).\n\n"
+md << "```\n"
+total_pc = pc_buckets.values.sum
+top_pc = pc_buckets.sort_by { |_, v| -v }.first(20)
+top_pc.each do |bucket, n|
+  pct = 100.0 * n / total_pc
+  md << format("%-44s %s %5.2f%% (%d)\n",
+               label_pc_bucket(bucket), bar(pct), pct, n)
+end
+md << "```\n"
+md << "\n_Top 20 of #{pc_buckets.size} buckets; #{format('%.2f%%', 100.0 * top_pc.sum { |_, v| v } / total_pc)} of executed PCs shown._\n"
+
+# ---- Opcode mix ---------------------------------------------------------------
+md << "\n## MIPS opcode mix (primary opcode)\n\n"
+md << "Helps spot which emulated instructions dominate: lots of LW/SW means\n"
+md << "memory loop work, lots of branches means tight inner loops, etc.\n\n"
+md << "```\n"
+total_op = opcode_hist.sum
+op_pairs = opcode_hist.each_with_index.to_a.sort_by { |c, _| -c }
+op_pairs.first(20).each do |count, op|
+  next if count.zero?
+  pct = 100.0 * count / total_op
+  name = OPCODE_NAMES[op] || format("op_%02X", op)
+  md << format("%-9s (0x%02X)  %s %5.2f%% (%d)\n", name, op, bar(pct), pct, count)
+end
+md << "```\n"
+
+# Break down SPECIAL further -- a huge SPECIAL bar tells us nothing on its own.
+md << "\n### SPECIAL function breakdown\n\n```\n"
+total_sp = special_hist.sum
+sp_pairs = special_hist.each_with_index.to_a.sort_by { |c, _| -c }
+sp_pairs.first(15).each do |count, func|
+  next if count.zero?
+  pct = 100.0 * count / total_sp
+  name = SPECIAL_NAMES[func] || format("func_%02X", func)
+  md << format("%-9s (0x%02X)  %s %5.2f%% (%d)\n", name, func, bar(pct), pct, count)
+end
+md << "```\n"
+
+File.write(report_path, md)
+
+# ---------------------------------------------------------------------------
+# Terminal summary.
+# ---------------------------------------------------------------------------
+puts
+puts format("BIOS:   %s", bios)
+puts format("Cycles: %d (~%.2f s emulated)", cycles, cycles / 33_868_800.0)
+puts format("Pass 1: %.2fs wall (%.2f MHz)", pass1_secs, pass1_mhz)
+puts format("Pass 2: %.2fs wall (instrumented)", pass2_secs)
+puts
+puts "Top 10 Ruby self-time:"
+by_self.first(10).each do |f|
+  pct = total_samples.zero? ? 0.0 : 100.0 * f[:samples].to_i / total_samples
+  puts format("  %5.2f%%  %s", pct, f[:name])
+end
+puts
+puts "Top 5 PC regions:"
+top_pc.first(5).each do |bucket, n|
+  pct = 100.0 * n / total_pc
+  puts format("  %5.2f%%  %s", pct, label_pc_bucket(bucket))
+end
+puts
+puts "Top 5 opcodes:"
+op_pairs.first(5).each do |count, op|
+  next if count.zero?
+  pct = 100.0 * count / total_op
+  name = OPCODE_NAMES[op] || format("op_%02X", op)
+  puts format("  %5.2f%%  %s", pct, name)
+end
+puts
+puts "Wrote:"
+puts "  #{report_path}"
+puts "  #{flame_path}    (open #{flame_path})"
+puts "  #{dump_path}"
