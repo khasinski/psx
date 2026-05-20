@@ -164,21 +164,26 @@ module PSX
       dma = @dma
       cdrom = @cdrom
       tick_threshold = 64
+      timer_acc = 0
       while remaining > 0
         remaining -= 1
         cpu.step
 
         # Inlined tick_devices. cpu.step_cycles is the effective cycle cost
         # of the instruction we just ran (1 for ALU, 2 for loads, plus the
-        # per-opcode count for GTE commands). Timers tick with exact cycles
-        # every step so Timer 2's CPU-clock/8 cadence is cycle-accurate —
-        # amidog's psxtest_gte TIMING reads Timer 2 around each GTE op.
-        # Other devices stay on the 64-cycle batched poll.
+        # per-opcode count for GTE commands). Devices including timers are
+        # batched at 64-cycle granularity — calling timers.tick per CPU step
+        # was 18% of the profile when running Ridge Racer mid-game.
+        # Cycle-accurate Timer 2 reads (the amidog psxtest_gte TIMING column
+        # depends on this) still work because Timers#read_counter calls
+        # flush! to drain the accumulator before reading.
         cycles = cpu.step_cycles
         cycle_count += cycles
-        timers.tick(cycles)
+        timer_acc += cycles
         if cycle_count >= tick_threshold
           tick_threshold = cycle_count + 64
+          timers.tick(timer_acc)
+          timer_acc = 0
           sio0.tick(64)
           dma.tick_cycles(64)
           cdrom.tick(64)
@@ -191,6 +196,8 @@ module PSX
           gpu.vblank
         end
       end
+      # Drain leftover timer cycles so the next run starts clean.
+      timers.tick(timer_acc) if timer_acc > 0
 
       @cycle_count = cycle_count
       @frame_count = frame_count
