@@ -29,8 +29,8 @@ module PSX
     CYCLES_PER_FRAME = CPU_FREQ / 60  # ~560K cycles per frame at 60Hz
     CYCLES_PER_SCANLINE = CYCLES_PER_FRAME / 263  # NTSC has 263 scanlines
 
-    def initialize(bios_path, disc_path: nil)
-      bios = BIOS.new(bios_path)
+    def initialize(bios_path, disc_path: nil, fast_boot: false)
+      bios = BIOS.new(bios_path, fast_boot: fast_boot)
       ram = RAM.new
       @interrupts = Interrupts.new
       @spu = SPU.new

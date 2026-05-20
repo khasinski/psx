@@ -88,7 +88,7 @@ puts "YJIT: #{defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? 'enabled' : 'dis
 puts ""
 
 begin
-  emu = PSX::Emulator.new(bios_path, disc_path: disc_path)
+  emu = PSX::Emulator.new(bios_path, disc_path: disc_path, fast_boot: fast_boot)
   if fast_boot
     raise "--fast-boot requires a disc image" unless disc_path
     boot = emu.fast_boot_from_disc
