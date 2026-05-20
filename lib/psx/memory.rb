@@ -115,6 +115,23 @@ module PSX
       0
     end
 
+    # Fused instruction fetch: tests fetchable? + reads in one call. Returns
+    # the 32-bit instruction word, or nil if PC is in a region the bus
+    # doesn't service (the caller raises a bus-error exception). Used by
+    # the cpu.step hot path so we save a method dispatch per CPU step.
+    def fetch32(addr)
+      phys = addr & REGION_MASK[(addr >> 29) & 0x7]
+      return @ram_words[(phys & RAM_MIRROR_MASK) >> 2] if phys < 0x0080_0000
+      return @bios_words[(phys - BIOS_START) >> 2] if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
+      # Rare paths: IO/DMA/GPU/SPU/SBUS regions that DO respond to fetch.
+      if phys >= 0x1F80_1000 && phys < 0x1F80_3000
+        return io_read32(phys - IO_START) if (phys >= 0x1F80_1080 && phys < 0x1F80_1100) ||
+                                              (phys >= 0x1F80_1810 && phys < 0x1F80_1820) ||
+                                              (phys >= 0x1F80_1C00 && phys < 0x1F80_2000)
+      end
+      nil  # bus error — instruction fetch from a forbidden region
+    end
+
     def read32(addr)
       # Fast path: translate virtual to physical
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]

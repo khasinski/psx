@@ -107,11 +107,11 @@ module PSX
         exception(COP0::EXC_ADEL, bad_addr: pc)
         return
       end
-      unless @memory.fetchable?(pc)
+      instruction = @memory.fetch32(pc)
+      if instruction.nil?
         exception(COP0::EXC_IBE, bad_addr: pc)
         return
       end
-      instruction = @memory.read32(pc)
 
       # Advance PC (next_pc may have been redirected by a previous branch
       # epilogue, which is exactly what makes the current instruction a
