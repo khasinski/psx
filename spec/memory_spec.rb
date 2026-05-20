@@ -144,7 +144,8 @@ class RAMSpec < Minitest::Test
   end
 
   def test_ram_size
-    assert_equal 2 * 1024 * 1024, @ram.instance_variable_get(:@data).length
+    # 2 MB of RAM as a 32-bit-word array.
+    assert_equal (2 * 1024 * 1024) / 4, @ram.instance_variable_get(:@words).length
   end
 
   def test_ram_initialized_to_zero
