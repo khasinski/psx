@@ -29,6 +29,8 @@ module PSX
     def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil)
       @bios = bios
       @ram = ram
+      @ram_words = ram.instance_variable_get(:@words)  # for inlined fast-path
+      @bios_words = bios.instance_variable_get(:@words)
       @interrupts = interrupts
       @dma = dma
       @timers = timers
@@ -117,14 +119,16 @@ module PSX
       # Fast path: translate virtual to physical
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      # Fast path for RAM (most common case)
+      # Inlined RAM fast path (the overwhelmingly most common case for
+      # instruction fetch + lw + linked-list DMA).
       if phys < 0x0080_0000
-        return @ram.read32(phys & RAM_MIRROR_MASK)
+        return @ram_words[(phys & RAM_MIRROR_MASK) >> 2]
       end
 
-      # Fast path for BIOS
+      # Inlined BIOS fast path — same idea, instruction fetch out of ROM
+      # happens during every kernel call.
       if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
-        return @bios.read32(phys - BIOS_START)
+        return @bios_words[(phys - BIOS_START) >> 2]
       end
 
       # Scratchpad
@@ -211,9 +215,9 @@ module PSX
       # Fast path: translate virtual to physical
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      # Fast path for RAM (most common case)
+      # Inlined RAM fast path.
       if phys < 0x0080_0000
-        @ram.write32(phys & RAM_MIRROR_MASK, value)
+        @ram_words[(phys & RAM_MIRROR_MASK) >> 2] = value & 0xFFFF_FFFF
         return
       end
 
