@@ -26,6 +26,11 @@ module PSX
 
     def initialize(memory, interrupts: nil)
       @memory = memory
+      # Direct references for the inlined RAM fast paths in op_lw / op_sw,
+      # so the common case (load/store that hits main RAM) doesn't pay
+      # for a Memory#read32 / write32 method dispatch on every hit.
+      @ram_words = memory.ram_words
+      @region_mask = Memory::REGION_MASK
       @interrupts = interrupts
       @regs = Array.new(32, 0)  # R0 is always 0
       @pc = RESET_VECTOR
@@ -892,8 +897,16 @@ module PSX
         exception(COP0::EXC_ADEL, bad_addr: addr)
         return
       end
+      # Inline the RAM fast path; the bootmap profile shows ~27% of all
+      # executed ops are LW, and the overwhelming majority hit main RAM.
+      phys = addr & @region_mask[(addr >> 29) & 0x7]
+      val = if phys < 0x0080_0000
+              @ram_words[(phys & 0x001F_FFFF) >> 2]
+            else
+              @memory.read32(addr) & 0xFFFF_FFFF
+            end
       @load_delay_reg = rt
-      @load_delay_value = @memory.read32(addr) & 0xFFFF_FFFF
+      @load_delay_value = val
       @step_cycles += 2
     end
 
@@ -993,7 +1006,16 @@ module PSX
         exception(COP0::EXC_ADES, bad_addr: addr)
         return
       end
-      @memory.write32(addr, @regs[rt])
+      # Inline the RAM fast path. cache_isolated is true only briefly
+      # during BIOS cache flushes, so the slow path through Memory#write32
+      # is fine for that case.
+      return if @memory.cache_isolated
+      phys = addr & @region_mask[(addr >> 29) & 0x7]
+      if phys < 0x0080_0000
+        @ram_words[(phys & 0x001F_FFFF) >> 2] = @regs[rt] & 0xFFFF_FFFF
+      else
+        @memory.write32(addr, @regs[rt])
+      end
     end
 
     def op_swl(instruction)
