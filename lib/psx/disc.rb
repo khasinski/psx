@@ -201,6 +201,28 @@ module PSX
       data
     end
 
+    # 2340-byte "whole sector" slice — what the CD-ROM controller returns
+    # when SetMode bit 5 (whole_sector) is set. Skips the 12 sync bytes
+    # but keeps everything from offset 12 onwards: 4-byte header (MSF +
+    # mode), 8-byte sub-header (CD-XA file/channel/submode/coding info,
+    # repeated), 2048-byte user data, and the trailing EDC/ECC. Games
+    # that stream CD-XA (FMV, in-game music) toggle this mode and read
+    # the sub-header first to filter which channel they want.
+    def read_whole_sector(lba)
+      raw = read_sector(lba)
+      case raw.bytesize
+      when 2048
+        # Cooked ISO: no sync/header/sub-header on disc. Fabricate a
+        # zero header so reads of the sub-header area don't return
+        # arbitrary user-data bytes.
+        ("\x00" * 12).b + raw + ("\x00" * 280).b
+      when 2336 then ("\x00" * 4).b + raw         # MODE2/2336: prepend header
+      when 2352 then raw.byteslice(12, 2340)      # skip sync; keep the rest
+      else
+        raise "unsupported sector size #{raw.bytesize} for whole_sector"
+      end
+    end
+
     # 2048-byte user-data slice of a sector. For MODE2/2352 (the default)
     # the layout is:
     #   [12 sync][3 header MSF][1 mode][8 sub-header][2048 user][280 ECC]

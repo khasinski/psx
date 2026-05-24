@@ -206,8 +206,12 @@ module PSX
         return
       end
 
-      data = @disc.read_data(lba)
-      @data_buffer = data
+      # whole_sector mode (SetMode bit 5) makes the data FIFO start at
+      # offset 12 of the raw sector — header + sub-header + user data +
+      # ECC — instead of the 2048-byte user-data slice. CD-XA streaming
+      # (FMV, in-game music) needs this so the game can read the
+      # sub-header to filter which channel it wants.
+      @data_buffer = @whole_sector ? @disc.read_whole_sector(lba) : @disc.read_data(lba)
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
@@ -400,7 +404,7 @@ module PSX
       lba = @read_lba
       track = @disc.track_for_lba(lba)
       return if track.nil? || track.audio?
-      @data_buffer = @disc.read_data(lba)
+      @data_buffer = @whole_sector ? @disc.read_whole_sector(lba) : @disc.read_data(lba)
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
