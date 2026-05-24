@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Run a PS-EXE through the SDL display so you can SEE what it draws.
+# Useful for the ps1-tests GPU tests (animated-triangle, lines, quad,
+# rectangles, ...), or any homebrew that boots without MDEC / FMV /
+# CD-XA audio.
+#
+# Usage:
+#   bin/_psx-exe-display .tests/gpu/animated-triangle/animated-triangle.exe
+#   bin/_psx-exe-display -b SCPH7502.BIN PSX.EXE
+#
+# Boots BIOS for a short window (just enough for the A/B/C jump tables
+# to be set up), drops the EXE in via load_psexe, then hands off to the
+# normal run_with_display loop — so F5/F8 quicksaves work just like
+# disc-based games.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+bios        = ENV["PSX_BIOS"]        || "SCPH1001.BIN"
+boot_cycles = Integer((ENV["PSX_BOOT_CYCLES"] || "5_000_000").gsub("_", ""))
+exe         = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"        then bios = args.shift
+  when "-c", "--boot-cycles" then boot_cycles = args.shift.gsub("_", "").to_i
+  when "-h", "--help"
+    puts "Usage: _psx-exe-display [-b BIOS] [-c BOOT_CYCLES] PSEXE"
+    exit 0
+  else
+    exe = arg
+  end
+end
+
+abort "Usage: _psx-exe-display [-b BIOS] [-c BOOT_CYCLES] PSEXE" unless exe
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+abort "EXE not found: #{exe}"   unless File.exist?(exe)
+
+puts "PSX-Ruby — PS-EXE display"
+puts "  bios:        #{bios}"
+puts "  exe:         #{exe}"
+puts "  boot cycles: #{boot_cycles}"
+puts ""
+
+emu = PSX::Emulator.new(bios)
+emu.run(steps: boot_cycles)   # Let BIOS init the A/B/C kernel jump tables.
+emu.load_psexe(exe)
+puts "EXE loaded, entry PC=0x#{format('%08X', emu.cpu.pc)}"
+puts ""
+puts "Tip: F5 quicksave the current scene, then bench it with"
+puts "     bin/_psx-state-bench tmp/quicksave.psxstate"
+puts ""
+
+emu.run_with_display
