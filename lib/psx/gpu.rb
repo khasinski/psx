@@ -1033,18 +1033,26 @@ module PSX
           fr_const = (cr >> 3) & 0x1F; fg_const = (cg >> 3) & 0x1F; fb_const = (cb >> 3) & 0x1F
           opaque_pixel = fr_const | (fg_const << 5) | (fb_const << 10)
           opaque_pixel |= 0x8000 if smb
-          x = x_start - 1
-          while (x += 1) <= x_end
-            idx = row + x
-            bg = vram[idx]
-            next if cmb && (bg & 0x8000) != 0
-            if stp_mode >= 0
-              r5, g5, b5 = stp_blend5(bg, fr_const, fg_const, fb_const, stp_mode)
-              pixel = r5 | (g5 << 5) | (b5 << 10)
-              pixel |= 0x8000 if smb
-              vram[idx] = pixel
-            else
-              vram[idx] = opaque_pixel
+          if !cmb && stp_mode < 0 && x_end >= x_start
+            # Pure opaque flat fill — the Sony logo and most BIOS UI hit
+            # this path. Array#fill is a single C-level memset over the
+            # span; we previously ran a 100-1000 iteration Ruby loop per
+            # scanline doing the same constant store.
+            vram.fill(opaque_pixel, row + x_start, x_end - x_start + 1)
+          else
+            x = x_start - 1
+            while (x += 1) <= x_end
+              idx = row + x
+              bg = vram[idx]
+              next if cmb && (bg & 0x8000) != 0
+              if stp_mode >= 0
+                r5, g5, b5 = stp_blend5(bg, fr_const, fg_const, fb_const, stp_mode)
+                pixel = r5 | (g5 << 5) | (b5 << 10)
+                pixel |= 0x8000 if smb
+                vram[idx] = pixel
+              else
+                vram[idx] = opaque_pixel
+              end
             end
           end
         end
