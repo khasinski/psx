@@ -31,6 +31,16 @@ module PSX
     # Bit 31: OR of bits 30..23 and 18..13
     FLAG_ERROR_MASK       = ((0xFF) << 23) | ((0x3F) << 13)
 
+    # Per-channel flag-bit lookup tables. mac_set / check_mac_overflow /
+    # sat_ir are called 3x per RTPS (and 9x per RTPT); the per-call case
+    # dispatch to pick FLAG_MACi_POS etc. showed up in the profile, so we
+    # use a constant-array load instead. Index 0 is unused (channels are
+    # 1-indexed).
+    MAC_POS_FLAGS = [nil, FLAG_MAC1_POS, FLAG_MAC2_POS, FLAG_MAC3_POS].freeze
+    MAC_NEG_FLAGS = [nil, FLAG_MAC1_NEG, FLAG_MAC2_NEG, FLAG_MAC3_NEG].freeze
+    IR_SAT_FLAGS  = [nil, FLAG_IR1_SAT,  FLAG_IR2_SAT,  FLAG_IR3_SAT].freeze
+    COLOR_FLAGS   = [FLAG_COLOR_R_SAT, FLAG_COLOR_G_SAT, FLAG_COLOR_B_SAT].freeze
+
     def initialize
       reset
     end
@@ -401,11 +411,8 @@ module PSX
 
     # 43-bit signed overflow detection on MAC1/2/3 values (i = 1,2,3).
     def check_mac_overflow(i, v)
-      lim = 1 << 43
-      pos_bit = case i; when 1 then FLAG_MAC1_POS; when 2 then FLAG_MAC2_POS; else FLAG_MAC3_POS; end
-      neg_bit = case i; when 1 then FLAG_MAC1_NEG; when 2 then FLAG_MAC2_NEG; else FLAG_MAC3_NEG; end
-      @flag |= pos_bit if v >= lim
-      @flag |= neg_bit if v < -lim
+      @flag |= MAC_POS_FLAGS[i] if v >= 0x80_0000_0000  # 1 << 43
+      @flag |= MAC_NEG_FLAGS[i] if v < -0x80_0000_0000
     end
 
     # 31-bit signed overflow detection on MAC0.
@@ -419,12 +426,10 @@ module PSX
     # Returns saturated value and sets the appropriate IRx flag.
     def sat_ir(i, v, lm)
       lo = lm ? 0 : -0x8000
-      hi = 0x7FFF
-      bit = case i; when 1 then FLAG_IR1_SAT; when 2 then FLAG_IR2_SAT; else FLAG_IR3_SAT; end
       if v < lo
-        @flag |= bit; lo
-      elsif v > hi
-        @flag |= bit; hi
+        @flag |= IR_SAT_FLAGS[i]; lo
+      elsif v > 0x7FFF
+        @flag |= IR_SAT_FLAGS[i]; 0x7FFF
       else
         v
       end
@@ -471,11 +476,10 @@ module PSX
     end
 
     def sat_color(channel, v)
-      bit = case channel; when 0 then FLAG_COLOR_R_SAT; when 1 then FLAG_COLOR_G_SAT; else FLAG_COLOR_B_SAT; end
       if v < 0
-        @flag |= bit; 0
+        @flag |= COLOR_FLAGS[channel]; 0
       elsif v > 0xFF
-        @flag |= bit; 0xFF
+        @flag |= COLOR_FLAGS[channel]; 0xFF
       else
         v
       end
@@ -564,10 +568,13 @@ module PSX
 
     def cmd_rtps(vi, shift, lm, push_sxy:)
       vx, vy, vz = @v[vi]
+      rt = @rt
+      rt0 = rt[0]; rt1 = rt[1]; rt2 = rt[2]
+      tr = @tr
 
-      ax = (@tr[0] << 12) + @rt[0][0] * vx + @rt[0][1] * vy + @rt[0][2] * vz
-      ay = (@tr[1] << 12) + @rt[1][0] * vx + @rt[1][1] * vy + @rt[1][2] * vz
-      az = (@tr[2] << 12) + @rt[2][0] * vx + @rt[2][1] * vy + @rt[2][2] * vz
+      ax = (tr[0] << 12) + rt0[0] * vx + rt0[1] * vy + rt0[2] * vz
+      ay = (tr[1] << 12) + rt1[0] * vx + rt1[1] * vy + rt1[2] * vz
+      az = (tr[2] << 12) + rt2[0] * vx + rt2[1] * vy + rt2[2] * vz
 
       mac_set(1, ax, shift, lm)
       mac_set(2, ay, shift, lm)
@@ -708,16 +715,22 @@ module PSX
     # Normal color light source: MAC := LS * V
     def light_normal(vi, shift, lm)
       vx, vy, vz = @v[vi]
-      mac_set(1, @ls[0][0] * vx + @ls[0][1] * vy + @ls[0][2] * vz, shift, lm)
-      mac_set(2, @ls[1][0] * vx + @ls[1][1] * vy + @ls[1][2] * vz, shift, lm)
-      mac_set(3, @ls[2][0] * vx + @ls[2][1] * vy + @ls[2][2] * vz, shift, lm)
+      ls = @ls
+      ls0 = ls[0]; ls1 = ls[1]; ls2 = ls[2]
+      mac_set(1, ls0[0] * vx + ls0[1] * vy + ls0[2] * vz, shift, lm)
+      mac_set(2, ls1[0] * vx + ls1[1] * vy + ls1[2] * vz, shift, lm)
+      mac_set(3, ls2[0] * vx + ls2[1] * vy + ls2[2] * vz, shift, lm)
     end
 
     # Background + LightColor * IR
     def light_color(shift, lm)
-      mac_set(1, (@bk[0] << 12) + @lc[0][0] * @ir1 + @lc[0][1] * @ir2 + @lc[0][2] * @ir3, shift, lm)
-      mac_set(2, (@bk[1] << 12) + @lc[1][0] * @ir1 + @lc[1][1] * @ir2 + @lc[1][2] * @ir3, shift, lm)
-      mac_set(3, (@bk[2] << 12) + @lc[2][0] * @ir1 + @lc[2][1] * @ir2 + @lc[2][2] * @ir3, shift, lm)
+      lc = @lc
+      lc0 = lc[0]; lc1 = lc[1]; lc2 = lc[2]
+      bk = @bk
+      ir1 = @ir1; ir2 = @ir2; ir3 = @ir3
+      mac_set(1, (bk[0] << 12) + lc0[0] * ir1 + lc0[1] * ir2 + lc0[2] * ir3, shift, lm)
+      mac_set(2, (bk[1] << 12) + lc1[0] * ir1 + lc1[1] * ir2 + lc1[2] * ir3, shift, lm)
+      mac_set(3, (bk[2] << 12) + lc2[0] * ir1 + lc2[1] * ir2 + lc2[2] * ir3, shift, lm)
     end
 
     def cmd_ncs(vi, shift, lm)
