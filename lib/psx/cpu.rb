@@ -102,7 +102,7 @@ module PSX
       # without depending on a working CD-ROM/Shell. Returns true when the
       # call has been handled and PC was advanced to the caller.
       if @tty_handler && intercept_bios_call(pc)
-        return
+        return @step_cycles
       end
 
       # Fetch instruction. Misaligned PC -> address-error; fetch from a
@@ -111,7 +111,7 @@ module PSX
       # pointing at the offending PC.
       if (pc & 3) != 0
         exception(COP0::EXC_ADEL, bad_addr: pc)
-        return
+        return @step_cycles
       end
       # Inlined fetch32: the two hot regions (RAM / BIOS ROM) handled here,
       # everything else delegated to Memory#fetch32 which returns nil for
@@ -126,7 +126,7 @@ module PSX
                     end
       if instruction.nil?
         exception(COP0::EXC_IBE, bad_addr: pc)
-        return
+        return @step_cycles
       end
 
       # Advance PC (next_pc may have been redirected by a previous branch
@@ -291,6 +291,7 @@ module PSX
         @branch_target = nil
         @next_in_delay_slot = true
       end
+      @step_cycles
     end
 
     def disassemble_current

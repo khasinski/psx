@@ -173,8 +173,7 @@ module PSX
         batch_cycles = 0
         while batch_cycles < 64 && remaining > 0
           remaining -= 1
-          cpu.step
-          batch_cycles += cpu.step_cycles
+          batch_cycles += cpu.step
         end
 
         cycle_count += batch_cycles
