@@ -79,6 +79,72 @@ class CDROMSpec < Minitest::Test
     assert_equal 0x21445650, @cdrom.dma_read_word, "First word should be 'PVD!' (LE)"
   end
 
+  # whole_sector mode (SetMode bit 5) makes the data FIFO start at offset
+  # 12 of the raw 2352-byte sector — header + sub-header + user data +
+  # ECC — instead of the 2048-byte user-data slice. Rage Racer's CD-XA
+  # streaming intro relied on this: it reads 12 bytes of header / sub-
+  # header then 2048 bytes of user data per sector. Before this was
+  # implemented we always served 2048 bytes regardless, so the "header"
+  # DMA returned the first 12 bytes of user data and the user-data DMA
+  # overshot our buffer by 12 bytes — @data_pos ended at 2060 in a 2048-
+  # byte buffer and the game's wait-for-FIFO poll hung forever.
+  def test_whole_sector_mode_returns_header_then_user_data
+    # User data starts with a magic word so we can verify the header
+    # offset is right.
+    user_data = ("MARK" + "\x00" * 2044).b
+    @cdrom.disc = build_one_sector_disc(user_data)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0xA0)   # SetMode params: bit 7 = 2x speed, bit 5 = whole_sector
+    @cdrom.write8(1, 0x0E)   # Cmd SetMode
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)  # MSF 00:02:00
+    @cdrom.write8(1, 0x02)   # Cmd SetLoc
+    drain_response
+    @cdrom.write8(1, 0x06)   # Cmd ReadN
+    drain_response
+    @cdrom.write8(1, 0x09)   # Cmd Pause (delivers the in-flight sector)
+    drive_until_int(1, max_ticks: 200)
+
+    buf = @cdrom.instance_variable_get(:@data_buffer)
+    assert_equal 2340, buf.bytesize,
+                 "whole_sector mode should serve 2340 bytes (header + sub-header + user + ECC)"
+
+    # The MSF header is the first 4 bytes (3 MSF + 1 mode).
+    assert_equal "\x00\x02\x00\x02".b, buf.byteslice(0, 4),
+                 "first 4 bytes should be the MSF + mode header"
+    # Sub-header (8 bytes) at offset 4 — what build_one_sector_disc baked in.
+    assert_equal "\x00\x00\x08\x00\x00\x00\x08\x00".b, buf.byteslice(4, 8),
+                 "next 8 bytes should be the CD-XA sub-header"
+    # User data begins at offset 12.
+    assert_equal "MARK".b, buf.byteslice(12, 4),
+                 "user data should start at offset 12 in whole_sector mode"
+  end
+
+  # Default (no whole_sector) still returns just the 2048-byte user-data
+  # slice. Critical for the BIOS shell path that doesn't touch SetMode.
+  def test_default_mode_serves_user_data_only
+    user_data = ("DATA" + "\x00" * 2044).b
+    @cdrom.disc = build_one_sector_disc(user_data)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+    @cdrom.write8(1, 0x09)
+    drive_until_int(1, max_ticks: 200)
+
+    buf = @cdrom.instance_variable_get(:@data_buffer)
+    assert_equal 2048, buf.bytesize
+    assert_equal "DATA".b, buf.byteslice(0, 4),
+                 "default mode should serve user data starting at offset 0"
+  end
+
   private
 
   def build_one_sector_disc(user_data)

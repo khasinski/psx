@@ -96,6 +96,29 @@ class DiscSpec < Minitest::Test
     end
   end
 
+  # whole_sector mode returns 2340 bytes starting at offset 12 of the raw
+  # sector: the 4-byte header (MSF + mode) + 8-byte sub-header + 2048
+  # user data + 280 ECC. Games that stream CD-XA (FMV, in-game music)
+  # need the sub-header to filter which channel they want.
+  def test_read_whole_sector_returns_header_then_user_data
+    Dir.mktmpdir do |dir|
+      payload = ("USER" + ("\x00" * 2044)).b
+      bin = make_bin(dir, [payload])
+      disc = PSX::Disc.open(bin)
+
+      whole = disc.read_whole_sector(0)
+      assert_equal 2340, whole.bytesize, "whole sector slice is sync-stripped 2340 bytes"
+      # First 4 bytes = MSF + mode. LBA 0 -> MSF 00:02:00 (75-frame offset),
+      # mode byte = 0x02 for MODE2.
+      assert_equal "\x00\x02\x00\x02".b, whole.byteslice(0, 4)
+      # Next 8 bytes = the CD-XA sub-header make_bin baked in.
+      assert_equal "\x00\x00\x08\x00\x00\x00\x08\x00".b, whole.byteslice(4, 8)
+      # User data starts at offset 12.
+      assert_equal "USER".b, whole.byteslice(12, 4)
+      disc.close
+    end
+  end
+
   def test_track_for_lba_out_of_range
     Dir.mktmpdir do |dir|
       bin = make_bin(dir, [("\x00" * 2048).b, ("\x00" * 2048).b])
