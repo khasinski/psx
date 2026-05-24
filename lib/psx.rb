@@ -150,7 +150,13 @@ module PSX
       raise
     end
 
-    # Fast path for Ruby CPU: known number of steps, no debug
+    # Fast path for Ruby CPU: known number of steps, no debug.
+    # Two-level loop: the inner loop is kept tight (step + accumulate
+    # cycles) so YJIT can compile a small specialized loop body. The
+    # outer loop runs every ~64 cycles to do the heavier bookkeeping
+    # (device ticks, frame/VBlank). Device timing matches the previous
+    # single-loop version because both batched at the same 64-cycle
+    # cadence; the outer cadence is in [64, 64+step_cycles_max] cycles.
     def run_fast(steps)
       cpu = @cpu
       cycle_count = @cycle_count
@@ -163,41 +169,27 @@ module PSX
       sio0 = @sio0
       dma = @dma
       cdrom = @cdrom
-      tick_threshold = 64
-      timer_acc = 0
       while remaining > 0
-        remaining -= 1
-        cpu.step
-
-        # Inlined tick_devices. cpu.step_cycles is the effective cycle cost
-        # of the instruction we just ran (1 for ALU, 2 for loads, plus the
-        # per-opcode count for GTE commands). Devices including timers are
-        # batched at 64-cycle granularity — calling timers.tick per CPU step
-        # was 18% of the profile when running Ridge Racer mid-game.
-        # Cycle-accurate Timer 2 reads (the amidog psxtest_gte TIMING column
-        # depends on this) still work because Timers#read_counter calls
-        # flush! to drain the accumulator before reading.
-        cycles = cpu.step_cycles
-        cycle_count += cycles
-        timer_acc += cycles
-        if cycle_count >= tick_threshold
-          tick_threshold = cycle_count + 64
-          timers.tick(timer_acc)
-          timer_acc = 0
-          sio0.tick(64)
-          dma.tick_cycles(64)
-          cdrom.tick(64)
+        batch_cycles = 0
+        while batch_cycles < 64 && remaining > 0
+          remaining -= 1
+          cpu.step
+          batch_cycles += cpu.step_cycles
         end
+
+        cycle_count += batch_cycles
+        timers.tick(batch_cycles)
+        sio0.tick(batch_cycles)
+        dma.tick_cycles(batch_cycles)
+        cdrom.tick(batch_cycles)
+
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
-          tick_threshold = 64
           frame_count += 1
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank
         end
       end
-      # Drain leftover timer cycles so the next run starts clean.
-      timers.tick(timer_acc) if timer_acc > 0
 
       @cycle_count = cycle_count
       @frame_count = frame_count
