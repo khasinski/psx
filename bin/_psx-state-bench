@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Bench forward from a saved emulator state, so we can measure perf
+# inside a real game scene instead of always replaying BIOS boot. Use
+# F5 in the SDL window to capture a save state during gameplay, then:
+#
+#   bin/_psx-state-bench tmp/scene.psxstate
+#   PSX_CYCLES=200_000_000 bin/_psx-state-bench tmp/scene.psxstate
+#   bin/_psx-state-bench -b SCPH7502.BIN -d game.cue tmp/scene.psxstate
+#
+# Reports cycles/sec, GTE ops/sec (a side-metric that quietly tells you
+# whether the scene is GTE-bound), and the end PC.
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx"
+
+bios     = ENV["PSX_BIOS"] || "SCPH1001.BIN"
+disc     = ENV["PSX_DISC"]
+warmup   = Integer((ENV["PSX_WARMUP"] || "5_000_000").gsub("_", ""))
+cycles   = Integer((ENV["PSX_CYCLES"] || "100_000_000").gsub("_", ""))
+state_path = nil
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"   then bios   = args.shift
+  when "-d", "--disc"   then disc   = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  when "-w", "--warmup" then warmup = args.shift.gsub("_", "").to_i
+  when "-h", "--help"
+    puts "Usage: _psx-state-bench [-b BIOS] [-d DISC.cue] [-c CYCLES] [-w WARMUP] STATEFILE"
+    exit 0
+  else
+    state_path = arg
+  end
+end
+
+abort "Usage: _psx-state-bench [opts] STATEFILE" unless state_path
+abort "State file not found: #{state_path}" unless File.exist?(state_path)
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+abort "Disc not found: #{disc}" if disc && !File.exist?(disc)
+
+emu = PSX::Emulator.from_state(state_path, bios: bios, disc: disc)
+
+# GTE-op tally: cheap wrapper that's outside the timed window doesn't
+# add overhead to the bench but lets us classify the scene.
+gte_ops = 0
+gte = emu.cpu.gte
+orig_execute = gte.method(:execute)
+gte.define_singleton_method(:execute) do |instr|
+  gte_ops += 1
+  orig_execute.call(instr)
+end
+
+emu.run(steps: warmup) if warmup > 0
+
+start_pc    = emu.cpu.pc
+start_frame = emu.instance_variable_get(:@frame_count)
+
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+emu.run(steps: cycles)
+elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+
+end_frame = emu.instance_variable_get(:@frame_count)
+mhz = (cycles / elapsed) / 1_000_000.0
+fps = (end_frame - start_frame) / elapsed
+gte_per_sec = gte_ops / elapsed
+
+ruby = "#{RUBY_ENGINE} #{RUBY_ENGINE_VERSION} (#{RUBY_PLATFORM})"
+yjit_on = defined?(RubyVM::YJIT) && RubyVM::YJIT.respond_to?(:enabled?) && RubyVM::YJIT.enabled?
+puts "ruby:        #{ruby}#{yjit_on ? " +YJIT" : ""}"
+puts "state:       #{state_path}"
+puts "bios:        #{bios}"
+puts "disc:        #{disc || "(none)"}"
+puts "warmup:      #{warmup} cycles"
+puts "measured:    #{cycles} cycles in #{format('%.2fs', elapsed)}"
+puts format("speed:       %.2f MHz (%.0f cycles/s)", mhz, cycles / elapsed)
+puts format("frames:      %d in %.2fs (%.2f FPS)", end_frame - start_frame, elapsed, fps)
+puts format("gte ops:     %d (%.0f ops/sec, %.2f%% of cycles)",
+            gte_ops, gte_per_sec, 100.0 * gte_ops / cycles)
+puts format("start pc:    0x%08X", start_pc)
+puts format("end pc:      0x%08X", emu.cpu.pc)

@@ -18,6 +18,7 @@ require_relative "psx/cpu"
 require_relative "psx/disasm"
 require_relative "psx/display"
 require_relative "psx/audio"
+require_relative "psx/savestate"
 
 module PSX
   class Emulator
@@ -241,6 +242,7 @@ module PSX
       puts "Note: BIOS takes ~40 seconds to show Sony logo"
       puts "Controls: Arrow keys=D-pad, Z=Cross, X=Circle, A=Square, S=Triangle"
       puts "          Enter=Start, Space=Select, Q/W=L1/R1, Escape=Quit"
+      puts "          F5=quicksave, F8=quickload (PSX_QUICKSAVE env var = path)"
       puts ""
 
       # Shared state
@@ -273,12 +275,38 @@ module PSX
       last_render = Time.now
       last_status = Time.now
       last_status_cycles = 0
+      quicksave_path = ENV["PSX_QUICKSAVE"] || "tmp/quicksave.psxstate"
+      require "fileutils"
+      FileUtils.mkdir_p(File.dirname(quicksave_path))
+
       loop do
         # Poll SDL events (must be on main thread on macOS)
         display.poll_events
         if display.quit_requested?
           @quit_flag = true
           break
+        end
+
+        # F5 save / F8 load — done with the emulation mutex held so the
+        # snapshot is taken between CPU steps, not mid-instruction.
+        if display.take_save_request!
+          @emu_mutex.synchronize do
+            save_state(quicksave_path)
+            display.flash_status("Saved -> #{quicksave_path}")
+            puts "[savestate] saved to #{quicksave_path} (PC=#{format('0x%08X', @cpu.pc)})"
+          end
+        end
+        if display.take_load_request!
+          if File.exist?(quicksave_path)
+            @emu_mutex.synchronize do
+              load_state(quicksave_path)
+              display.flash_status("Loaded <- #{quicksave_path}")
+              puts "[savestate] loaded from #{quicksave_path} (PC=#{format('0x%08X', @cpu.pc)})"
+            end
+          else
+            display.flash_status("No save at #{quicksave_path}")
+            puts "[savestate] no file at #{quicksave_path}"
+          end
         end
 
         # Check for emulation errors

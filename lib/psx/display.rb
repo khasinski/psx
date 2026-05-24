@@ -25,6 +25,11 @@ module PSX
       # Input state
       @quit_requested = false
       @controller_state = 0xFFFF  # All buttons released (active low)
+      # Save-state request flags — set by F5/F8 in handle_key, consumed by
+      # the emulator loop in run_with_display (under the emulation mutex so
+      # the snapshot is taken between CPU steps).
+      @save_state_requested = false
+      @load_state_requested = false
 
       # Performance tracking
       @frame_count = 0
@@ -132,6 +137,27 @@ module PSX
       @quit_requested
     end
 
+    # Read-and-clear save/load state requests. The emulator loop polls
+    # these once per frame and, if true, takes the action with the
+    # emulation mutex held.
+    def take_save_request!
+      r = @save_state_requested
+      @save_state_requested = false
+      r
+    end
+
+    def take_load_request!
+      r = @load_state_requested
+      @load_state_requested = false
+      r
+    end
+
+    # Show a transient banner in the window title for save/load feedback.
+    # Stays for ~2s before the FPS counter overwrites it again.
+    def flash_status(msg)
+      @window.title = "PSX-Ruby - #{msg}"
+    end
+
     def controller_state
       @controller_state
     end
@@ -185,6 +211,18 @@ module PSX
       if scancode == SDL2::Key::Scan::ESCAPE && pressed
         @quit_requested = true
         return
+      end
+
+      # F5 = save state, F8 = load state. Set on key-down only; the
+      # emulator loop reads + clears the flag once per frame.
+      if pressed
+        if scancode == SDL2::Key::Scan::F5
+          @save_state_requested = true
+          return
+        elsif scancode == SDL2::Key::Scan::F8
+          @load_state_requested = true
+          return
+        end
       end
 
       button = KEY_MAP[scancode]
