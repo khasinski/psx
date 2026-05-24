@@ -47,8 +47,11 @@ module PSX
       @load_delay_reg = 0
       @load_delay_value = 0
 
-      # Branch delay slot tracking
-      @in_delay_slot = false
+      # Branch delay slot tracking. exception() reads @next_in_delay_slot
+      # directly to decide whether the current instruction is in a delay
+      # slot, so we only need the one "is the next instruction in a delay
+      # slot" flag. step's epilogue keeps it accurate: true after a taken
+      # branch, false otherwise.
       @branch_target = nil
       @current_pc = @pc
 
@@ -76,8 +79,6 @@ module PSX
       pc = @pc
       next_pc = @next_pc
       @current_pc = pc
-      @in_delay_slot = @next_in_delay_slot
-      @next_in_delay_slot = false
 
       # Optional TTY hook: intercept BIOS A-table entry so PS-EXE programs
       # built against the standard BIOS putchar/puts functions can be tested
@@ -266,12 +267,17 @@ module PSX
         end
       end
 
-      # Handle branch delay (check @branch_target as instruction may have set new one)
+      # Handle branch delay (check @branch_target as instruction may have set
+      # new one). @next_in_delay_slot must be set unconditionally so the next
+      # step's exception path sees the right BD bit; we read @branch_target
+      # once and stash the result in a local to do that with a single write.
       new_branch = @branch_target
       if new_branch
         @next_pc = new_branch
         @branch_target = nil
         @next_in_delay_slot = true
+      else
+        @next_in_delay_slot = false
       end
       @step_cycles
     end
@@ -295,16 +301,14 @@ module PSX
     # Called from run_fast at the same ~64-cycle batch boundary as the
     # device ticks. Previously this was done inside step() with its own
     # counter; lifting it out drops one ivar inc + branch per step. When
-    # an IRQ actually fires we have to refresh @current_pc/@in_delay_slot
-    # to reflect the *about-to-execute* instruction (step's own snapshot
-    # only covers what just ran), otherwise exception() records the
-    # wrong EPC/BD and the BIOS interrupt path goes off the rails.
+    # an IRQ actually fires we have to refresh @current_pc to point at the
+    # *about-to-execute* instruction so exception() records the right EPC;
+    # @next_in_delay_slot is already current (step's epilogue keeps it so).
     def check_interrupts
       return unless @interrupts
       @cop0.set_hardware_irq(@interrupts.pending?)
       if @cop0.interrupt_pending?
         @current_pc = @pc
-        @in_delay_slot = @next_in_delay_slot
         exception(COP0::EXC_INT)
       end
     end
@@ -1265,7 +1269,7 @@ module PSX
       vector = @cop0.enter_exception(
         cause,
         @current_pc,
-        in_delay_slot: @in_delay_slot,
+        in_delay_slot: @next_in_delay_slot,
         bad_addr: bad_addr,
         coprocessor: coprocessor
       )
