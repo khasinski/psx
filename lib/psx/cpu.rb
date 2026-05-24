@@ -142,8 +142,147 @@ module PSX
         @load_delay_reg = 0
       end
 
-      # Execute (skip NOP)
-      execute(instruction) if instruction != 0
+      # Execute (skip NOP). Hot opcodes inlined directly so YJIT can
+      # specialize the full fetch -> decode -> op chain in one frame.
+      # Cold opcodes still go through their op_* methods.
+      if instruction != 0
+        opcode = (instruction >> 26) & 0x3F
+        case opcode
+        when 0x09  # ADDIU
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          imm = instruction & 0xFFFF
+          imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+          @load_delay_reg = 0 if @load_delay_reg == rt
+          @regs[rt] = (@regs[rs] + imm) & 0xFFFF_FFFF if rt != 0
+        when 0x23  # LW
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          imm = instruction & 0xFFFF
+          imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+          addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+          if (addr & 3) != 0
+            exception(COP0::EXC_ADEL, bad_addr: addr)
+          else
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            val = if ph < 0x0080_0000
+                    @ram_words[(ph & 0x001F_FFFF) >> 2]
+                  else
+                    @memory.read32(addr) & 0xFFFF_FFFF
+                  end
+            @load_delay_reg = rt
+            @load_delay_value = val
+            @step_cycles += 2
+          end
+        when 0x2B  # SW
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          imm = instruction & 0xFFFF
+          imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+          addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+          if (addr & 3) != 0
+            exception(COP0::EXC_ADES, bad_addr: addr)
+          elsif !@memory.cache_isolated
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            if ph < 0x0080_0000
+              @ram_words[(ph & 0x001F_FFFF) >> 2] = @regs[rt] & 0xFFFF_FFFF
+            else
+              @memory.write32(addr, @regs[rt])
+            end
+          end
+        when 0x05  # BNE
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          if @regs[rs] != @regs[rt]
+            imm = instruction & 0xFFFF
+            imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+            @branch_target = (@pc + (imm << 2)) & 0xFFFF_FFFF
+          end
+        when 0x04  # BEQ
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          if @regs[rs] == @regs[rt]
+            imm = instruction & 0xFFFF
+            imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+            @branch_target = (@pc + (imm << 2)) & 0xFFFF_FFFF
+          end
+        when 0x0F  # LUI
+          rt = (instruction >> 16) & 0x1F
+          @load_delay_reg = 0 if @load_delay_reg == rt
+          @regs[rt] = ((instruction & 0xFFFF) << 16) & 0xFFFF_FFFF if rt != 0
+        when 0x0D  # ORI
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          @load_delay_reg = 0 if @load_delay_reg == rt
+          @regs[rt] = (@regs[rs] | (instruction & 0xFFFF)) & 0xFFFF_FFFF if rt != 0
+        when 0x00  # SPECIAL: nested decode for hot subops
+          funct = instruction & 0x3F
+          case funct
+          when 0x00  # SLL
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            shamt = (instruction >> 6) & 0x1F
+            @load_delay_reg = 0 if @load_delay_reg == rd
+            @regs[rd] = (@regs[rt] << shamt) & 0xFFFF_FFFF if rd != 0
+          when 0x21  # ADDU
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            @load_delay_reg = 0 if @load_delay_reg == rd
+            @regs[rd] = (@regs[rs] + @regs[rt]) & 0xFFFF_FFFF if rd != 0
+          when 0x23  # SUBU
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            @load_delay_reg = 0 if @load_delay_reg == rd
+            @regs[rd] = (@regs[rs] - @regs[rt]) & 0xFFFF_FFFF if rd != 0
+          when 0x2A  # SLT
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            a = @regs[rs]; a -= 0x1_0000_0000 if (a & 0x8000_0000) != 0
+            b = @regs[rt]; b -= 0x1_0000_0000 if (b & 0x8000_0000) != 0
+            @load_delay_reg = 0 if @load_delay_reg == rd
+            @regs[rd] = (a < b ? 1 : 0) if rd != 0
+          else
+            execute_special(instruction)
+          end
+        when 0x01 then execute_bcondz(instruction)
+        when 0x02 then op_j(instruction)
+        when 0x03 then op_jal(instruction)
+        when 0x06 then op_blez(instruction)
+        when 0x07 then op_bgtz(instruction)
+        when 0x08 then op_addi(instruction)
+        when 0x0A then op_slti(instruction)
+        when 0x0B then op_sltiu(instruction)
+        when 0x0C then op_andi(instruction)
+        when 0x0E then op_xori(instruction)
+        when 0x10 then execute_cop0(instruction)
+        when 0x11 then execute_cop1(instruction)
+        when 0x12 then execute_cop2(instruction)
+        when 0x13 then execute_cop3(instruction)
+        when 0x20 then op_lb(instruction)
+        when 0x21 then op_lh(instruction)
+        when 0x22 then op_lwl(instruction)
+        when 0x24 then op_lbu(instruction)
+        when 0x25 then op_lhu(instruction)
+        when 0x26 then op_lwr(instruction)
+        when 0x28 then op_sb(instruction)
+        when 0x29 then op_sh(instruction)
+        when 0x2A then op_swl(instruction)
+        when 0x2E then op_swr(instruction)
+        when 0x30 then op_lwcN(instruction, 0)
+        when 0x31 then op_lwcN(instruction, 1)
+        when 0x32 then op_lwcN(instruction, 2)
+        when 0x33 then op_lwcN(instruction, 3)
+        when 0x38 then op_swcN(instruction, 0)
+        when 0x39 then op_swcN(instruction, 1)
+        when 0x3A then op_swcN(instruction, 2)
+        when 0x3B then op_swcN(instruction, 3)
+        else
+          exception(COP0::EXC_RI)
+        end
+      end
 
       # Handle branch delay (check @branch_target as instruction may have set new one)
       new_branch = @branch_target
