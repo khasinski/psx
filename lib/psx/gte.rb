@@ -137,9 +137,12 @@ module PSX
         @sxy[2][0] = sign16(v & 0xFFFF); @sxy[2][1] = sign16((v >> 16) & 0xFFFF)
       when 15
         # SXYP: writing pushes the FIFO (SXY0 <- SXY1, SXY1 <- SXY2, SXY2 <- new)
+        slot = @sxy[0]
         @sxy[0] = @sxy[1]
         @sxy[1] = @sxy[2]
-        @sxy[2] = [sign16(v & 0xFFFF), sign16((v >> 16) & 0xFFFF)]
+        @sxy[2] = slot
+        slot[0] = sign16(v & 0xFFFF)
+        slot[1] = sign16((v >> 16) & 0xFFFF)
       when 16 then @sz[0] = v & 0xFFFF
       when 17 then @sz[1] = v & 0xFFFF
       when 18 then @sz[2] = v & 0xFFFF
@@ -487,19 +490,29 @@ module PSX
       @sz[3] = sat_sz3(value)
     end
 
+    # Rotate the FIFO references and reuse the oldest slot for the new
+    # value, so the push doesn't allocate a fresh [x, y] / [r, g, b, c]
+    # pair on every call. Profiling the GTE micro-bench showed 97% of
+    # samples in GC; almost all of it was the two pushes here multiplied
+    # by millions of RTPT/NCDS calls.
     def push_sxy(x, y)
+      slot = @sxy[0]
       @sxy[0] = @sxy[1]
       @sxy[1] = @sxy[2]
-      @sxy[2] = [sat_sxy_x(x), sat_sxy_y(y)]
+      @sxy[2] = slot
+      slot[0] = sat_sxy_x(x)
+      slot[1] = sat_sxy_y(y)
     end
 
     def push_rgb_from_mac
-      r = sat_color(0, @mac1 >> 4)
-      g = sat_color(1, @mac2 >> 4)
-      b = sat_color(2, @mac3 >> 4)
+      slot = @rgb_fifo[0]
       @rgb_fifo[0] = @rgb_fifo[1]
       @rgb_fifo[1] = @rgb_fifo[2]
-      @rgb_fifo[2] = [r, g, b, @rgbc[3]]
+      @rgb_fifo[2] = slot
+      slot[0] = sat_color(0, @mac1 >> 4)
+      slot[1] = sat_color(1, @mac2 >> 4)
+      slot[2] = sat_color(2, @mac3 >> 4)
+      slot[3] = @rgbc[3]
     end
 
     # --- Helpers: math primitives -------------------------------------------
@@ -515,7 +528,7 @@ module PSX
       # should be, which made the BIOS PS logo render at 2x scale.
       if @h < @sz[3] * 2 && @sz[3] != 0
         n = ((@h.to_i * 0x20000 / @sz[3]) + 1) / 2
-        return [n, 0x1FFFF].min
+        return n < 0x1FFFF ? n : 0x1FFFF
       end
       @flag |= FLAG_DIVIDE_OVERFLOW
       0x1FFFF
@@ -523,21 +536,21 @@ module PSX
 
     # MAC1/2/3 := (a + b + c + d) >> shift, then IR1/2/3 := saturate(MACi).
     # Used by RTPS, MVMVA, etc. Each addition is checked for 43-bit overflow.
+    # The hardware MAC registers are 32-bit visible, so we go straight to a
+    # 32-bit truncation and sign-extension. The previous 64-bit normalisation
+    # step (& 0xFFFF_FFFF_FFFF_FFFF + sign_to_64) was redundant: it
+    # immediately got overwritten by the 32-bit truncation, but each call to
+    # it allocated a temporary Bignum because the 64-bit mask literal is
+    # larger than Ruby's Fixnum range on 64-bit hosts. Profiling the GTE
+    # micro-bench showed ~97% of samples in GC; this was the culprit.
     def mac_set(i, accum, shift, lm)
       check_mac_overflow(i, accum)
       result = accum >> shift
-      # Note: in real GTE the IR saturation is checked against the unshifted
-      # value when sf=0 (uses lm only). We approximate with the shifted value.
+      mac32 = sign32(result & 0xFFFF_FFFF)
       case i
-      when 1 then @mac1 = result & 0xFFFF_FFFF_FFFF_FFFF; @mac1 = sign_to_64(@mac1); @ir1 = sat_ir(1, result, lm)
-      when 2 then @mac2 = result & 0xFFFF_FFFF_FFFF_FFFF; @mac2 = sign_to_64(@mac2); @ir2 = sat_ir(2, result, lm)
-      when 3 then @mac3 = result & 0xFFFF_FFFF_FFFF_FFFF; @mac3 = sign_to_64(@mac3); @ir3 = sat_ir(3, result, lm)
-      end
-      # Truncate MAC to S32 for storage (hardware MAC is 32-bit visible)
-      case i
-      when 1 then @mac1 = sign32(@mac1 & 0xFFFF_FFFF)
-      when 2 then @mac2 = sign32(@mac2 & 0xFFFF_FFFF)
-      when 3 then @mac3 = sign32(@mac3 & 0xFFFF_FFFF)
+      when 1 then @mac1 = mac32; @ir1 = sat_ir(1, result, lm)
+      when 2 then @mac2 = mac32; @ir2 = sat_ir(2, result, lm)
+      when 3 then @mac3 = mac32; @ir3 = sat_ir(3, result, lm)
       end
       result
     end

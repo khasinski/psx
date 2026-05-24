@@ -1,0 +1,173 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Synthetic GTE micro-bench. The BIOS-boot bench (bin/_psx-bench) barely
+# touches the GTE because the Sony logo is 2D; gte-fuzz / gte/test-all
+# are interactive or short-running. This driver calls GTE#execute in a
+# tight Ruby loop with realistic register state so we can measure deltas
+# for GTE-targeted changes without CPU dispatch / scheduler noise.
+#
+# Correctness check: after each batch we hash a fistful of output
+# registers and compare against a baseline captured on the first run.
+# Any optimisation that changes a bit of GTE output causes the bench to
+# print the mismatch and exit nonzero.
+#
+# Usage:
+#   bundle exec bin/_psx-gtebench
+#   PSX_GTE_ITERS=1_000_000 bundle exec bin/_psx-gtebench
+#   PSX_GTE_BASELINE=tmp/gte-baseline.txt bundle exec bin/_psx-gtebench
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx/gte"
+
+iters    = Integer((ENV["PSX_GTE_ITERS"] || "1_000_000").gsub("_", ""))
+warmup   = Integer((ENV["PSX_GTE_WARMUP"] || "100_000").gsub("_", ""))
+baseline_path = ENV["PSX_GTE_BASELINE"] || "tmp/gte-baseline.txt"
+
+gte = PSX::GTE.new
+
+# --- Register setup -----------------------------------------------------------
+# Realistic-ish state borrowed from a typical RTPS/RTPT setup: a non-trivial
+# rotation matrix with a small translation, a unit-ish light matrix, a single
+# bright light, and three input vertices. Numbers chosen so saturations fire
+# occasionally (we want the saturation paths warmed up too).
+
+# Rotation matrix (1.3.12 fixed point, identity-ish with mild rotation)
+#  rt[0][0]=0x0FFF rt[0][1]=0x0010 rt[0][2]=0xF000  (signed 16)
+#  rt[1][0]=0x0010 rt[1][1]=0x0FFF rt[1][2]=0x0020
+#  rt[2][0]=0xF000 rt[2][1]=0x0020 rt[2][2]=0x0FFF
+gte.write_control(0, (0x0010 << 16) | 0x0FFF)
+gte.write_control(1, (0x0010 << 16) | 0xF000)
+gte.write_control(2, (0x0FFF << 16) | 0x0020)
+gte.write_control(3, (0x0020 << 16) | 0xF000)
+gte.write_control(4, 0x0FFF)
+
+# Translation
+gte.write_control(5, 0x0000_0010)
+gte.write_control(6, 0xFFFF_FFF0)
+gte.write_control(7, 0x0000_0040)
+
+# Light source matrix
+gte.write_control(8, (0x0800 << 16) | 0x0800)
+gte.write_control(9, (0x0000 << 16) | 0x0800)
+gte.write_control(10, (0x0800 << 16) | 0x0000)
+gte.write_control(11, (0x0800 << 16) | 0x0800)
+gte.write_control(12, 0x0800)
+
+# Background color
+gte.write_control(13, 0x0000_2000)
+gte.write_control(14, 0x0000_2000)
+gte.write_control(15, 0x0000_2000)
+
+# Light color
+gte.write_control(16, (0x0800 << 16) | 0x0800)
+gte.write_control(17, (0x0000 << 16) | 0x0800)
+gte.write_control(18, (0x0800 << 16) | 0x0000)
+gte.write_control(19, (0x0800 << 16) | 0x0800)
+gte.write_control(20, 0x0800)
+
+# Far color, screen offset, projection plane distance, depth coefficients
+gte.write_control(21, 0x0000_0080)
+gte.write_control(22, 0x0000_0080)
+gte.write_control(23, 0x0000_0080)
+gte.write_control(24, 0x0000_0000)   # OFX
+gte.write_control(25, 0x0000_0000)   # OFY
+gte.write_control(26, 0x0000_0200)   # H = projection distance
+gte.write_control(27, 0x0000_0080)   # DQA
+gte.write_control(28, 0x0000_0040)   # DQB
+gte.write_control(29, 0x0000_0080)   # ZSF3
+gte.write_control(30, 0x0000_0080)   # ZSF4
+
+# Input vertices V0..V2 (signed 16, packed)
+gte.write_data(0, (0x0040 << 16) | 0x0080)   # V0.x=0x80 V0.y=0x40
+gte.write_data(1, 0x0000_0100)               # V0.z=0x100
+gte.write_data(2, (0xFFC0 << 16) | 0x0080)   # V1.x=0x80 V1.y=-0x40
+gte.write_data(3, 0x0000_0120)
+gte.write_data(4, (0x0040 << 16) | 0xFF80)   # V2.x=-0x80 V2.y=0x40
+gte.write_data(5, 0x0000_0140)
+
+# RGBC
+gte.write_data(6, 0xFF80_8080)
+
+# --- Instruction words --------------------------------------------------------
+# Encoded with sf=1, lm=0 unless noted. The dispatch is via instruction's
+# low 6 bits with mvmva fields in bits 17-20 / 15-16 / 13-14.
+RTPS  = 0x4A80_0001
+RTPT  = 0x4A80_0030
+NCDS  = 0x4A80_0413  # lm=1
+NCDT  = 0x4A80_0416  # lm=1
+MVMVA = 0x4A48_0012  # mx=rotation, mv=v0, cv=tr
+NCLIP = 0x4A80_0006
+OP    = 0x4A80_000C
+AVSZ3 = 0x4A80_002D
+AVSZ4 = 0x4A80_002E
+
+WORKLOAD = [RTPT, NCDS, NCDS, NCDT, MVMVA, NCLIP, OP, AVSZ3, AVSZ4].freeze
+
+def run_workload(gte, iters)
+  i = 0
+  while i < iters
+    WORKLOAD.each { |instr| gte.execute(instr) }
+    i += 1
+  end
+end
+
+# Output digest of state we care about — any change here means we broke
+# semantics. Read raw control + data regs that the workload writes to.
+def state_digest(gte)
+  parts = []
+  # MAC0/IR0
+  parts << gte.instance_variable_get(:@mac0)
+  parts << gte.instance_variable_get(:@ir0)
+  parts << gte.instance_variable_get(:@mac1)
+  parts << gte.instance_variable_get(:@mac2)
+  parts << gte.instance_variable_get(:@mac3)
+  parts << gte.instance_variable_get(:@ir1)
+  parts << gte.instance_variable_get(:@ir2)
+  parts << gte.instance_variable_get(:@ir3)
+  parts << gte.instance_variable_get(:@otz)
+  parts << gte.instance_variable_get(:@flag)
+  parts << gte.instance_variable_get(:@sz).dup
+  parts << gte.instance_variable_get(:@sxy).map(&:dup)
+  parts << gte.instance_variable_get(:@rgb_fifo).map(&:dup)
+  parts.map(&:inspect).join("|")
+end
+
+# --- Warmup -------------------------------------------------------------------
+run_workload(gte, warmup)
+
+# --- Measure ------------------------------------------------------------------
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+run_workload(gte, iters)
+elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+total_ops = iters * WORKLOAD.size
+ops_per_sec = total_ops / elapsed
+
+digest = state_digest(gte)
+
+ruby = "#{RUBY_ENGINE} #{RUBY_ENGINE_VERSION} (#{RUBY_PLATFORM})"
+yjit_on = defined?(RubyVM::YJIT) && RubyVM::YJIT.respond_to?(:enabled?) && RubyVM::YJIT.enabled?
+
+puts "ruby:        #{ruby}#{yjit_on ? " +YJIT" : ""}"
+puts "iters:       #{iters} x #{WORKLOAD.size}-op workload = #{total_ops} GTE ops"
+puts format("elapsed:     %.3fs", elapsed)
+puts format("throughput:  %.2fM GTE ops/sec", ops_per_sec / 1_000_000.0)
+puts format("per-op cost: %.0f ns", elapsed * 1e9 / total_ops)
+
+# --- Correctness check --------------------------------------------------------
+require "fileutils"
+FileUtils.mkdir_p(File.dirname(baseline_path))
+if File.exist?(baseline_path)
+  baseline = File.read(baseline_path).chomp
+  if digest == baseline
+    puts "state:       OK (matches #{baseline_path})"
+  else
+    puts "state:       MISMATCH"
+    puts "  expected: #{baseline[0, 200]}..."
+    puts "  actual:   #{digest[0, 200]}..."
+    exit 1
+  end
+else
+  File.write(baseline_path, digest)
+  puts "state:       baseline saved -> #{baseline_path}"
+end

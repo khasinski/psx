@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Stackprof the GTE bench so we can see which commands and helpers
+# actually dominate. Same workload as bin/_psx-gtebench.
+
+require "stackprof"
+require "fileutils"
+
+iters = Integer((ENV["PSX_GTE_ITERS"] || "1_000_000").gsub("_", ""))
+out   = ENV["PSX_GTE_PROFILE_OUT"] || "tmp/gte-profile.dump"
+
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
+require_relative "../lib/psx/gte"
+
+gte = PSX::GTE.new
+
+# (Identical register setup to bin/_psx-gtebench. Kept inline so the two
+# scripts stay independent; a small amount of duplication is preferable
+# to introducing a shared helper that breaks if either driver changes.)
+gte.write_control(0, (0x0010 << 16) | 0x0FFF)
+gte.write_control(1, (0x0010 << 16) | 0xF000)
+gte.write_control(2, (0x0FFF << 16) | 0x0020)
+gte.write_control(3, (0x0020 << 16) | 0xF000)
+gte.write_control(4, 0x0FFF)
+gte.write_control(5, 0x0000_0010)
+gte.write_control(6, 0xFFFF_FFF0)
+gte.write_control(7, 0x0000_0040)
+gte.write_control(8, (0x0800 << 16) | 0x0800)
+gte.write_control(9, (0x0000 << 16) | 0x0800)
+gte.write_control(10, (0x0800 << 16) | 0x0000)
+gte.write_control(11, (0x0800 << 16) | 0x0800)
+gte.write_control(12, 0x0800)
+gte.write_control(13, 0x0000_2000)
+gte.write_control(14, 0x0000_2000)
+gte.write_control(15, 0x0000_2000)
+gte.write_control(16, (0x0800 << 16) | 0x0800)
+gte.write_control(17, (0x0000 << 16) | 0x0800)
+gte.write_control(18, (0x0800 << 16) | 0x0000)
+gte.write_control(19, (0x0800 << 16) | 0x0800)
+gte.write_control(20, 0x0800)
+gte.write_control(21, 0x0000_0080)
+gte.write_control(22, 0x0000_0080)
+gte.write_control(23, 0x0000_0080)
+gte.write_control(24, 0x0000_0000)
+gte.write_control(25, 0x0000_0000)
+gte.write_control(26, 0x0000_0200)
+gte.write_control(27, 0x0000_0080)
+gte.write_control(28, 0x0000_0040)
+gte.write_control(29, 0x0000_0080)
+gte.write_control(30, 0x0000_0080)
+gte.write_data(0, (0x0040 << 16) | 0x0080)
+gte.write_data(1, 0x0000_0100)
+gte.write_data(2, (0xFFC0 << 16) | 0x0080)
+gte.write_data(3, 0x0000_0120)
+gte.write_data(4, (0x0040 << 16) | 0xFF80)
+gte.write_data(5, 0x0000_0140)
+gte.write_data(6, 0xFF80_8080)
+
+WORKLOAD = [0x4A80_0030, 0x4A80_0413, 0x4A80_0413, 0x4A80_0416,
+            0x4A48_0012, 0x4A80_0006, 0x4A80_000C, 0x4A80_002D, 0x4A80_002E].freeze
+
+# Warm YJIT
+50_000.times { WORKLOAD.each { |i| gte.execute(i) } }
+
+FileUtils.mkdir_p(File.dirname(out))
+StackProf.run(mode: :cpu, raw: true, interval: 500, out: out) do
+  i = 0
+  while i < iters
+    WORKLOAD.each { |instr| gte.execute(instr) }
+    i += 1
+  end
+end
+
+report = StackProf::Report.new(Marshal.load(IO.binread(out)))
+total = report.data[:samples].to_i
+puts "Total samples: #{total}"
+puts
+puts "=== Top 25 by self-time ==="
+report.print_text(false, 25, nil, nil, nil, nil, $stdout)
+puts
+puts "=== Top 15 by total-time ==="
+report.print_text(true, 15, nil, nil, nil, nil, $stdout)
