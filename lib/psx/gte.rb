@@ -409,7 +409,10 @@ module PSX
 
     # --- Helpers: saturation / overflow flags -------------------------------
 
-    # 43-bit signed overflow detection on MAC1/2/3 values (i = 1,2,3).
+    # 43-bit signed overflow detection on MAC1/2/3 values. Kept around for
+    # any caller that doesn't know the channel at compile time; the hot path
+    # uses the per-channel specialisations (mac_set1/2/3) below which inline
+    # the FLAG bit constants directly.
     def check_mac_overflow(i, v)
       @flag |= MAC_POS_FLAGS[i] if v >= 0x80_0000_0000  # 1 << 43
       @flag |= MAC_NEG_FLAGS[i] if v < -0x80_0000_0000
@@ -539,23 +542,55 @@ module PSX
     end
 
     # MAC1/2/3 := (a + b + c + d) >> shift, then IR1/2/3 := saturate(MACi).
-    # Used by RTPS, MVMVA, etc. Each addition is checked for 43-bit overflow.
-    # The hardware MAC registers are 32-bit visible, so we go straight to a
-    # 32-bit truncation and sign-extension. The previous 64-bit normalisation
-    # step (& 0xFFFF_FFFF_FFFF_FFFF + sign_to_64) was redundant: it
-    # immediately got overwritten by the 32-bit truncation, but each call to
-    # it allocated a temporary Bignum because the 64-bit mask literal is
-    # larger than Ruby's Fixnum range on 64-bit hosts. Profiling the GTE
-    # micro-bench showed ~97% of samples in GC; this was the culprit.
-    def mac_set(i, accum, shift, lm)
-      check_mac_overflow(i, accum)
+    # Per-channel specialisations: each call site knows which channel it's
+    # writing to, so we avoid a case-on-i for the FLAG bits and the MAC/IR
+    # ivars. The hot loop (cmd_rtps, light_normal, light_color) calls these
+    # three at a time so the savings compound.
+    def mac_set1(accum, shift, lm)
+      @flag |= FLAG_MAC1_POS if accum >= 0x80_0000_0000
+      @flag |= FLAG_MAC1_NEG if accum < -0x80_0000_0000
       result = accum >> shift
-      mac32 = sign32(result & 0xFFFF_FFFF)
-      case i
-      when 1 then @mac1 = mac32; @ir1 = sat_ir(1, result, lm)
-      when 2 then @mac2 = mac32; @ir2 = sat_ir(2, result, lm)
-      when 3 then @mac3 = mac32; @ir3 = sat_ir(3, result, lm)
-      end
+      @mac1 = sign32(result & 0xFFFF_FFFF)
+      lo = lm ? 0 : -0x8000
+      @ir1 = if result < lo
+               @flag |= FLAG_IR1_SAT; lo
+             elsif result > 0x7FFF
+               @flag |= FLAG_IR1_SAT; 0x7FFF
+             else
+               result
+             end
+      result
+    end
+
+    def mac_set2(accum, shift, lm)
+      @flag |= FLAG_MAC2_POS if accum >= 0x80_0000_0000
+      @flag |= FLAG_MAC2_NEG if accum < -0x80_0000_0000
+      result = accum >> shift
+      @mac2 = sign32(result & 0xFFFF_FFFF)
+      lo = lm ? 0 : -0x8000
+      @ir2 = if result < lo
+               @flag |= FLAG_IR2_SAT; lo
+             elsif result > 0x7FFF
+               @flag |= FLAG_IR2_SAT; 0x7FFF
+             else
+               result
+             end
+      result
+    end
+
+    def mac_set3(accum, shift, lm)
+      @flag |= FLAG_MAC3_POS if accum >= 0x80_0000_0000
+      @flag |= FLAG_MAC3_NEG if accum < -0x80_0000_0000
+      result = accum >> shift
+      @mac3 = sign32(result & 0xFFFF_FFFF)
+      lo = lm ? 0 : -0x8000
+      @ir3 = if result < lo
+               @flag |= FLAG_IR3_SAT; lo
+             elsif result > 0x7FFF
+               @flag |= FLAG_IR3_SAT; 0x7FFF
+             else
+               result
+             end
       result
     end
 
@@ -576,10 +611,10 @@ module PSX
       ay = (tr[1] << 12) + rt1[0] * vx + rt1[1] * vy + rt1[2] * vz
       az = (tr[2] << 12) + rt2[0] * vx + rt2[1] * vy + rt2[2] * vz
 
-      mac_set(1, ax, shift, lm)
-      mac_set(2, ay, shift, lm)
+      mac_set1(ax, shift, lm)
+      mac_set2(ay, shift, lm)
       # SZ FIFO push uses the unshifted-by-sf result; if sf=0 we still shift by 12.
-      mac_set(3, az, shift, lm)
+      mac_set3(az, shift, lm)
       sz_value = (az >> 12)
       push_sz(sz_value)
 
@@ -657,9 +692,9 @@ module PSX
       a1 = (tv[1] << 12) + mx[1][0] * mv[0] + mx[1][1] * mv[1] + mx[1][2] * mv[2]
       a2 = (tv[2] << 12) + mx[2][0] * mv[0] + mx[2][1] * mv[1] + mx[2][2] * mv[2]
 
-      mac_set(1, a0, shift, lm)
-      mac_set(2, a1, shift, lm)
-      mac_set(3, a2, shift, lm)
+      mac_set1(a0, shift, lm)
+      mac_set2(a1, shift, lm)
+      mac_set3(a2, shift, lm)
     end
 
     def cmd_op(shift, lm)
@@ -667,15 +702,15 @@ module PSX
       a1 = @ir3 * d2 - @ir2 * d3
       a2 = @ir1 * d3 - @ir3 * d1
       a3 = @ir2 * d1 - @ir1 * d2
-      mac_set(1, a1, shift, lm)
-      mac_set(2, a2, shift, lm)
-      mac_set(3, a3, shift, lm)
+      mac_set1(a1, shift, lm)
+      mac_set2(a2, shift, lm)
+      mac_set3(a3, shift, lm)
     end
 
     def cmd_sqr(shift, lm)
-      mac_set(1, @ir1 * @ir1, shift, lm)
-      mac_set(2, @ir2 * @ir2, shift, lm)
-      mac_set(3, @ir3 * @ir3, shift, lm)
+      mac_set1(@ir1 * @ir1, shift, lm)
+      mac_set2(@ir2 * @ir2, shift, lm)
+      mac_set3(@ir3 * @ir3, shift, lm)
     end
 
     def cmd_dpcs(shift, lm, color)
@@ -689,9 +724,9 @@ module PSX
       mac1_in += (((@fc[0] << 12) - mac1_in) >> shift) * @ir0
       mac2_in += (((@fc[1] << 12) - mac2_in) >> shift) * @ir0
       mac3_in += (((@fc[2] << 12) - mac3_in) >> shift) * @ir0
-      mac_set(1, mac1_in, shift, lm)
-      mac_set(2, mac2_in, shift, lm)
-      mac_set(3, mac3_in, shift, lm)
+      mac_set1(mac1_in, shift, lm)
+      mac_set2(mac2_in, shift, lm)
+      mac_set3(mac3_in, shift, lm)
       push_rgb_from_mac
     end
 
@@ -706,9 +741,9 @@ module PSX
       mac1_in += (((@fc[0] << 12) - mac1_in) >> shift) * @ir0
       mac2_in += (((@fc[1] << 12) - mac2_in) >> shift) * @ir0
       mac3_in += (((@fc[2] << 12) - mac3_in) >> shift) * @ir0
-      mac_set(1, mac1_in, shift, lm)
-      mac_set(2, mac2_in, shift, lm)
-      mac_set(3, mac3_in, shift, lm)
+      mac_set1(mac1_in, shift, lm)
+      mac_set2(mac2_in, shift, lm)
+      mac_set3(mac3_in, shift, lm)
       push_rgb_from_mac
     end
 
@@ -717,9 +752,9 @@ module PSX
       vx, vy, vz = @v[vi]
       ls = @ls
       ls0 = ls[0]; ls1 = ls[1]; ls2 = ls[2]
-      mac_set(1, ls0[0] * vx + ls0[1] * vy + ls0[2] * vz, shift, lm)
-      mac_set(2, ls1[0] * vx + ls1[1] * vy + ls1[2] * vz, shift, lm)
-      mac_set(3, ls2[0] * vx + ls2[1] * vy + ls2[2] * vz, shift, lm)
+      mac_set1(ls0[0] * vx + ls0[1] * vy + ls0[2] * vz, shift, lm)
+      mac_set2(ls1[0] * vx + ls1[1] * vy + ls1[2] * vz, shift, lm)
+      mac_set3(ls2[0] * vx + ls2[1] * vy + ls2[2] * vz, shift, lm)
     end
 
     # Background + LightColor * IR
@@ -728,9 +763,9 @@ module PSX
       lc0 = lc[0]; lc1 = lc[1]; lc2 = lc[2]
       bk = @bk
       ir1 = @ir1; ir2 = @ir2; ir3 = @ir3
-      mac_set(1, (bk[0] << 12) + lc0[0] * ir1 + lc0[1] * ir2 + lc0[2] * ir3, shift, lm)
-      mac_set(2, (bk[1] << 12) + lc1[0] * ir1 + lc1[1] * ir2 + lc1[2] * ir3, shift, lm)
-      mac_set(3, (bk[2] << 12) + lc2[0] * ir1 + lc2[1] * ir2 + lc2[2] * ir3, shift, lm)
+      mac_set1((bk[0] << 12) + lc0[0] * ir1 + lc0[1] * ir2 + lc0[2] * ir3, shift, lm)
+      mac_set2((bk[1] << 12) + lc1[0] * ir1 + lc1[1] * ir2 + lc1[2] * ir3, shift, lm)
+      mac_set3((bk[2] << 12) + lc2[0] * ir1 + lc2[1] * ir2 + lc2[2] * ir3, shift, lm)
     end
 
     def cmd_ncs(vi, shift, lm)
@@ -749,9 +784,9 @@ module PSX
       light_normal(vi, shift, lm)
       light_color(shift, lm)
       r, g, b, _ = @rgbc
-      mac_set(1, (r * @ir1) << 4, shift, lm)
-      mac_set(2, (g * @ir2) << 4, shift, lm)
-      mac_set(3, (b * @ir3) << 4, shift, lm)
+      mac_set1((r * @ir1) << 4, shift, lm)
+      mac_set2((g * @ir2) << 4, shift, lm)
+      mac_set3((b * @ir3) << 4, shift, lm)
       push_rgb_from_mac
     end
 
@@ -772,9 +807,9 @@ module PSX
       mac1_in += (((@fc[0] << 12) - mac1_in) >> shift) * @ir0
       mac2_in += (((@fc[1] << 12) - mac2_in) >> shift) * @ir0
       mac3_in += (((@fc[2] << 12) - mac3_in) >> shift) * @ir0
-      mac_set(1, mac1_in, shift, lm)
-      mac_set(2, mac2_in, shift, lm)
-      mac_set(3, mac3_in, shift, lm)
+      mac_set1(mac1_in, shift, lm)
+      mac_set2(mac2_in, shift, lm)
+      mac_set3(mac3_in, shift, lm)
       push_rgb_from_mac
     end
 
@@ -787,9 +822,9 @@ module PSX
     def cmd_cc(shift, lm)
       r, g, b, _ = @rgbc
       light_color(shift, lm)
-      mac_set(1, (r * @ir1) << 4, shift, lm)
-      mac_set(2, (g * @ir2) << 4, shift, lm)
-      mac_set(3, (b * @ir3) << 4, shift, lm)
+      mac_set1((r * @ir1) << 4, shift, lm)
+      mac_set2((g * @ir2) << 4, shift, lm)
+      mac_set3((b * @ir3) << 4, shift, lm)
       push_rgb_from_mac
     end
 
@@ -802,9 +837,9 @@ module PSX
       mac1_in += (((@fc[0] << 12) - mac1_in) >> shift) * @ir0
       mac2_in += (((@fc[1] << 12) - mac2_in) >> shift) * @ir0
       mac3_in += (((@fc[2] << 12) - mac3_in) >> shift) * @ir0
-      mac_set(1, mac1_in, shift, lm)
-      mac_set(2, mac2_in, shift, lm)
-      mac_set(3, mac3_in, shift, lm)
+      mac_set1(mac1_in, shift, lm)
+      mac_set2(mac2_in, shift, lm)
+      mac_set3(mac3_in, shift, lm)
       push_rgb_from_mac
     end
 
@@ -816,23 +851,23 @@ module PSX
       mac1_in += (((@fc[0] << 12) - mac1_in) >> shift) * @ir0
       mac2_in += (((@fc[1] << 12) - mac2_in) >> shift) * @ir0
       mac3_in += (((@fc[2] << 12) - mac3_in) >> shift) * @ir0
-      mac_set(1, mac1_in, shift, lm)
-      mac_set(2, mac2_in, shift, lm)
-      mac_set(3, mac3_in, shift, lm)
+      mac_set1(mac1_in, shift, lm)
+      mac_set2(mac2_in, shift, lm)
+      mac_set3(mac3_in, shift, lm)
       push_rgb_from_mac
     end
 
     def cmd_gpf(shift, lm)
-      mac_set(1, @ir0 * @ir1, shift, lm)
-      mac_set(2, @ir0 * @ir2, shift, lm)
-      mac_set(3, @ir0 * @ir3, shift, lm)
+      mac_set1(@ir0 * @ir1, shift, lm)
+      mac_set2(@ir0 * @ir2, shift, lm)
+      mac_set3(@ir0 * @ir3, shift, lm)
       push_rgb_from_mac
     end
 
     def cmd_gpl(shift, lm)
-      mac_set(1, (@mac1 << shift) + @ir0 * @ir1, shift, lm)
-      mac_set(2, (@mac2 << shift) + @ir0 * @ir2, shift, lm)
-      mac_set(3, (@mac3 << shift) + @ir0 * @ir3, shift, lm)
+      mac_set1((@mac1 << shift) + @ir0 * @ir1, shift, lm)
+      mac_set2((@mac2 << shift) + @ir0 * @ir2, shift, lm)
+      mac_set3((@mac3 << shift) + @ir0 * @ir3, shift, lm)
       push_rgb_from_mac
     end
   end
