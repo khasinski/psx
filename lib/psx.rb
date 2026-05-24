@@ -181,6 +181,7 @@ module PSX
         sio0.tick(batch_cycles)
         dma.tick_cycles(batch_cycles)
         cdrom.tick(batch_cycles)
+        cpu.check_interrupts
 
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0

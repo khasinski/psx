@@ -314,13 +314,15 @@ class CPUSpec < Minitest::Test
     refute_equal 0, @cpu.instance_variable_get(:@next_pc) - @cpu.instance_variable_get(:@pc),
                  "branch should have redirected @next_pc"
 
-    # Pre-bake a pending VBlank IRQ and force the interrupt check to fire on
-    # the very next step (the delay slot).
+    # Pre-bake a pending VBlank IRQ. The interrupt check now lives in the
+    # run loop (run_fast calls cpu.check_interrupts at the 64-cycle batch
+    # boundary), so to exercise the "IRQ pending while about to enter the
+    # delay slot" path we trigger the check directly. check_interrupts
+    # snapshots @current_pc/@in_delay_slot from @pc/@next_in_delay_slot
+    # before raising EXC_INT.
     interrupts.request(PSX::Interrupts::IRQ_VBLANK)
-    @cpu.instance_variable_set(:@interrupt_check_counter, 64)
-
     pc_before_delay_slot = @cpu.instance_variable_get(:@pc)
-    @cpu.step
+    @cpu.check_interrupts
 
     # The CPU should have taken the exception with EPC pointing at the
     # branch (= delay_slot - 4) and BD = 1.

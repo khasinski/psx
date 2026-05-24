@@ -52,10 +52,6 @@ module PSX
       @branch_target = nil
       @current_pc = @pc
 
-      # Interrupt check counter - only check every N cycles
-      @interrupt_check_counter = 0
-      @interrupt_check_interval = 64
-
       # Cycles consumed by the most recent step. Defaults to 1 per
       # instruction; loads bump it to reflect the R3000A load-delay slot plus
       # main-RAM access latency (the BIOS code path is mostly uncached). The
@@ -82,20 +78,6 @@ module PSX
       @current_pc = pc
       @in_delay_slot = @next_in_delay_slot
       @next_in_delay_slot = false
-
-      # Check for pending interrupts (only every N cycles for performance).
-      # If this fires, @pc/@next_pc/@current_pc are clobbered to the vector
-      # and we continue with the vector's first instruction.
-      @interrupt_check_counter += 1
-      if @interrupt_check_counter >= @interrupt_check_interval
-        @interrupt_check_counter = 0
-        check_interrupts
-        if @pc != pc
-          # Exception was taken; rebind the loop variables to the vector.
-          pc = @pc
-          next_pc = @next_pc
-        end
-      end
 
       # Optional TTY hook: intercept BIOS A-table entry so PS-EXE programs
       # built against the standard BIOS putchar/puts functions can be tested
@@ -310,19 +292,24 @@ module PSX
       lines.join("\n")
     end
 
-    private
-
+    # Called from run_fast at the same ~64-cycle batch boundary as the
+    # device ticks. Previously this was done inside step() with its own
+    # counter; lifting it out drops one ivar inc + branch per step. When
+    # an IRQ actually fires we have to refresh @current_pc/@in_delay_slot
+    # to reflect the *about-to-execute* instruction (step's own snapshot
+    # only covers what just ran), otherwise exception() records the
+    # wrong EPC/BD and the BIOS interrupt path goes off the rails.
     def check_interrupts
       return unless @interrupts
-
-      # Update hardware IRQ status in COP0
       @cop0.set_hardware_irq(@interrupts.pending?)
-
-      # If interrupts are pending and enabled, trigger exception
       if @cop0.interrupt_pending?
+        @current_pc = @pc
+        @in_delay_slot = @next_in_delay_slot
         exception(COP0::EXC_INT)
       end
     end
+
+    private
 
     # Intercept BIOS jump-table calls for PS-EXE testing. Returns true when
     # a known function (currently putchar/puts on A and B tables) was handled
