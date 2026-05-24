@@ -26,10 +26,11 @@ module PSX
 
     def initialize(memory, interrupts: nil)
       @memory = memory
-      # Direct references for the inlined RAM fast paths in op_lw / op_sw,
-      # so the common case (load/store that hits main RAM) doesn't pay
-      # for a Memory#read32 / write32 method dispatch on every hit.
+      # Direct references for inlined fast paths so the common-case load,
+      # store, and instruction fetch don't pay for a Memory method
+      # dispatch on every step.
       @ram_words = memory.ram_words
+      @bios_words = memory.bios_words
       @region_mask = Memory::REGION_MASK
       @interrupts = interrupts
       @regs = Array.new(32, 0)  # R0 is always 0
@@ -112,7 +113,17 @@ module PSX
         exception(COP0::EXC_ADEL, bad_addr: pc)
         return
       end
-      instruction = @memory.fetch32(pc)
+      # Inlined fetch32: the two hot regions (RAM / BIOS ROM) handled here,
+      # everything else delegated to Memory#fetch32 which returns nil for
+      # a forbidden region.
+      phys = pc & @region_mask[(pc >> 29) & 0x7]
+      instruction = if phys < 0x0080_0000
+                      @ram_words[(phys & 0x001F_FFFF) >> 2]
+                    elsif phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
+                      @bios_words[(phys - 0x1FC0_0000) >> 2]
+                    else
+                      @memory.fetch32(pc)
+                    end
       if instruction.nil?
         exception(COP0::EXC_IBE, bad_addr: pc)
         return

@@ -25,7 +25,7 @@ module PSX
     ].freeze
 
     attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0, :spu
-    attr_reader :ram_words  # exposed so cpu op_lw/op_sw can inline the RAM fast path
+    attr_reader :ram_words, :bios_words  # exposed so CPU can inline read32/fetch32 fast paths
 
     def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil)
       @bios = bios
