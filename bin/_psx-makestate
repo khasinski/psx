@@ -1,0 +1,63 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Build a save state from a fresh BIOS boot + N cycles. Useful for the
+# "I'm debugging Rage Racer and don't want to re-boot the BIOS every
+# time" loop — capture the post-boot state once, then load it from
+# every subsequent diagnostic / bench run.
+#
+# Usage:
+#   bin/_psx-makestate -d disc.cue -c 800_000_000 -o tmp/rage-post-boot.psxstate
+#   bin/_psx-makestate -c 20_000_000 -o tmp/bios-boot.psxstate     # BIOS only
+
+$stdout.sync = true
+RubyVM::YJIT.enable
+require_relative "../lib/psx"
+
+bios   = ENV["PSX_BIOS"] || "SCPH1001.BIN"
+disc   = nil
+cycles = 800_000_000
+out    = "tmp/state.psxstate"
+
+args = ARGV.dup
+while (arg = args.shift)
+  case arg
+  when "-b", "--bios"   then bios   = args.shift
+  when "-d", "--disc"   then disc   = args.shift
+  when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
+  when "-o", "--out"    then out    = args.shift
+  when "-h", "--help"
+    puts "Usage: _psx-makestate [-b BIOS] [-d DISC.cue] [-c CYCLES] [-o OUT]"
+    exit 0
+  else
+    abort "Unknown arg: #{arg}"
+  end
+end
+
+abort "BIOS not found: #{bios}" unless File.exist?(bios)
+abort "Disc not found: #{disc}" if disc && !File.exist?(disc)
+
+require "fileutils"
+FileUtils.mkdir_p(File.dirname(out))
+
+emu = PSX::Emulator.new(bios, disc_path: disc)
+puts "Booting #{bios} (#{disc ? "disc=#{disc}" : "no disc"}) for #{cycles} cycles..."
+
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+# Run in chunks so we can show progress on long boots.
+chunk = 25_000_000
+ran = 0
+while ran < cycles
+  step = [chunk, cycles - ran].min
+  emu.run(steps: step)
+  ran += step
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+  mhz = (ran / elapsed) / 1_000_000.0
+  printf "  [%6.1fs] %11d / %d  (%.2f MHz)  PC=%08X\n", elapsed, ran, cycles, mhz, emu.cpu.pc
+end
+
+emu.save_state(out)
+size_mb = File.size(out) / 1024.0 / 1024.0
+puts ""
+puts format("Saved %.2f MB to %s", size_mb, out)
+puts format("Final PC: 0x%08X", emu.cpu.pc)
