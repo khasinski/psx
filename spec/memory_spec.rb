@@ -90,13 +90,27 @@ class MemorySpec < Minitest::Test
     assert_equal 0xABCD_1234, result
   end
 
-  def test_ram_mirrors
-    # PS1 RAM is 2MB, mirrored 4 times in first 8MB
+  # The PSX RAM-decode region is 8 MB but only the low 2 MB is physical
+  # chip. Reads of the upper 6 MB *do* mirror back into the populated
+  # bank — games legitimately store data via 0x80100000 and read it
+  # back through 0x80100000 expecting to see what they wrote. But
+  # writes to the upper 6 MB are silently DROPPED (the unpopulated
+  # DRAM banks ack the write without affecting the populated bank
+  # below). Without this asymmetry, Rage Racer's RLE decompressor
+  # clobbers the BIOS exception handler at 0x80000080 by writing to
+  # 0x80200000+ and the game stops making forward progress.
+  def test_upper_ram_region_reads_mirror_writes_drop
     @memory.write32(0x8000_0000, 0x11111111)
 
-    # Should read same value from mirror
-    result = @memory.read32(0x8020_0000)
-    assert_equal 0x11111111, result
+    # Reads of upper-region mirror back into the populated 2 MB chip.
+    assert_equal 0x11111111, @memory.read32(0x8020_0000),
+                 "upper-region read should mirror back into 2 MB chip"
+
+    # Writes to upper region are dropped — do NOT clobber the lower
+    # 2 MB chip via the mirror.
+    @memory.write32(0x8020_0000, 0xDEADBEEF)
+    assert_equal 0x11111111, @memory.read32(0x8000_0000),
+                 "upper-region write must not clobber 2 MB chip via mirror"
   end
 
   def test_byte_access

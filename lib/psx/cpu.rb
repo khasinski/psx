@@ -167,8 +167,11 @@ module PSX
             exception(COP0::EXC_ADES, bad_addr: addr)
           elsif !@memory.cache_isolated
             ph = addr & @region_mask[(addr >> 29) & 0x7]
-            if ph < 0x0080_0000
-              @ram_words[(ph & 0x001F_FFFF) >> 2] = @regs[rt] & 0xFFFF_FFFF
+            if ph < 0x0020_0000
+              @ram_words[ph >> 2] = @regs[rt] & 0xFFFF_FFFF
+            elsif ph < 0x0080_0000
+              # Upper 6 MB of RAM-decode region: write dropped (see
+              # Memory#write8 comment on asymmetric mirror behaviour).
             else
               @memory.write32(addr, @regs[rt])
             end
@@ -1153,8 +1156,10 @@ module PSX
       # is fine for that case.
       return if @memory.cache_isolated
       phys = addr & @region_mask[(addr >> 29) & 0x7]
-      if phys < 0x0080_0000
-        @ram_words[(phys & 0x001F_FFFF) >> 2] = @regs[rt] & 0xFFFF_FFFF
+      if phys < 0x0020_0000
+        @ram_words[phys >> 2] = @regs[rt] & 0xFFFF_FFFF
+      elsif phys < 0x0080_0000
+        # Upper 6 MB of RAM-decode region: write dropped
       else
         @memory.write32(addr, @regs[rt])
       end
