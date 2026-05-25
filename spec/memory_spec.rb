@@ -91,26 +91,24 @@ class MemorySpec < Minitest::Test
   end
 
   # The PSX RAM-decode region is 8 MB but only the low 2 MB is physical
-  # chip. Reads of the upper 6 MB *do* mirror back into the populated
-  # bank — games legitimately store data via 0x80100000 and read it
-  # back through 0x80100000 expecting to see what they wrote. But
-  # writes to the upper 6 MB are silently DROPPED (the unpopulated
-  # DRAM banks ack the write without affecting the populated bank
-  # below). Without this asymmetry, Rage Racer's RLE decompressor
-  # clobbers the BIOS exception handler at 0x80000080 by writing to
-  # 0x80200000+ and the game stops making forward progress.
-  def test_upper_ram_region_reads_mirror_writes_drop
+  # chip. The address decoder routes bits 0..20 to the chip, so every
+  # access within the 8 MB region targets the same 2 MB cell — both
+  # reads and writes mirror symmetrically. Rage Racer relies on this:
+  # its stack and ra-save slots live at 0x80200000+, and on a return
+  # the saved ra would be lost if upper-region writes were dropped.
+  def test_upper_ram_region_mirrors_symmetrically
     @memory.write32(0x8000_0000, 0x11111111)
-
-    # Reads of upper-region mirror back into the populated 2 MB chip.
     assert_equal 0x11111111, @memory.read32(0x8020_0000),
                  "upper-region read should mirror back into 2 MB chip"
 
-    # Writes to upper region are dropped — do NOT clobber the lower
-    # 2 MB chip via the mirror.
+    # Writes through the upper-region alias commit to the populated
+    # chip too (any address with the same low 21 bits hits the same
+    # cell).
     @memory.write32(0x8020_0000, 0xDEADBEEF)
-    assert_equal 0x11111111, @memory.read32(0x8000_0000),
-                 "upper-region write must not clobber 2 MB chip via mirror"
+    assert_equal 0xDEADBEEF, @memory.read32(0x8000_0000),
+                 "upper-region write should commit through the mirror"
+    assert_equal 0xDEADBEEF, @memory.read32(0x8060_0000),
+                 "any mirror alias should observe the same value"
   end
 
   def test_byte_access

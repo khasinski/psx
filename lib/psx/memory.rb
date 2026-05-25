@@ -177,18 +177,14 @@ module PSX
 
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      # RAM (most common). Reads of the upper 6 MB of the decoded region
-      # mirror back to the 2 MB chip (games legitimately store + read back
-      # from there), but writes to the upper 6 MB are silently DROPPED:
-      # the unpopulated DRAM banks ack the cycle without affecting the
-      # populated bank below. Without this asymmetric behaviour Rage
-      # Racer's RLE decompressor (which writes pixel data to 0x80200000+)
-      # clobbers the BIOS exception handler at 0x80000080 via the mirror.
-      if phys < RAM_SIZE
-        @ram.write8(phys, value)
+      # PSX RAM chip is 2 MB but the address decoder uses an 8 MB window;
+      # bits 0..20 are the only ones routed to the chip, so every store
+      # within the 8 MB region commits to the same 2 MB cell (symmetric
+      # mirror, matches real hardware).
+      if phys < 0x0080_0000
+        @ram.write8(phys & RAM_MIRROR_MASK, value)
         return
       end
-      return if phys < 0x0080_0000
 
       # Scratchpad
       if phys >= 0x1F80_0000 && phys < 0x1F80_0400
@@ -211,12 +207,11 @@ module PSX
 
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      # RAM (see write8 note on asymmetric upper-region behaviour).
-      if phys < RAM_SIZE
-        @ram.write16(phys, value)
+      # RAM (see write8 note on symmetric mirror behaviour).
+      if phys < 0x0080_0000
+        @ram.write16(phys & RAM_MIRROR_MASK, value)
         return
       end
-      return if phys < 0x0080_0000
 
       # Scratchpad
       if phys >= 0x1F80_0000 && phys < 0x1F80_0400
@@ -242,12 +237,11 @@ module PSX
       # Fast path: translate virtual to physical
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
 
-      # Inlined RAM fast path. Upper 6 MB writes drop (see write8 note).
-      if phys < RAM_SIZE
-        @ram_words[phys >> 2] = value & 0xFFFF_FFFF
+      # Inlined RAM fast path (see write8 note on symmetric mirror).
+      if phys < 0x0080_0000
+        @ram_words[(phys & RAM_MIRROR_MASK) >> 2] = value & 0xFFFF_FFFF
         return
       end
-      return if phys < 0x0080_0000
 
       # Scratchpad
       if phys >= 0x1F80_0000 && phys < 0x1F80_0400
