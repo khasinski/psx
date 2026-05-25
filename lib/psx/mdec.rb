@@ -42,6 +42,35 @@ module PSX
     CMD_SET_IDCT_TABLE     = 3   # load IDCT scale table (64 × s16 = 128 bytes)
     # 4..7 reserved
 
+    # Zig-zag scan order for an 8x8 DCT block — the layout MDEC's RLC
+    # stream uses to walk the coefficients (low-frequency first, then
+    # diagonally outward). Standard JPEG / MPEG zigzag.
+    ZIGZAG = [
+       0,  1,  8, 16,  9,  2,  3, 10,
+      17, 24, 32, 25, 18, 11,  4,  5,
+      12, 19, 26, 33, 40, 48, 41, 34,
+      27, 20, 13,  6,  7, 14, 21, 28,
+      35, 42, 49, 56, 57, 50, 43, 36,
+      29, 22, 15, 23, 30, 37, 44, 51,
+      58, 59, 52, 45, 38, 31, 39, 46,
+      53, 60, 61, 54, 47, 55, 62, 63
+    ].freeze
+
+    # Precomputed cosines for the 8x8 IDCT. We use a straightforward
+    # direct-form IDCT; precision is good enough that the test fixtures
+    # render visually correct, even if not bit-exact with the hardware.
+    IDCT_COS = Array.new(8) do |k|
+      Array.new(8) do |n|
+        scale = (k.zero? ? 1.0 / Math.sqrt(2) : 1.0)
+        Math.cos((2 * n + 1) * k * Math::PI / 16) * scale
+      end
+    end.freeze
+
+    # End-of-block marker in the RLC stream: any halfword equal to 0xFE00
+    # terminates the current block (the decoder then advances to the
+    # header of the next block). Encoder convention; not a runtime flag.
+    RLC_EOB = 0xFE00
+
     def initialize
       reset
     end
@@ -78,13 +107,16 @@ module PSX
 
     # --- Bus interface -----------------------------------------------------
 
-    # Read MDEC0: drain a word from the decoder output. Phase-2 stub
-    # returns zero but tracks a remaining count, so the FIFO eventually
-    # reports "empty" — games that DMA out a fixed number of words still
-    # complete and then move on.
+    # Read MDEC0: drain a word from the decoder output FIFO. After Phase 3
+    # this returns real decoded pixel data (packed in the format the game
+    # requested via the last CMD_DECODE).
     def read32_data
-      @output_words_remaining -= 1 if @output_words_remaining.positive?
-      0
+      if @output_words_remaining.positive?
+        @output_words_remaining -= 1
+        @output_fifo.shift || 0
+      else
+        0
+      end
     end
 
     # Read MDEC1: the live status word.
@@ -202,17 +234,231 @@ module PSX
       end
     end
 
-    # Phase-2 "honest stub": after the game finishes feeding us a decode
-    # stream, claim a generous output buffer is ready. Real decoder
-    # (phase 3) will compute the correct macroblock-by-macroblock output
-    # size; for now we just say "lots of zeros available" so the game's
-    # DMA-out drain doesn't hang waiting for output that never came.
+    # Phase 3: walk the RLC stream submitted via CMD_DECODE, decompress
+    # each block (header → RLC pairs → unzig-zag → dequantise → IDCT),
+    # assemble macroblocks for 15/24-bit modes (Cr, Cb, 4×Y → YCbCr → RGB),
+    # and pack the resulting pixels into the output FIFO in the format
+    # the game requested.
     def finish_decode
-      # 4 KiB worth of words covers any single-block / single-macroblock
-      # read the test EXEs do; well over what fits in the real FIFO but
-      # the game's DMA stops at the count it configured so the excess is
-      # harmless.
-      @output_words_remaining = 1024
+      halfwords = []
+      @decode_buffer.each do |word|
+        halfwords << (word & 0xFFFF)
+        halfwords << ((word >> 16) & 0xFFFF)
+      end
+
+      blocks_per_mb = (@output_depth <= 1) ? 1 : 6
+      output_bytes  = []
+      pos           = 0
+
+      while pos < halfwords.size
+        blocks = []
+        blocks_per_mb.times do |bi|
+          # Block index decides which quant table to use: 0/1 = chroma
+          # (Cr, Cb), 2..5 = luma. 4-bit/8-bit modes only ever have a
+          # single Y block so they always use the luma table.
+          qtable = if blocks_per_mb == 1 || bi >= 2
+                     @quant_luma
+                   else
+                     @quant_chroma
+                   end
+          block, pos = decode_block(halfwords, pos, qtable)
+          break if block.nil?
+          blocks << block
+        end
+        break if blocks.size < blocks_per_mb
+
+        case @output_depth
+        when 0 then pack_4bit_into(output_bytes, blocks[0])
+        when 1 then pack_8bit_into(output_bytes, blocks[0])
+        when 2 then pack_24bit_into(output_bytes, blocks)
+        when 3 then pack_15bit_into(output_bytes, blocks)
+        end
+      end
+
+      # Pack bytes into 32-bit words (little-endian). MDEC's FIFO words
+      # are read by DMA1 in the same order they're produced.
+      @output_fifo.clear
+      i = 0
+      while i < output_bytes.size
+        word = (output_bytes[i] || 0) |
+               ((output_bytes[i + 1] || 0) << 8) |
+               ((output_bytes[i + 2] || 0) << 16) |
+               ((output_bytes[i + 3] || 0) << 24)
+        @output_fifo << word
+        i += 4
+      end
+      @output_words_remaining = @output_fifo.size
+    end
+
+    # Decode a single 8x8 block. Returns [pixel_block_64ints, new_pos] or
+    # [nil, pos] if the stream is truncated.
+    def decode_block(halfwords, pos, qtable)
+      return [nil, pos] if pos >= halfwords.size
+
+      # Skip blocks the encoder marked as empty: a leading EOB means
+      # "this whole block is zero". Output an all-zero 8x8 block; the
+      # IDCT of zeros is just zeros plus the DC offset (also 0 here).
+      header = halfwords[pos]
+      pos += 1
+      return [Array.new(64, 0), pos] if header == RLC_EOB
+
+      q_scale = (header >> 10) & 0x3F
+      dc_raw  = header & 0x3FF
+      dc_raw  -= 0x400 if dc_raw >= 0x200   # sign-extend 10-bit
+
+      # Reconstruct quantised DCT coefficients in natural (un-zigzagged)
+      # order. The header DC value is at position 0; subsequent RLC pairs
+      # describe (zero-run, AC-value) at zigzag offsets 1..63.
+      coeffs = Array.new(64, 0)
+      coeffs[0] = dc_raw * qtable[0]   # DC is dequantised with quant[0] only
+
+      idx = 1
+      while pos < halfwords.size
+        hw = halfwords[pos]
+        pos += 1
+        break if hw == RLC_EOB
+
+        run = (hw >> 10) & 0x3F
+        val = hw & 0x3FF
+        val -= 0x400 if val >= 0x200    # sign-extend 10-bit
+
+        idx += run
+        break if idx >= 64
+
+        # Standard MDEC dequantisation: val * qtable[zigzag_idx] * qscale * 2 / 16.
+        # When q_scale == 0 the formula degenerates to plain val * qtable[idx] * 2
+        # (matches the unscaled case some encoders emit).
+        zz   = ZIGZAG[idx]
+        coef = if q_scale.zero?
+                 val * qtable[zz] * 2
+               else
+                 (val * qtable[zz] * q_scale * 2) / 16
+               end
+        coeffs[zz] = coef
+        idx += 1
+      end
+      # End-of-stream without an explicit EOB = implicit EOB; emit the
+      # partial block we built up. (Some encoders, including the one
+      # used for .tests/mdec/4bit/heart.mdec, omit the trailing EOB.)
+
+      [idct_8x8(coeffs), pos]
+    end
+
+    # In-place 8x8 inverse DCT. Input: 64 ints (un-zigzagged DCT coeffs).
+    # Output: 64 ints, signed 9-bit clamped (-256..255), one per pixel.
+    # Two-pass: row IDCT then column IDCT.
+    def idct_8x8(coeffs)
+      # Pass 1: row IDCT into intermediate buffer
+      tmp = Array.new(64, 0.0)
+      8.times do |y|
+        8.times do |x|
+          sum = 0.0
+          8.times do |k|
+            sum += coeffs[y * 8 + k] * IDCT_COS[k][x]
+          end
+          tmp[y * 8 + x] = sum / 2.0
+        end
+      end
+
+      # Pass 2: column IDCT
+      out = Array.new(64, 0)
+      8.times do |x|
+        8.times do |y|
+          sum = 0.0
+          8.times do |k|
+            sum += tmp[k * 8 + x] * IDCT_COS[k][y]
+          end
+          v = (sum / 2.0).round
+          v = -256 if v < -256
+          v = 255  if v > 255
+          out[y * 8 + x] = v
+        end
+      end
+      out
+    end
+
+    # 4-bit indexed output: pack each pixel as a 4-bit nybble, two per
+    # byte. The hardware quantises the 9-bit pixel to 4 bits by taking
+    # the high nybble of the unsigned value (after +128 bias).
+    def pack_4bit_into(output_bytes, block)
+      32.times do |i|
+        lo = clamp_nybble(block[i * 2])
+        hi = clamp_nybble(block[i * 2 + 1])
+        output_bytes << (lo | (hi << 4))
+      end
+    end
+
+    # 8-bit indexed output: pack each pixel as a byte. Signed or unsigned
+    # based on output_signed flag.
+    def pack_8bit_into(output_bytes, block)
+      64.times do |i|
+        v = block[i]
+        output_bytes << (@output_signed ? (v & 0xFF) : clamp_byte(v))
+      end
+    end
+
+    # 15-bit RGB output (RGB555 little-endian halfwords). 16x16 macroblock:
+    # 4 Y blocks + 1 Cb + 1 Cr (chroma is half-res, upsampled 2x). Two
+    # bytes per pixel, 256 pixels = 512 bytes per macroblock.
+    def pack_15bit_into(output_bytes, blocks)
+      cr, cb, y0, y1, y2, y3 = blocks
+      bit15 = @output_bit15 ? 0x8000 : 0
+      ys    = [y0, y1, y2, y3]
+      16.times do |y|
+        16.times do |x|
+          # Pick the Y sub-block (Y0=TL, Y1=TR, Y2=BL, Y3=BR), 8x8 each.
+          yb = ys[(y >> 3) * 2 + (x >> 3)]
+          yv = yb[(y & 7) * 8 + (x & 7)]
+          # Chroma: half-resolution, upsampled by nearest-neighbour.
+          cv = cb[(y >> 1) * 8 + (x >> 1)]
+          rv = cr[(y >> 1) * 8 + (x >> 1)]
+          r, g, b = ycbcr_to_rgb(yv, cv, rv)
+          pix = ((r >> 3) & 0x1F) | (((g >> 3) & 0x1F) << 5) | (((b >> 3) & 0x1F) << 10) | bit15
+          output_bytes << (pix & 0xFF)
+          output_bytes << ((pix >> 8) & 0xFF)
+        end
+      end
+    end
+
+    # 24-bit RGB output: 3 bytes per pixel, B G R order. Same 16x16
+    # macroblock structure as 15-bit.
+    def pack_24bit_into(output_bytes, blocks)
+      cr, cb, y0, y1, y2, y3 = blocks
+      ys = [y0, y1, y2, y3]
+      16.times do |y|
+        16.times do |x|
+          yb = ys[(y >> 3) * 2 + (x >> 3)]
+          yv = yb[(y & 7) * 8 + (x & 7)]
+          cv = cb[(y >> 1) * 8 + (x >> 1)]
+          rv = cr[(y >> 1) * 8 + (x >> 1)]
+          r, g, b = ycbcr_to_rgb(yv, cv, rv)
+          output_bytes << r << g << b
+        end
+      end
+    end
+
+    # YCbCr → RGB888 using BT.601 coefficients. Y, Cb, Cr are the signed
+    # 9-bit decoder outputs; we add 128 to bias Y to unsigned and let
+    # Cb/Cr stay signed (they're chrominance offsets from neutral grey).
+    def ycbcr_to_rgb(y, cb, cr)
+      yf = y + 128
+      r = yf + 1.402   * cr
+      g = yf - 0.3441 * cb - 0.7139 * cr
+      b = yf + 1.7720 * cb
+      [clamp_byte(r.round), clamp_byte(g.round), clamp_byte(b.round)]
+    end
+
+    def clamp_byte(v)
+      return 0   if v < 0
+      return 255 if v > 255
+      v
+    end
+
+    # Bias signed-9 to unsigned-8, then take the high nybble for 4-bit
+    # output. Hardware uses the upper 4 bits of the unsigned-byte form.
+    def clamp_nybble(v)
+      b = clamp_byte(v + 128)
+      (b >> 4) & 0xF
     end
   end
 end
