@@ -39,7 +39,7 @@ module PSX
       @mdec = MDEC.new
       disc = disc_path ? Disc.open(disc_path) : nil
       @cdrom = CDROM.new(interrupts: @interrupts, disc: disc)
-      @dma = DMA.new(interrupts: @interrupts, spu: @spu, cdrom: @cdrom)
+      @dma = DMA.new(interrupts: @interrupts, spu: @spu, cdrom: @cdrom, mdec: @mdec)
       @gpu = GPU.new(interrupts: @interrupts)
       @timers = Timers.new(interrupts: @interrupts)
       @controller_state_proc = -> { 0xFFFF }

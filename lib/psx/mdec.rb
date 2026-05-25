@@ -57,26 +57,47 @@ module PSX
       # When we actually decode, the output FIFO will hold pixel data; for the
       # phase-1 stub it stays empty so the game sees "FIFO empty" on reads.
       @output_fifo      = []
+      # Quant tables (luma + chroma) and IDCT scale table. Stored when the
+      # game loads them; consumed by the decoder in phase 3.
+      @quant_luma       = Array.new(64, 0)
+      @quant_chroma     = Array.new(64, 0)
+      @idct_table       = Array.new(64, 0)
+      # Buffer of decode-command parameter words (RLE + scale headers).
+      # Phase 3 will consume this and produce pixel data.
+      @decode_buffer    = []
+      # Sub-state during a multi-word command load (so write32_data knows
+      # what to do with each successive word).
+      @load_target      = nil   # :quant_luma | :quant_chroma | :idct | :decode_data | nil
+      @load_offset      = 0
+      # Phase-2 "honest stub" output: number of output words still
+      # available for the game to drain. Set when a decode finishes;
+      # decremented on each read. Reads return 0 (no real decoder yet),
+      # but at least the DMA-out path completes instead of hanging.
+      @output_words_remaining = 0
     end
 
     # --- Bus interface -----------------------------------------------------
 
-    # Read MDEC0: dequeue from the output FIFO. Phase-1 stub: always empty.
+    # Read MDEC0: drain a word from the decoder output. Phase-2 stub
+    # returns zero but tracks a remaining count, so the FIFO eventually
+    # reports "empty" — games that DMA out a fixed number of words still
+    # complete and then move on.
     def read32_data
-      @output_fifo.shift || 0
+      @output_words_remaining -= 1 if @output_words_remaining.positive?
+      0
     end
 
     # Read MDEC1: the live status word.
     def read32_status
       status = 0
-      status |= STAT_OUTPUT_FIFO_EMPTY if @output_fifo.empty?
+      status |= STAT_OUTPUT_FIFO_EMPTY if @output_words_remaining.zero?
       # STAT_INPUT_FIFO_FULL stays 0 in the stub — we consume writes immediately.
       status |= STAT_COMMAND_BUSY if @params_remaining.positive?
       # DMA0 (data in) requested when DMA0 is enabled AND we're mid-command
-      # waiting for more parameter words. DMA1 (out) when DMA1 is enabled
-      # AND the output FIFO has data to drain. Both stay 0 in the stub.
+      # waiting for more parameter words.
       status |= STAT_DATA_IN_REQ  if @dma_in_enabled  && @params_remaining.positive?
-      status |= STAT_DATA_OUT_REQ if @dma_out_enabled && !@output_fifo.empty?
+      # DMA1 (out) when DMA1 is enabled AND there's output left to drain.
+      status |= STAT_DATA_OUT_REQ if @dma_out_enabled && @output_words_remaining.positive?
       status |= (@output_depth & 0x3) << 25
       status |= (1 << 24) if @output_signed
       status |= (1 << 23) if @output_bit15
@@ -92,27 +113,11 @@ module PSX
     def write32_data(word)
       word &= 0xFFFF_FFFF
       if @params_remaining.zero?
-        # New command word.
-        @command = (word >> 29) & 0x7
-        case @command
-        when CMD_DECODE
-          # Bits 25..0 = number of parameter words; bits 27-26 = output mode.
-          @output_depth  = (word >> 27) & 0x3
-          @output_signed = ((word >> 26) & 1) != 0
-          @output_bit15  = ((word >> 25) & 1) != 0
-          @params_remaining = word & 0xFFFF
-        when CMD_SET_QUANT_TABLE
-          # Bit 0 = include chroma table (extra 64 bytes). Phase-1: drop.
-          @params_remaining = ((word & 1) != 0) ? 32 : 16  # 64+64 or 64 bytes
-        when CMD_SET_IDCT_TABLE
-          @params_remaining = 32  # 64 × s16 = 128 bytes = 32 words
-        else
-          # CMD_NOP / unknown — drop, stays idle.
-          @params_remaining = 0
-        end
+        start_command(word)
       else
-        # Parameter / RLE data word. Phase-1 stub: just consume it.
+        consume_payload(word)
         @params_remaining -= 1
+        finish_decode if @params_remaining.zero? && @load_target == :decode_data
       end
     end
 
@@ -125,6 +130,89 @@ module PSX
       end
       @dma_in_enabled  = (word & CTRL_ENABLE_DMA_IN)  != 0
       @dma_out_enabled = (word & CTRL_ENABLE_DMA_OUT) != 0
+    end
+
+    private
+
+    def start_command(word)
+      @command = (word >> 29) & 0x7
+      case @command
+      when CMD_DECODE
+        # Bits 27..25 = output mode (depth, signed, bit15). 15..0 = data
+        # words to follow. Each one is a 32-bit pair of RLE codes.
+        @output_depth  = (word >> 27) & 0x3
+        @output_signed = ((word >> 26) & 1) != 0
+        @output_bit15  = ((word >> 25) & 1) != 0
+        @params_remaining = word & 0xFFFF
+        @load_target = :decode_data
+        @load_offset = 0
+        @decode_buffer.clear
+      when CMD_SET_QUANT_TABLE
+        # Bit 0 = include chroma table (extra 64 bytes). 64 bytes = 16
+        # words; 64+64 = 32 words.
+        chroma = (word & 1) != 0
+        @params_remaining = chroma ? 32 : 16
+        @load_target = :quant_luma
+        @load_offset = 0
+        @load_includes_chroma = chroma
+      when CMD_SET_IDCT_TABLE
+        @params_remaining = 32  # 64 × s16 = 128 bytes = 32 words
+        @load_target = :idct
+        @load_offset = 0
+      else
+        # CMD_NOP / unknown — stays idle.
+        @params_remaining = 0
+        @load_target = nil
+      end
+    end
+
+    def consume_payload(word)
+      case @load_target
+      when :decode_data
+        @decode_buffer << word
+      when :quant_luma
+        # Each word holds 4 bytes of the table (little-endian).
+        4.times do |i|
+          idx = @load_offset + i
+          next if idx >= 64
+          @quant_luma[idx] = (word >> (i * 8)) & 0xFF
+        end
+        @load_offset += 4
+        # After 64 luma bytes, switch to chroma if the command included it.
+        if @load_offset == 64 && @load_includes_chroma
+          @load_target = :quant_chroma
+          @load_offset = 0
+        end
+      when :quant_chroma
+        4.times do |i|
+          idx = @load_offset + i
+          next if idx >= 64
+          @quant_chroma[idx] = (word >> (i * 8)) & 0xFF
+        end
+        @load_offset += 4
+      when :idct
+        # Each word holds two signed-16 coefficients (little-endian).
+        2.times do |i|
+          idx = @load_offset + i
+          next if idx >= 64
+          raw = (word >> (i * 16)) & 0xFFFF
+          @idct_table[idx] = (raw & 0x8000) != 0 ? raw - 0x1_0000 : raw
+        end
+        @load_offset += 2
+      end
+    end
+
+    # Phase-2 "honest stub": after the game finishes feeding us a decode
+    # stream, claim a generous output buffer is ready. Real decoder
+    # (phase 3) will compute the correct macroblock-by-macroblock output
+    # size; for now we just say "lots of zeros available" so the game's
+    # DMA-out drain doesn't hang waiting for output that never came.
+    def finish_decode
+      # 4 KiB worth of words covers any single-block / single-macroblock
+      # read the test EXEs do; well over what fits in the real FIFO but
+      # the game's DMA stops at the count it configured so the excess is
+      # harmless.
+      @output_words_remaining = 1024
     end
   end
 end

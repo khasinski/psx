@@ -106,12 +106,13 @@ module PSX
     end
 
     attr_reader :channels, :dpcr, :dicr
-    attr_accessor :spu, :cdrom, :memory
+    attr_accessor :spu, :cdrom, :memory, :mdec
 
-    def initialize(interrupts: nil, spu: nil, cdrom: nil)
+    def initialize(interrupts: nil, spu: nil, cdrom: nil, mdec: nil)
       @interrupts = interrupts
       @spu = spu
       @cdrom = cdrom
+      @mdec = mdec
       @memory = nil  # set by Emulator after Memory is constructed
       @channels = Array.new(NUM_CHANNELS) { Channel.new }
       @dpcr = 0x0765_4321  # Default: all channels enabled with default priorities
@@ -280,7 +281,10 @@ module PSX
           transfer_cdrom(memory)
         when OTC
           transfer_otc(memory)
-        # Other channels can be added as needed
+        when MDEC_IN
+          transfer_mdec_in(memory)
+        when MDEC_OUT
+          transfer_mdec_out(memory)
         end
       end
     end
@@ -465,6 +469,51 @@ module PSX
       # still hold (they check CHCR after a single write, with no cycle gap).
       channel.finish!
       set_irq_flag(OTC)
+    end
+
+    # RAM -> MDEC0 (channel 0). The game sets up SyncMode 1 (request-sync)
+    # and we drain `block_size * block_count` words, each fed into the
+    # decoder's data-in port. Output never appears until phase 3 ships a
+    # real IDCT; phase 2 just makes sure the ingress path completes
+    # without hanging.
+    def transfer_mdec_in(memory)
+      channel = @channels[MDEC_IN]
+      size  = channel.block_size; size  = 0x10000 if size.zero?
+      count = channel.block_count; count = 1     if count.zero?
+      total = size * count
+      addr  = channel.base_addr
+      step  = channel.step
+
+      total.times do
+        word = memory.read32(addr & 0x1F_FFFC)
+        @mdec&.write32_data(word)
+        addr = (addr + step) & 0xFFFF_FFFF
+      end
+
+      channel.finish!
+      set_irq_flag(MDEC_IN)
+    end
+
+    # MDEC0 -> RAM (channel 1). Game configures dest addr + block_size and
+    # we drain the decoder's output FIFO into RAM. Phase 2: the FIFO is
+    # still empty (no decoder yet), so reads return 0 and the destination
+    # buffer ends up zero-filled — better than hanging.
+    def transfer_mdec_out(memory)
+      channel = @channels[MDEC_OUT]
+      size  = channel.block_size; size  = 0x10000 if size.zero?
+      count = channel.block_count; count = 1     if count.zero?
+      total = size * count
+      addr  = channel.base_addr
+      step  = channel.step
+
+      total.times do
+        word = @mdec ? @mdec.read32_data : 0
+        memory.write32(addr & 0x1F_FFFC, word)
+        addr = (addr + step) & 0xFFFF_FFFF
+      end
+
+      channel.finish!
+      set_irq_flag(MDEC_OUT)
     end
 
     # Mark a channel as still busy for `cycles` more CPU cycles, so callers

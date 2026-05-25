@@ -230,6 +230,13 @@ module PSX
         command: @command,
         params_remaining: @params_remaining,
         output_fifo: @output_fifo.dup,
+        quant_luma: @quant_luma.dup,
+        quant_chroma: @quant_chroma.dup,
+        idct_table: @idct_table.dup,
+        decode_buffer: @decode_buffer.dup,
+        load_target: @load_target,
+        load_offset: @load_offset,
+        load_includes_chroma: @load_includes_chroma,
       }
     end
 
@@ -242,6 +249,13 @@ module PSX
       @command = s[:command]
       @params_remaining = s[:params_remaining]
       @output_fifo = s[:output_fifo].dup
+      @quant_luma = s[:quant_luma]&.dup || Array.new(64, 0)
+      @quant_chroma = s[:quant_chroma]&.dup || Array.new(64, 0)
+      @idct_table = s[:idct_table]&.dup || Array.new(64, 0)
+      @decode_buffer = s[:decode_buffer]&.dup || []
+      @load_target = s[:load_target]
+      @load_offset = s[:load_offset] || 0
+      @load_includes_chroma = s[:load_includes_chroma]
     end
   end
 
