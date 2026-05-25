@@ -13,6 +13,7 @@ require_relative "psx/iso9660"
 require_relative "psx/cdrom"
 require_relative "psx/sio0"
 require_relative "psx/spu"
+require_relative "psx/mdec"
 require_relative "psx/memory"
 require_relative "psx/cpu"
 require_relative "psx/disasm"
@@ -22,7 +23,7 @@ require_relative "psx/savestate"
 
 module PSX
   class Emulator
-    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom, :sio0
+    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom, :sio0, :spu, :mdec
     attr_accessor :controller_state_proc
 
     # Timing constants
@@ -35,6 +36,7 @@ module PSX
       ram = RAM.new
       @interrupts = Interrupts.new
       @spu = SPU.new
+      @mdec = MDEC.new
       disc = disc_path ? Disc.open(disc_path) : nil
       @cdrom = CDROM.new(interrupts: @interrupts, disc: disc)
       @dma = DMA.new(interrupts: @interrupts, spu: @spu, cdrom: @cdrom)
@@ -44,7 +46,7 @@ module PSX
       @sio0 = SIO0.new(interrupts: @interrupts, controller_state: -> { @controller_state_proc.call })
       @memory = Memory.new(
         bios: bios, ram: ram, interrupts: @interrupts,
-        dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0, spu: @spu
+        dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0, spu: @spu, mdec: @mdec
       )
       @memory.gpu = @gpu
       @dma.memory = @memory  # so tick_cycles can retry deferred CDROM transfers

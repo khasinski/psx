@@ -24,10 +24,10 @@ module PSX
       0xFFFF_FFFF, 0xFFFF_FFFF                              # KSEG2: 0xC000_0000 - 0xFFFF_FFFF
     ].freeze
 
-    attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0, :spu
+    attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0, :spu, :mdec
     attr_reader :ram_words, :bios_words  # exposed so CPU can inline read32/fetch32 fast paths
 
-    def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil)
+    def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil, mdec: nil)
       @bios = bios
       @ram = ram
       @ram_words = ram.instance_variable_get(:@words)  # for inlined fast-path
@@ -38,6 +38,7 @@ module PSX
       @cdrom = cdrom
       @sio0 = sio0
       @spu = spu
+      @mdec = mdec
       @gpu = nil  # Set later when GPU is created
       @scratchpad = ("\x00" * SCRATCHPAD_SIZE).b  # Force binary encoding
       @cache_isolated = false
@@ -342,6 +343,13 @@ module PSX
       when 0x0814
         # GPU GPUSTAT - return ready, display enabled
         @gpu&.status || 0x1C00_0000
+      when 0x0820
+        # MDEC0: decoded output data (FIFO drain)
+        @mdec&.read32_data || 0
+      when 0x0824
+        # MDEC1: status word. Nil-MDEC fallback returns "output FIFO
+        # empty" — any reasonable poll loop sees "no data" and gives up.
+        @mdec&.read32_status || 0x8000_0000
       when 0x0C00...0x1000
         # SPU register window. Real hardware reads back the most recent
         # 32-bit value; our SPU stub keeps a shadow so writes survive.
@@ -432,6 +440,12 @@ module PSX
       when 0x0814
         # GPU GP1
         @gpu&.gp1(value)
+      when 0x0820
+        # MDEC0: command / RLE data
+        @mdec&.write32_data(value)
+      when 0x0824
+        # MDEC1: control / reset
+        @mdec&.write32_control(value)
       when 0x0C00...0x1000
         # SPU register window. Treat 32-bit writes as two halfword writes
         # so the SPU stub's shadow stays in sync (see io_read32 for SPU).

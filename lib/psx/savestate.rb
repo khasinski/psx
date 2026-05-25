@@ -219,6 +219,32 @@ module PSX
     end
   end
 
+  class MDEC
+    def state_snapshot
+      {
+        output_depth: @output_depth,
+        output_signed: @output_signed,
+        output_bit15: @output_bit15,
+        dma_in_enabled: @dma_in_enabled,
+        dma_out_enabled: @dma_out_enabled,
+        command: @command,
+        params_remaining: @params_remaining,
+        output_fifo: @output_fifo.dup,
+      }
+    end
+
+    def restore_state(s)
+      @output_depth = s[:output_depth]
+      @output_signed = s[:output_signed]
+      @output_bit15 = s[:output_bit15]
+      @dma_in_enabled = s[:dma_in_enabled]
+      @dma_out_enabled = s[:dma_out_enabled]
+      @command = s[:command]
+      @params_remaining = s[:params_remaining]
+      @output_fifo = s[:output_fifo].dup
+    end
+  end
+
   class CDROM
     CDROM_SCALAR_IVARS = %i[
       stat index irq_enable irq_flags data_pos seek_lba read_lba
@@ -314,6 +340,7 @@ module PSX
         dma: @dma.state_snapshot,
         gpu: @gpu.state_snapshot,
         spu: @spu.state_snapshot,
+        mdec: @mdec.state_snapshot,
         cdrom: @cdrom.state_snapshot,
         timers: @timers.state_snapshot,
         sio0: @sio0.state_snapshot,
@@ -341,6 +368,7 @@ module PSX
       @dma.restore_state(data[:dma])
       @gpu.restore_state(data[:gpu])
       @spu.restore_state(data[:spu])
+      @mdec.restore_state(data[:mdec]) if data[:mdec]
       @cdrom.restore_state(data[:cdrom])
       @timers.restore_state(data[:timers])
       @sio0.restore_state(data[:sio0])
