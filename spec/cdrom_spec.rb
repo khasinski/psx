@@ -226,6 +226,30 @@ class CDROMSpec < Minitest::Test
     assert_equal "KEEP".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(12, 4)
   end
 
+  def test_xa_enabled_realtime_audio_sectors_are_not_delivered_to_data_fifo
+    audio_payload = ("\x00" * 2048).b
+    data_payload = ("DATA" + "\x00" * 2044).b
+    audio_subheader = [0x12, 0x34, 0x44, 0x00] # realtime + audio
+    data_subheader = [0x12, 0x34, 0x08, 0x00]  # data
+    @cdrom.disc = build_disc([audio_payload, data_payload], subheaders: [audio_subheader, data_subheader])
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x40)   # SetMode params: bit 6 = XA enable
+    @cdrom.write8(1, 0x0E)
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+
+    assert drive_until_int(1, max_ticks: 40),
+           "realtime XA audio sector should be consumed internally and the next data sector delivered"
+    assert_equal "DATA".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+  end
+
   # Default (no whole_sector) still returns just the 2048-byte user-data
   # slice. Critical for the BIOS shell path that doesn't touch SetMode.
   def test_default_mode_serves_user_data_only
@@ -254,7 +278,7 @@ class CDROMSpec < Minitest::Test
     build_disc([user_data])
   end
 
-  def build_disc(payloads)
+  def build_disc(payloads, subheaders: nil)
     payloads.each do |user_data|
       raise "user_data must be 2048 bytes" if user_data.bytesize != 2048
     end
@@ -262,11 +286,12 @@ class CDROMSpec < Minitest::Test
     tmp = Tempfile.new(["disc", ".bin"])
     tmp.binmode
     sync = "\x00\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00".b
-    sub  = "\x00\x00\x08\x00\x00\x00\x08\x00".b
     ecc  = "\x00" * 280
     payloads.each_with_index do |user_data, lba|
       m, s, f = PSX::Disc.lba_to_msf(lba)
       msf = [PSX::Disc.to_bcd(m), PSX::Disc.to_bcd(s), PSX::Disc.to_bcd(f)].pack("C*")
+      sub = subheaders&.fetch(lba, nil) || [0x00, 0x00, 0x08, 0x00]
+      sub = (sub + sub).pack("C*")
       tmp.write(sync + msf + "\x02".b + sub + user_data + ecc)
     end
     tmp.close

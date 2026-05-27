@@ -80,6 +80,7 @@ module PSX
       @mode = 0
       @speed_2x = false
       @whole_sector = false  # SetMode bit 5 — read 2340 bytes vs 2048
+      @xa_enabled = false
       @xa_filter_file = 0
       @xa_filter_channel = 0
       @reading = false
@@ -231,12 +232,14 @@ module PSX
         return
       end
 
-      # whole_sector mode (SetMode bit 5) makes the data FIFO start at
-      # offset 12 of the raw sector — header + sub-header + user data +
-      # ECC — instead of the 2048-byte user-data slice. CD-XA streaming
-      # (FMV, in-game music) needs this so the game can read the
-      # sub-header to filter which channel it wants.
-      @data_buffer = read_sector_payload(lba)
+      whole = read_sector(lba)
+      if xa_audio_sector?(whole)
+        @read_lba += 1
+        @sector_cycles += next_sector_cycles
+        return
+      end
+
+      @data_buffer = sector_payload(whole)
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
@@ -303,13 +306,27 @@ module PSX
       true
     end
 
-    def read_sector_payload(lba)
+    def read_sector(lba)
       whole = @disc.read_whole_sector(lba)
       @last_sector_lba = lba
       @last_sector_header = whole.byteslice(0, 4).bytes
       @last_sector_subheader = whole.byteslice(4, 4).bytes
       @last_sector_header_valid = true
+      whole
+    end
+
+    def sector_payload(whole)
       @whole_sector ? whole : whole.byteslice(12, 2048)
+    end
+
+    def xa_audio_sector?(whole)
+      return false unless @xa_enabled
+      return false unless whole.getbyte(3) == 0x02
+
+      submode = whole.getbyte(6)
+      realtime = (submode & 0x40) != 0
+      audio = (submode & 0x04) != 0
+      realtime && audio
     end
 
     def execute_command(cmd)
@@ -460,7 +477,13 @@ module PSX
       lba = @read_lba
       track = @disc.track_for_lba(lba)
       return if track.nil? || track.audio?
-      @data_buffer = read_sector_payload(lba)
+      whole = read_sector(lba)
+      if xa_audio_sector?(whole)
+        @read_lba += 1
+        return
+      end
+
+      @data_buffer = sector_payload(whole)
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
@@ -506,6 +529,7 @@ module PSX
       @mode = params[0] & 0xFF
       @speed_2x = (@mode & 0x80) != 0
       @whole_sector = (@mode & 0x20) != 0
+      @xa_enabled = (@mode & 0x40) != 0
       queue_response(0, 3, [@stat])
     end
 
