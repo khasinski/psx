@@ -167,6 +167,17 @@ class SIO0Test < Minitest::Test
     assert_equal 0, status & (1 << 7), "/ACK pulse should return high"
   end
 
+  def test_ack_input_pulses_without_ack_interrupt_enable
+    @sio.write16(0x4A, CTRL_TXEN | CTRL_JOYN_OUTPUT)
+    @irqs.instance_variable_set(:@stat, 0)
+
+    tx(0x01)
+    @sio.tick(500)
+
+    assert (status & (1 << 7)) != 0, "/ACK input should pulse even when ACK IRQ is disabled"
+    assert_equal 0, @irqs.stat & PSX::Interrupts::IRQ_CONTROLLER
+  end
+
   def test_status_read_clears_ack_input_latch
     tx(0x01)
     @sio.tick(500)
