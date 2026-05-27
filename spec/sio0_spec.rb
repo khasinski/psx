@@ -7,6 +7,7 @@ class SIO0Test < Minitest::Test
   CTRL_JOYN_OUTPUT = 1 << 1
   CTRL_ACK         = 1 << 4
   CTRL_RESET       = 1 << 6
+  CTRL_RX_INT_EN   = 1 << 11
   CTRL_ACK_INT_EN  = 1 << 12
   CTRL_SLOT        = 1 << 13
 
@@ -86,6 +87,18 @@ class SIO0Test < Minitest::Test
     @sio.tick(1000)  # advance past the scheduled /ACK delay
     assert (@irqs.stat & PSX::Interrupts::IRQ_CONTROLLER) != 0,
            "IRQ_CONTROLLER should be raised once the /ACK delay elapses"
+  end
+
+  def test_rx_interrupt_fires_when_response_byte_is_received
+    @sio.write16(0x4A, CTRL_TXEN | CTRL_JOYN_OUTPUT | CTRL_RX_INT_EN)
+    @irqs.write_stat(0)
+    @irqs.write_mask(PSX::Interrupts::IRQ_CONTROLLER)
+
+    tx(0x01)
+
+    assert (@irqs.stat & PSX::Interrupts::IRQ_CONTROLLER) != 0,
+           "RX interrupt should be raised as soon as the response byte enters RX"
+    assert status & (1 << 9) != 0
   end
 
   def test_last_byte_does_not_ack

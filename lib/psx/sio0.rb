@@ -366,6 +366,7 @@ module PSX
 
       response, ack = device_step_byte(byte)
       @rx.push(response & 0xFF)
+      trigger_irq if (@ctrl & CTRL_RX_INT_EN) != 0
 
       # Schedule the /ACK pulse a few hundred cycles into the future. The
       # BIOS polls I_STAT bit 7 in a tight loop after issuing the TX, but it
@@ -374,6 +375,11 @@ module PSX
       if (@ctrl & CTRL_ACK_INT_EN) != 0 && ack
         @pending_ack_cycles = 500
       end
+    end
+
+    def trigger_irq
+      @irq = true
+      @interrupts&.request(Interrupts::IRQ_CONTROLLER)
     end
 
     # Digital-pad protocol state machine.
