@@ -101,6 +101,7 @@ module PSX
         ram: @ram.state_snapshot,
         scratchpad: @scratchpad.dup,
         cache_isolated: @cache_isolated,
+        isolated_cache_words: @isolated_cache_words.dup,
       }
     end
 
@@ -112,6 +113,7 @@ module PSX
       @ram_words = @ram.instance_variable_get(:@words)
       @scratchpad = s[:scratchpad].dup
       @cache_isolated = s[:cache_isolated]
+      @isolated_cache_words = s[:isolated_cache_words] || {}
     end
   end
 
@@ -478,6 +480,7 @@ module PSX
       # CPU's @ram_words mirror was rebound by Memory#restore_state; reattach
       # so its op_lw/op_sw fast paths read the restored RAM, not the original.
       @cpu.instance_variable_set(:@ram_words, @memory.ram_words)
+      @cpu.instance_variable_set(:@isolated_cache_words, @memory.isolated_cache_words)
 
       self
     end

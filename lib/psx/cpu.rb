@@ -18,6 +18,7 @@ module PSX
     CALLBACK_TABLE_MASK = 0x8009_9460
     CALLBACK_RETURN_SENTINEL = 0x8000_FFFC
     DMA_CALLBACK_TABLE_BASE = 0x8009_A4F8
+    BIOS_LOW_VECTOR = [0x3C1A_0000, 0x275A_0C80, 0x0340_0008].freeze
 
     attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte, :step_cycles
     attr_accessor :tty_handler
@@ -326,9 +327,9 @@ module PSX
         # exception vectors. Until the emulator has an instruction-cache
         # model, vectoring through an all-zero 0x80000080 just executes a
         # long NOP sled and strands retail games during IRQ-heavy loaders.
-        if @memory.read32(0x8000_0080).zero?
-          service_installed_interrupt_callbacks
-          return
+        if callback_fallback_vector?
+          return if service_installed_interrupt_callbacks
+          return if @memory.read32(0x8000_0080).zero?
         end
 
         @current_pc = @pc
@@ -337,6 +338,28 @@ module PSX
     end
 
     private
+
+    def callback_fallback_vector?
+      phys_pc = @pc & @region_mask[(@pc >> 29) & 0x7]
+      return false if phys_pc >= 0x1FC0_0000 && phys_pc < 0x1FC8_0000
+
+      first = @memory.read32(0x8000_0080)
+      return true if first.zero?
+
+      vector = [
+        first,
+        @memory.read32(0x8000_0084),
+        @memory.read32(0x8000_0088),
+      ]
+      return true if vector == BIOS_LOW_VECTOR
+
+      # Rage Racer's skipped-intro path can stream over low RAM before the
+      # cache-resident BIOS handler is modeled well enough to run directly.
+      # If RAM no longer holds a recognizable vector, use the installed
+      # callback table instead of executing arbitrary stream bytes.
+      opcode = first >> 26
+      opcode != 0x02 && opcode != 0x03
+    end
 
     def service_installed_interrupt_callbacks
       return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
