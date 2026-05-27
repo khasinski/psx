@@ -172,6 +172,7 @@ module PSX
       texture_page_x texture_page_y texture_depth semi_transparency
       texture_window_mask_x texture_window_mask_y
       texture_window_offset_x texture_window_offset_y
+      texture_x_flip texture_y_flip
       texture_disable_allow set_mask_bit check_mask_bit
       cmd_remaining current_cmd polyline_active
       vram_transfer_x vram_transfer_y vram_transfer_start_x
@@ -191,6 +192,8 @@ module PSX
     def restore_state(s)
       @vram = s[:vram].unpack("v*")
       GPU_IVARS.each { |k| instance_variable_set(:"@#{k}", s[k]) }
+      @texture_x_flip = false if @texture_x_flip.nil?
+      @texture_y_flip = false if @texture_y_flip.nil?
       @cmd_buffer = s[:cmd_buffer].dup
       @vram_read_buffer = s[:vram_read_buffer].dup
       # Invalidate any cached display frame.

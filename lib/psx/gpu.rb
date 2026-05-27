@@ -89,6 +89,8 @@ module PSX
       @texture_window_mask_y = 0
       @texture_window_offset_x = 0
       @texture_window_offset_y = 0
+      @texture_x_flip = false
+      @texture_y_flip = false
       @texture_disable_allow = false
 
       # Mask settings
@@ -774,6 +776,8 @@ module PSX
       @texture_page_y = ((value >> 4) & 0x01) * 256
       @semi_transparency = (value >> 5) & 0x03
       @texture_depth = (value >> 7) & 0x03
+      @texture_x_flip = (value & (1 << 12)) != 0
+      @texture_y_flip = (value & (1 << 13)) != 0
 
       status_mask = preserve_draw_mode_bits ? 0x01FF : 0x07FF
       @status = (@status & ~status_mask) | (value & status_mask)
@@ -847,6 +851,8 @@ module PSX
       @texture_window_mask_y = 0
       @texture_window_offset_x = 0
       @texture_window_offset_y = 0
+      @texture_x_flip = false
+      @texture_y_flip = false
       @texture_disable_allow = false
       @set_mask_bit = false
       @check_mask_bit = false
@@ -1013,8 +1019,8 @@ module PSX
           px = x + dx
           next if px < al || px > ar || px < 0 || px >= VRAM_WIDTH
 
-          u = (tex_u + dx) & 0xFF
-          v = (tex_v + dy) & 0xFF
+          u = (@texture_x_flip ? tex_u - dx : tex_u + dx) & 0xFF
+          v = (@texture_y_flip ? tex_v - dy : tex_v + dy) & 0xFF
           texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp)
           next if texel == 0
 
