@@ -6,6 +6,25 @@ Snapshot of where the emulator is and what we just spent time on.
 
 2026-05-27 sixth update:
 
+- Additional continuation after the sixth update:
+  - Fixed MDEC signed colour output. 24-bit/15-bit colour conversion now
+    honors command bit 26: signed output no longer receives the unsigned
+    +128 bias. Commit: `c412ed7 Honor signed MDEC colour output`.
+  - Fixed MDEC 15-bit colour packing. RGB888 channels now round to 5-bit
+    with `+4 >> 3`, matching DuckStation's newer path, instead of truncating.
+    Commit: `d9463fd Round MDEC 15-bit colour output`.
+  - Fixed CD-ROM GetlocP before any sector read. With media present, GetlocP
+    now synthesizes current SubQ instead of returning a not-ready INT5,
+    matching DuckStation's `UpdateSubQPosition/EnsureLastSubQValid` path.
+    Commit: `1d8d946 Return CDROM GetlocP before first read`.
+  - Verification:
+    - After signed MDEC colour output: full suite passed
+      `316 runs, 796 assertions, 0 failures`.
+    - After rounded MDEC 15-bit output: full suite passed
+      `317 runs, 797 assertions, 0 failures`.
+    - After CD-ROM GetlocP fallback: full suite passed
+      `317 runs, 797 assertions, 0 failures`.
+
 - Added DuckStation-backed SPU DMA request status behavior:
   - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
     mode is DMA write and the simplified transfer FIFO is empty.
