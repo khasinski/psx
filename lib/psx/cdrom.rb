@@ -32,6 +32,8 @@ module PSX
     SF_PLAYING_CDDA = 1 << 7
 
     ERROR_REASON_INVALID_COMMAND = 0x40
+    ERROR_REASON_INVALID_ARGUMENT = 0x10
+    ERROR_REASON_NOT_READY = 0x80
 
     # Timing constants (in CPU cycles).
     CYCLES_PER_SECTOR_1X = 33_868_800 / 75
@@ -434,6 +436,10 @@ module PSX
       end
     end
 
+    def valid_bcd_byte?(value)
+      (value & 0x0F) <= 9 && ((value >> 4) & 0x0F) <= 9
+    end
+
     def execute_command(cmd)
       params = @parameters.dup
       @parameters.clear
@@ -663,26 +669,46 @@ module PSX
     end
 
     def cmd_get_tn
+      unless @disc
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
+        return
+      end
+
       first = 1
-      last = @disc ? @disc.track_count : 1
+      last = @disc.track_count
       queue_response(0, 3, [@stat, Disc.to_bcd(first), Disc.to_bcd(last)])
     end
 
     def cmd_get_td(params)
       raise "GetTD needs 1 BCD param" if params.empty?
+      unless @disc
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
+        return
+      end
+
+      unless valid_bcd_byte?(params[0])
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_ARGUMENT])
+        return
+      end
+
       track_no = Disc.from_bcd(params[0])
       if track_no == 0
         # Track 0 means "end of disc"
-        lba_end = @disc ? @disc.total_sectors : 0
+        lba_end = @disc.total_sectors
         m, s, _ = Disc.lba_to_msf(lba_end)
         queue_response(0, 3, [@stat, Disc.to_bcd(m), Disc.to_bcd(s)])
       else
-        track = @disc&.tracks&.find { |t| t.number == track_no }
+        if track_no > @disc.track_count
+          queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_ARGUMENT])
+          return
+        end
+
+        track = @disc.tracks.find { |t| t.number == track_no }
         if track
           m, s, _ = Disc.lba_to_msf(track.lba_start)
           queue_response(0, 3, [@stat, Disc.to_bcd(m), Disc.to_bcd(s)])
         else
-          queue_response(0, 3, [@stat, 0x00, 0x00])
+          queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_ARGUMENT])
         end
       end
     end

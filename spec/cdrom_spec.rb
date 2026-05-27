@@ -266,6 +266,40 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::ERROR_REASON_INVALID_COMMAND, @cdrom.read8(1)
   end
 
+  def test_get_tn_errors_when_drive_not_ready
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x13) # GetTN
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_NO_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_NOT_READY, @cdrom.read8(1)
+  end
+
+  def test_get_td_errors_for_invalid_bcd_track
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x1A)
+    @cdrom.write8(1, 0x14) # GetTD
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INVALID_ARGUMENT, @cdrom.read8(1)
+  end
+
+  def test_get_td_errors_for_out_of_range_track
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x02)
+    @cdrom.write8(1, 0x14) # GetTD
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INVALID_ARGUMENT, @cdrom.read8(1)
+  end
+
   def test_getparam_returns_mode_and_xa_filter
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 
