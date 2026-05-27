@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 module PSX
-  # SPU stub — enough to satisfy programs that probe SPUCNT/SPUSTAT and to
-  # round-trip data through SPU RAM via FIFO and DMA channel 4.
+  # SPU — partial register/DMA model. It satisfies programs that probe
+  # SPUCNT/SPUSTAT, round-trips data through SPU RAM via FIFO and DMA
+  # channel 4, and tracks basic voice key on/off state.
   #
-  # No audio synthesis. Voice/reverb/etc. registers read back as zero.
+  # Full audio synthesis is still TODO.
   class SPU
     RAM_SIZE = 512 * 1024
 
@@ -14,6 +15,12 @@ module PSX
     SPUCNT            = 0xDAA
     SPUDTC            = 0xDAC
     SPUSTAT           = 0xDAE
+    KEY_ON_LOW        = 0xD88
+    KEY_ON_HIGH       = 0xD8A
+    KEY_OFF_LOW       = 0xD8C
+    KEY_OFF_HIGH      = 0xD8E
+    ENDX_LOW          = 0xD9C
+    ENDX_HIGH         = 0xD9E
 
     # SPUCNT bits 4-5 = transfer mode
     MODE_STOP   = 0
@@ -29,6 +36,10 @@ module PSX
       @stat = 0
       @dtc = 0
       @fifo = []
+      @key_on = 0
+      @key_off = 0
+      @endx = 0
+      @voice_active = 0
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
       # Real hardware preserves register-write values across reads (most
       # voice/reverb regs aren't write-only); ps1-tests cpu/code-in-io
@@ -40,6 +51,12 @@ module PSX
 
     def read16(offset)
       case offset
+      when KEY_ON_LOW        then @key_on & 0xFFFF
+      when KEY_ON_HIGH       then (@key_on >> 16) & 0xFFFF
+      when KEY_OFF_LOW       then @key_off & 0xFFFF
+      when KEY_OFF_HIGH      then (@key_off >> 16) & 0xFFFF
+      when ENDX_LOW          then @endx & 0xFFFF
+      when ENDX_HIGH         then (@endx >> 16) & 0xFFFF
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
@@ -59,6 +76,18 @@ module PSX
         @regs.setbyte(idx + 1, (v >> 8) & 0xFF)
       end
       case offset
+      when KEY_ON_LOW
+        @key_on = (@key_on & 0xFFFF_0000) | v
+        key_on(v)
+      when KEY_ON_HIGH
+        @key_on = (@key_on & 0x0000_FFFF) | (v << 16)
+        key_on(v << 16)
+      when KEY_OFF_LOW
+        @key_off = (@key_off & 0xFFFF_0000) | v
+        key_off(v)
+      when KEY_OFF_HIGH
+        @key_off = (@key_off & 0x0000_FFFF) | (v << 16)
+        key_off(v << 16)
       when SPU_TRANSFER_ADDR
         @transfer_addr = (v * 8) & (RAM_SIZE - 1)
         @current_addr = @transfer_addr
@@ -107,6 +136,24 @@ module PSX
 
     def mode
       (@cnt >> 4) & 0x3
+    end
+
+    def key_on(mask)
+      mask &= 0x00FF_FFFF
+      @voice_active |= mask
+      @endx &= ~mask
+      24.times do |voice|
+        next if (mask & (1 << voice)).zero?
+
+        adsr_offset = 0xC00 + voice * 0x10 + 0x0C
+        @regs.setbyte(adsr_offset - 0xC00, 0)
+        @regs.setbyte(adsr_offset - 0xC00 + 1, 0)
+      end
+    end
+
+    def key_off(mask)
+      mask &= 0x00FF_FFFF
+      @voice_active &= ~mask
     end
 
     def write_word_to_ram(v)

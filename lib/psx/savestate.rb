@@ -205,6 +205,8 @@ module PSX
         ram: @ram.dup, regs: @regs.dup,
         transfer_addr: @transfer_addr, current_addr: @current_addr,
         cnt: @cnt, stat: @stat, dtc: @dtc,
+        key_on: @key_on, key_off: @key_off, endx: @endx,
+        voice_active: @voice_active,
         fifo: @fifo.dup,
       }
     end
@@ -215,6 +217,10 @@ module PSX
       @transfer_addr = s[:transfer_addr]
       @current_addr = s[:current_addr]
       @cnt = s[:cnt]; @stat = s[:stat]; @dtc = s[:dtc]
+      @key_on = s[:key_on] || 0
+      @key_off = s[:key_off] || 0
+      @endx = s[:endx] || 0
+      @voice_active = s[:voice_active] || 0
       @fifo = s[:fifo].dup
     end
   end
