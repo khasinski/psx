@@ -49,6 +49,22 @@ class MDECSpec < Minitest::Test
     assert_equal 0xFFFF, status & 0xFFFF
   end
 
+  def test_idct_scale_table_is_transposed_on_load
+    @mdec.write32_data(PSX::MDEC::CMD_SET_IDCT_TABLE << 29)
+    32.times do |i|
+      lo = i * 2
+      hi = lo + 1
+      @mdec.write32_data((hi << 16) | lo)
+    end
+
+    expected = Array.new(64) do |idx|
+      x = idx % 8
+      y = idx / 8
+      x * 8 + y
+    end
+    assert_equal expected, @mdec.instance_variable_get(:@idct_table)
+  end
+
   def test_state_snapshot_preserves_pending_output_count
     load_flat_identity_tables
 

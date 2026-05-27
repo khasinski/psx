@@ -236,7 +236,8 @@ module PSX
           idx = @load_offset + i
           next if idx >= 64
           raw = (word >> (i * 16)) & 0xFFFF
-          @idct_table[idx] = (raw & 0x8000) != 0 ? raw - 0x1_0000 : raw
+          transposed_idx = (idx % 8) * 8 + (idx / 8)
+          @idct_table[transposed_idx] = (raw & 0x8000) != 0 ? raw - 0x1_0000 : raw
         end
         @load_offset += 2
       end
