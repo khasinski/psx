@@ -24,6 +24,12 @@ Snapshot of where the emulator is and what we just spent time on.
     Unsupported commands still return invalid-command after valid arity, but
     wrong arity now returns incorrect-number-of-parameters first.
     Commit: `47f052f Validate remaining CDROM command counts`.
+  - Added SIO RX interrupt behavior. JOY_CTRL bit 11 now raises
+    IRQ_CONTROLLER when a response byte enters the RX FIFO, matching
+    DuckStation's `RXINTEN` path. Commit: `227f0cc Raise SIO RX interrupts`.
+  - Added SIO TX interrupt behavior. JOY_CTRL bit 10 now raises
+    IRQ_CONTROLLER when a transmit byte is accepted, matching DuckStation's
+    `TXINTEN` path. Commit: `347c964 Raise SIO TX interrupts`.
   - Fixed MDEC signed colour output. 24-bit/15-bit colour conversion now
     honors command bit 26: signed output no longer receives the unsigned
     +128 bias. Commit: `c412ed7 Honor signed MDEC colour output`.
@@ -49,6 +55,10 @@ Snapshot of where the emulator is and what we just spent time on.
       `323 runs, 815 assertions, 0 failures`.
     - After remaining CD-ROM command counts: full suite passed
       `326 runs, 824 assertions, 0 failures`.
+    - After SIO RX interrupt behavior: full suite passed
+      `327 runs, 826 assertions, 0 failures`.
+    - After SIO TX interrupt behavior: full suite passed
+      `328 runs, 828 assertions, 0 failures`.
 
 - Added DuckStation-backed SPU DMA request status behavior:
   - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
