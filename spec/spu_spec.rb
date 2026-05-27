@@ -313,6 +313,22 @@ class SPUSpec < Minitest::Test
     assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
   end
 
+  def test_spustat_reports_dma_write_request_in_dma_write_mode
+    @spu.write16(PSX::SPU::SPUCNT, PSX::SPU::MODE_DMA_W << 4)
+
+    status = @spu.read16(PSX::SPU::SPUSTAT)
+
+    assert_equal (1 << 7) | (1 << 9), status & ((1 << 7) | (1 << 8) | (1 << 9))
+  end
+
+  def test_spustat_clears_dma_request_bits_outside_dma_modes
+    @spu.write16(PSX::SPU::SPUCNT, PSX::SPU::MODE_DMA_W << 4)
+
+    @spu.write16(PSX::SPU::SPUCNT, PSX::SPU::MODE_MANUAL << 4)
+
+    assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & ((1 << 7) | (1 << 8) | (1 << 9))
+  end
+
   private
 
   def write_adpcm_block(address, flags:, first_data_byte: 0)

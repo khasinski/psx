@@ -34,6 +34,10 @@ module PSX
     MODE_MANUAL = 1
     MODE_DMA_W  = 2
     MODE_DMA_R  = 3
+    SPUSTAT_DMA_REQUEST       = 1 << 7
+    SPUSTAT_DMA_READ_REQUEST  = 1 << 8
+    SPUSTAT_DMA_WRITE_REQUEST = 1 << 9
+    SPUSTAT_DMA_BITS = SPUSTAT_DMA_REQUEST | SPUSTAT_DMA_READ_REQUEST | SPUSTAT_DMA_WRITE_REQUEST
     VoiceState = Struct.new(
       :current_address,
       :repeat_address,
@@ -161,6 +165,7 @@ module PSX
           # In other modes the data is buffered; on the transition to
           # ManualWrite the buffer drains in order.
           @fifo << v
+          update_dma_request_flags
         end
       when SPUCNT
         prev_mode = mode
@@ -179,6 +184,7 @@ module PSX
           trigger_ram_irq if irq_transfer_match?(@current_addr)
         end
         drain_fifo if mode == MODE_MANUAL && prev_mode != MODE_MANUAL
+        update_dma_request_flags
       when SPUDTC
         @dtc = v
       when MAIN_VOL_LEFT
@@ -340,6 +346,14 @@ module PSX
     def drain_fifo
       until @fifo.empty?
         write_word_to_ram(@fifo.shift)
+      end
+      update_dma_request_flags
+    end
+
+    def update_dma_request_flags
+      @stat &= ~SPUSTAT_DMA_BITS
+      if mode == MODE_DMA_W && @fifo.empty?
+        @stat |= SPUSTAT_DMA_REQUEST | SPUSTAT_DMA_WRITE_REQUEST
       end
     end
 
