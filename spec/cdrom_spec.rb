@@ -328,6 +328,67 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::ERROR_REASON_INVALID_COMMAND, @cdrom.read8(1)
   end
 
+  def test_setloc_errors_for_missing_parameters
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x02)
+    @cdrom.write8(1, 0x02) # SetLoc with only 2 params
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_setloc_errors_for_out_of_range_bcd_fields
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x60) # seconds must be below 0x60
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x02) # SetLoc
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INVALID_ARGUMENT, @cdrom.read8(1)
+  end
+
+  def test_setfilter_errors_for_wrong_parameter_count
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x12)
+    @cdrom.write8(1, 0x0D) # Setfilter with only file param
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_setmode_errors_for_missing_parameter
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0E) # Setmode with no params
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_get_td_errors_for_missing_parameter
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x14) # GetTD with no track param
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
   def test_get_tn_errors_when_drive_not_ready
     enable_irqs(0x1F)
     @cdrom.write8(0, 0)

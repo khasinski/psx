@@ -492,7 +492,18 @@ module PSX
     end
 
     def cmd_setloc(params)
-      raise "Setloc needs 3 BCD params" if params.size < 3
+      if params.size != 3
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        return
+      end
+
+      unless valid_bcd_byte?(params[0]) &&
+             valid_bcd_byte?(params[1]) && params[1] < 0x60 &&
+             valid_bcd_byte?(params[2]) && params[2] < 0x75
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_ARGUMENT])
+        return
+      end
+
       m = Disc.from_bcd(params[0])
       s = Disc.from_bcd(params[1])
       f = Disc.from_bcd(params[2])
@@ -633,14 +644,22 @@ module PSX
     end
 
     def cmd_setfilter(params)
-      raise "Setfilter needs 2 params" if params.size < 2
+      if params.size != 2
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        return
+      end
+
       @xa_filter_file = params[0] & 0xFF
       @xa_filter_channel = params[1] & 0xFF
       queue_response(0, 3, [@stat])
     end
 
     def cmd_setmode(params)
-      raise "Setmode needs 1 param" if params.empty?
+      if params.size != 1
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        return
+      end
+
       @mode = params[0] & 0xFF
       @speed_2x = (@mode & 0x80) != 0
       @whole_sector = (@mode & 0x20) != 0
@@ -681,7 +700,11 @@ module PSX
     end
 
     def cmd_get_td(params)
-      raise "GetTD needs 1 BCD param" if params.empty?
+      if params.size != 1
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        return
+      end
+
       unless @disc
         queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
         return
