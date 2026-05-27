@@ -29,6 +29,8 @@ module PSX
     MODE_DMA_W  = 2
     MODE_DMA_R  = 3
 
+    VoiceState = Struct.new(:current_address, :repeat_address, :adsr_volume, :last_samples, :decoded_samples, keyword_init: true)
+
     def initialize(interrupts: nil)
       @interrupts = interrupts
       @ram = ("\x00" * RAM_SIZE).b
@@ -43,6 +45,15 @@ module PSX
       @key_off = 0
       @endx = 0
       @voice_active = 0
+      @voices = Array.new(24) do
+        VoiceState.new(
+          current_address: 0,
+          repeat_address: 0,
+          adsr_volume: 0,
+          last_samples: [0, 0],
+          decoded_samples: []
+        )
+      end
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
       # Real hardware preserves register-write values across reads (most
       # voice/reverb regs aren't write-only); ps1-tests cpu/code-in-io
@@ -147,6 +158,42 @@ module PSX
       end
     end
 
+    def read_adpcm_block(address)
+      ram_address = (address * 8) & (RAM_SIZE - 1)
+      trigger_ram_irq if irq_enabled? && (irq_transfer_match?(ram_address) || irq_transfer_match?(ram_address + 8))
+      bytes = 16.times.map { |i| @ram.getbyte((ram_address + i) & (RAM_SIZE - 1)) }
+      {
+        shift_filter: bytes[0],
+        flags: bytes[1],
+        data: bytes[2, 14],
+      }
+    end
+
+    def decode_adpcm_block(block, last_samples = [0, 0])
+      filter_pos = [0, 60, 115, 98, 122, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      filter_neg = [0, 0, -52, -55, -60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      shift = block[:shift_filter] & 0x0F
+      shift = 9 if shift > 12
+      filter = (block[:shift_filter] >> 4) & 0x0F
+      previous = last_samples.dup
+      samples = []
+
+      28.times do |i|
+        byte = block[:data][i / 2]
+        nibble = i.even? ? (byte & 0x0F) : ((byte >> 4) & 0x0F)
+        signed_nibble = nibble >= 8 ? nibble - 16 : nibble
+        sample = (signed_nibble << 12) >> shift
+        sample += (previous[0] * filter_pos[filter]) >> 6
+        sample += (previous[1] * filter_neg[filter]) >> 6
+        sample = [[sample, -32_768].max, 32_767].min
+        previous[1] = previous[0]
+        previous[0] = sample
+        samples << sample
+      end
+
+      [samples, previous]
+    end
+
     private
 
     def mode
@@ -176,6 +223,15 @@ module PSX
         adsr_offset = 0xC00 + voice * 0x10 + 0x0C
         @regs.setbyte(adsr_offset - 0xC00, 0)
         @regs.setbyte(adsr_offset - 0xC00 + 1, 0)
+        start_address = read16(0xC00 + voice * 0x10 + 0x06) & ~1
+        @voices[voice].current_address = start_address
+        @voices[voice].repeat_address = read16(0xC00 + voice * 0x10 + 0x0E) & ~1
+        @voices[voice].adsr_volume = 0
+        @voices[voice].last_samples = [0, 0]
+        block = read_adpcm_block(start_address)
+        samples, last = decode_adpcm_block(block, @voices[voice].last_samples)
+        @voices[voice].decoded_samples = samples
+        @voices[voice].last_samples = last
       end
     end
 

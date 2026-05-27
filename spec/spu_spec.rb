@@ -50,6 +50,46 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0040, restored.instance_variable_get(:@voice_active)
   end
 
+  def test_decodes_simple_adpcm_block_from_spu_ram
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0)
+    @spu.dma_write_word(0x00F1_0000) # shift/filter=0, flags=0, samples +1 and -1
+    3.times { @spu.dma_write_word(0) }
+
+    block = @spu.read_adpcm_block(0)
+    samples, last = @spu.decode_adpcm_block(block)
+
+    assert_equal 4096, samples[0]
+    assert_equal(-4096, samples[1])
+    assert_equal 28, samples.length
+    assert_equal [0, 0], last
+  end
+
+  def test_reserved_adpcm_shift_values_decode_as_shift_9
+    block = {
+      shift_filter: 0x0D,
+      flags: 0,
+      data: [0x01] + Array.new(13, 0),
+    }
+
+    samples, = @spu.decode_adpcm_block(block)
+
+    assert_equal 8, samples[0]
+  end
+
+  def test_key_on_latches_start_address_and_decodes_first_block
+    @spu.write16(0xC00 + 0x06, 0x0020) # voice 0 ADPCM start address
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0020)
+    @spu.dma_write_word(0x00F1_0000)
+    3.times { @spu.dma_write_word(0) }
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    voice = @spu.instance_variable_get(:@voices)[0]
+    assert_equal 0x0020, voice.current_address
+    assert_equal 4096, voice.decoded_samples[0]
+    assert_equal(-4096, voice.decoded_samples[1])
+  end
+
   def test_irq9_fires_when_transfer_address_matches_irq_address
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
