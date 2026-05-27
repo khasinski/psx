@@ -9,10 +9,11 @@ It boots the SCPH1001 BIOS into the **Memory Card / CD-ROM shell**, reads
 `.bin`/`.cue` disc images, and runs real retail discs end-to-end through
 the BIOS license check (no patching). MDEC is wired up through Phase 3
 (RLC + dequant + IDCT + YCbCr). Save states (F5/F8 in the SDL window)
-round-trip the full machine state. There is no audio synthesis and no
-PGXP, and many retail games still hit content-specific blockers (FMV
-codec init, CD-XA streaming), so don't expect to play full games yet.
-Think of it as an executable spec for the PS1. 216/216 unit tests,
+round-trip the full machine state. SPU audio is still early but now mixes
+basic ADPCM voices plus CDDA/CD-XA through the SPU path. There is no PGXP,
+and many retail games still hit content-specific blockers (FMV codec init,
+timing-sensitive CD paths), so don't expect to play full games yet.
+Think of it as an executable spec for the PS1. 268/268 unit tests,
 18/21 of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
 cases that have a `psx.log` reference.
 
@@ -194,12 +195,14 @@ What works:
   no patching required (`--fast-boot` is still available for synthetic
   / homebrew discs)
 - SIO0 digital pad (slot 1)
-- SPU stub (mirrors SPUCNT → SPUSTAT, register window read-back; no
-  actual audio synthesis)
+- SPU: register window read-back, RAM DMA/FIFO transfers, IRQ9 RAM checks,
+  ADPCM block decode, basic voice stepping/ADSR, CDDA/CD-XA queue mixing,
+  and stereo PCM output. Reverb/noise/pitch modulation and full ADSR
+  conformance are still open.
 - MDEC: register surface (Phase 1), quant + IDCT tables and DMA 0/1
   ingress / egress (Phase 2), real RLC + dequant + IDCT + YCbCr → RGB
-  decoder (Phase 3). DMA1 completion IRQ wired. Phase 5 (full CD-XA
-  streaming integration with SPU) still open.
+  decoder (Phase 3). DMA1 completion IRQ wired. CD-XA sectors now decode
+  and feed the SPU CD-audio path, though full FMV timing is still rough.
 - Save states: F5 / F8 in the SDL window quicksave / quickload, full
   machine round-trip via `Marshal` (CPU + GTE + COP0 + RAM + GPU VRAM +
   SPU + MDEC + CD-ROM + timers + interrupts).
@@ -208,14 +211,15 @@ What works:
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 216/216 unit tests pass.
+- 268/268 unit tests pass.
 - 18/21 of the JaCzekanski/ps1-tests cases that have a `psx.log`
   reference (cpu/, dma/, gpu/, gte/, mdec/, spu/, timers/) — see
   `bin/_ps1tests-baseline`.
 
 What doesn't:
 
-- No SPU audio synthesis (no sound)
+- SPU audio is incomplete: no reverb, noise, pitch modulation, or
+  conformance-grade ADSR yet.
 - The 3 remaining ps1-tests failures are all CD-ROM (`cdrom/disc-swap`,
   `cdrom/getloc`, `cdrom/timing`) — they need a disc image wired into
   the bare-EXE loader path that `bin/psx-test` doesn't currently provide.
