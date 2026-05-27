@@ -243,15 +243,16 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00], bytes
   end
 
-  def test_getloc_p_errors_before_any_subq_is_available
+  def test_getloc_p_returns_current_subq_before_first_read
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 
     enable_irqs(0x1F)
     @cdrom.write8(0, 0)
     @cdrom.write8(1, 0x11) # GetlocP
 
-    assert drive_until_int(5, max_ticks: 20)
-    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+    assert_equal [0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00], bytes
   end
 
   def test_invalid_command_returns_int5_command_error
