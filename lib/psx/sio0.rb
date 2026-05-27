@@ -248,10 +248,8 @@ module PSX
           @pending_ack_cycles = nil
           @ack_low_cycles = 250
           ack_started = true
-          if (@ctrl & CTRL_ACK_INT_EN) != 0
-            @irq = true
-            @interrupts&.request(Interrupts::IRQ_CONTROLLER)
-          end
+          @irq = true
+          @interrupts&.request(Interrupts::IRQ_CONTROLLER)
         end
       end
 
@@ -373,7 +371,9 @@ module PSX
       # BIOS polls I_STAT bit 7 in a tight loop after issuing the TX, but it
       # first clears bit 7 between the TX and the poll -- firing immediately
       # would be wiped out by that clear, leaving the poll to spin forever.
-      @pending_ack_cycles = 500 if ack
+      if (@ctrl & CTRL_ACK_INT_EN) != 0 && ack
+        @pending_ack_cycles = 500
+      end
     end
 
     # Digital-pad protocol state machine.
