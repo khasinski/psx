@@ -449,15 +449,19 @@ module PSX
       end
     end
 
-    # YCbCr → RGB888 using BT.601 coefficients. Y, Cb, Cr are the signed
-    # 9-bit decoder outputs; we add 128 to bias Y to unsigned and let
-    # Cb/Cr stay signed (they're chrominance offsets from neutral grey).
+    # YCbCr -> RGB888 using BT.601 coefficients. Y, Cb, Cr are signed
+    # decoder outputs. Unsigned output adds the hardware +128 bias; signed
+    # output leaves the signed byte value in two's-complement form.
     def ycbcr_to_rgb(y, cb, cr)
-      yf = y + 128
-      r = yf + 1.402   * cr
-      g = yf - 0.3441 * cb - 0.7139 * cr
-      b = yf + 1.7720 * cb
-      [clamp_byte(r.round), clamp_byte(g.round), clamp_byte(b.round)]
+      r = y + 1.402 * cr
+      g = y - 0.3441 * cb - 0.7139 * cr
+      b = y + 1.7720 * cb
+      [output_byte(r.round), output_byte(g.round), output_byte(b.round)]
+    end
+
+    def output_byte(v)
+      v = [[v, -128].max, 127].min
+      @output_signed ? (v & 0xFF) : v + 128
     end
 
     def clamp_byte(v)

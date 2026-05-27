@@ -84,6 +84,20 @@ class MDECSpec < Minitest::Test
     assert_equal @mdec.data_out_available?, restored.data_out_available?
   end
 
+  def test_signed_24bit_colour_output_omits_unsigned_bias
+    load_flat_identity_tables
+
+    decode_flat_colour_macroblock(signed: false)
+    unsigned_word = @mdec.read32_data
+
+    load_flat_identity_tables
+    decode_flat_colour_macroblock(signed: true)
+    signed_word = @mdec.read32_data
+
+    assert_equal 0x80_80_80_80, unsigned_word
+    assert_equal 0x00_00_00_00, signed_word
+  end
+
   private
 
   def load_flat_identity_tables
@@ -92,5 +106,12 @@ class MDECSpec < Minitest::Test
 
     @mdec.write32_data(PSX::MDEC::CMD_SET_IDCT_TABLE << 29)
     32.times { @mdec.write32_data(0x2000_2000) }
+  end
+
+  def decode_flat_colour_macroblock(signed:)
+    command = (PSX::MDEC::CMD_DECODE << 29) | (2 << 27) | 6
+    command |= 1 << 26 if signed
+    @mdec.write32_data(command)
+    6.times { @mdec.write32_data(0xFE00_0000) }
   end
 end
