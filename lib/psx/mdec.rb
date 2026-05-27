@@ -115,7 +115,7 @@ module PSX
         @output_words_remaining -= 1
         @output_fifo.shift || 0
       else
-        0
+        0xFFFF_FFFF
       end
     end
 
@@ -125,9 +125,10 @@ module PSX
       status |= STAT_OUTPUT_FIFO_EMPTY if @output_words_remaining.zero?
       # STAT_INPUT_FIFO_FULL stays 0 in the stub — we consume writes immediately.
       status |= STAT_COMMAND_BUSY if @params_remaining.positive?
-      # DMA0 (data in) requested when DMA0 is enabled AND we're mid-command
-      # waiting for more parameter words.
-      status |= STAT_DATA_IN_REQ  if @dma_in_enabled  && @params_remaining.positive?
+      # DuckStation keeps DMA0 requested whenever input DMA is enabled and
+      # there is room in the input FIFO. We consume writes immediately, so
+      # input space is always available in this model.
+      status |= STAT_DATA_IN_REQ  if @dma_in_enabled
       # DMA1 (out) when DMA1 is enabled AND there's output left to drain.
       status |= STAT_DATA_OUT_REQ if @dma_out_enabled && @output_words_remaining.positive?
       status |= (@output_depth & 0x3) << 25
@@ -172,13 +173,16 @@ module PSX
 
     def start_command(word)
       @command = (word >> 29) & 0x7
+      @output_fifo.clear
+      @output_words_remaining = 0
+      @output_depth  = (word >> 27) & 0x3
+      @output_signed = ((word >> 26) & 1) != 0
+      @output_bit15  = ((word >> 25) & 1) != 0
+
       case @command
       when CMD_DECODE
         # Bits 27..25 = output mode (depth, signed, bit15). 15..0 = data
         # words to follow. Each one is a 32-bit pair of RLE codes.
-        @output_depth  = (word >> 27) & 0x3
-        @output_signed = ((word >> 26) & 1) != 0
-        @output_bit15  = ((word >> 25) & 1) != 0
         @params_remaining = word & 0xFFFF
         @load_target = :decode_data
         @load_offset = 0
@@ -196,9 +200,9 @@ module PSX
         @load_target = :idct
         @load_offset = 0
       else
-        # CMD_NOP / unknown — stays idle.
-        @params_remaining = 0
-        @load_target = nil
+        # Unknown commands still consume their declared parameter words.
+        @params_remaining = word & 0xFFFF
+        @load_target = :ignore
       end
     end
 

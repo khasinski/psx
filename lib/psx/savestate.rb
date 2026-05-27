@@ -274,6 +274,7 @@ module PSX
         command: @command,
         params_remaining: @params_remaining,
         output_fifo: @output_fifo.dup,
+        output_words_remaining: @output_words_remaining,
         quant_luma: @quant_luma.dup,
         quant_chroma: @quant_chroma.dup,
         idct_table: @idct_table.dup,
@@ -293,6 +294,7 @@ module PSX
       @command = s[:command]
       @params_remaining = s[:params_remaining]
       @output_fifo = s[:output_fifo].dup
+      @output_words_remaining = s[:output_words_remaining] || @output_fifo.size
       @quant_luma = s[:quant_luma]&.dup || Array.new(64, 0)
       @quant_chroma = s[:quant_chroma]&.dup || Array.new(64, 0)
       @idct_table = s[:idct_table]&.dup || Array.new(64, 0)
