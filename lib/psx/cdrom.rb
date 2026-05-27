@@ -31,6 +31,8 @@ module PSX
     SF_SEEKING      = 1 << 6
     SF_PLAYING_CDDA = 1 << 7
 
+    ERROR_REASON_INVALID_COMMAND = 0x40
+
     # Timing constants (in CPU cycles).
     CYCLES_PER_SECTOR_1X = 33_868_800 / 75
     CYCLES_PER_SECTOR_2X = CYCLES_PER_SECTOR_1X / 2
@@ -468,9 +470,9 @@ module PSX
       when 0x1E then cmd_read_toc
       else
         if ENV["PSX_TRACE_CDROM"]
-          $stderr.puts format("[cdrom] UNHANDLED cmd=%02X — sending generic ack", cmd)
+          $stderr.puts format("[cdrom] UNHANDLED cmd=%02X — sending invalid-command error", cmd)
         end
-        queue_response(0, 3, [@stat])  # default ack to keep BIOS moving
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_COMMAND])
       end
     end
 

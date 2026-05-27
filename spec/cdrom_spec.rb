@@ -254,6 +254,18 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
   end
 
+  def test_invalid_command_returns_int5_command_error
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x00) # Sync/invalid on retail drives
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INVALID_COMMAND, @cdrom.read8(1)
+  end
+
   def test_getparam_returns_mode_and_xa_filter
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 
