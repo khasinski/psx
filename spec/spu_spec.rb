@@ -167,6 +167,32 @@ class SPUSpec < Minitest::Test
     assert_equal 0, @spu.read16(0xC00 + 0x0C)
   end
 
+  def test_cd_audio_mixes_when_spucnt_cd_audio_enable_is_set
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x4000)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x2000)
+    @spu.queue_cd_audio([4000, -4000].pack("s<*"))
+
+    @spu.write16(PSX::SPU::SPUCNT, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal [2000, -1000], frames.first
+  end
+
+  def test_cd_audio_queue_is_not_consumed_when_spucnt_cd_audio_is_disabled
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x7FFF)
+    @spu.queue_cd_audio([1234, 5678].pack("s<*"))
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal [0, 0], frames.first
+    assert_equal [1234, 5678], @spu.instance_variable_get(:@cd_audio_fifo)
+  end
+
   def test_irq9_fires_when_transfer_address_matches_irq_address
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)

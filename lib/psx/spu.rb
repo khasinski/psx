@@ -21,6 +21,8 @@ module PSX
     ENDX_LOW          = 0xD9C
     ENDX_HIGH         = 0xD9E
     SPU_IRQ_ADDR      = 0xDA4
+    CD_AUDIO_VOL_LEFT = 0xDB0
+    CD_AUDIO_VOL_RIGHT = 0xDB2
     CYCLES_PER_SAMPLE = 768
 
     # SPUCNT bits 4-5 = transfer mode
@@ -60,6 +62,9 @@ module PSX
       @key_off = 0
       @endx = 0
       @voice_active = 0
+      @cd_audio_left_volume = 0
+      @cd_audio_right_volume = 0
+      @cd_audio_fifo = []
       @voices = Array.new(24) do
         VoiceState.new(
           current_address: 0,
@@ -97,6 +102,8 @@ module PSX
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
       when SPUSTAT           then @stat
+      when CD_AUDIO_VOL_LEFT then @cd_audio_left_volume
+      when CD_AUDIO_VOL_RIGHT then @cd_audio_right_volume
       else
         idx = offset - 0xC00
         return 0 unless idx >= 0 && idx < 0x400 - 1
@@ -156,6 +163,10 @@ module PSX
         drain_fifo if mode == MODE_MANUAL && prev_mode != MODE_MANUAL
       when SPUDTC
         @dtc = v
+      when CD_AUDIO_VOL_LEFT
+        @cd_audio_left_volume = v
+      when CD_AUDIO_VOL_RIGHT
+        @cd_audio_right_volume = v
       end
     end
 
@@ -222,6 +233,10 @@ module PSX
         @sample_cycle_accumulator -= CYCLES_PER_SAMPLE
         tick_sample
       end
+    end
+
+    def queue_cd_audio(bytes)
+      @cd_audio_fifo.concat(bytes.unpack("s<*"))
     end
 
     private
@@ -317,6 +332,13 @@ module PSX
           advance_voice_block(voice_index)
           break if (@voice_active & (1 << voice_index)).zero?
         end
+      end
+
+      if (@cnt & 0x0001) != 0
+        cd_left = @cd_audio_fifo.shift || 0
+        cd_right = @cd_audio_fifo.shift || 0
+        left_sum += apply_volume(cd_left, signed16(@cd_audio_left_volume))
+        right_sum += apply_volume(cd_right, signed16(@cd_audio_right_volume))
       end
 
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))

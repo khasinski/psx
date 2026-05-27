@@ -211,6 +211,9 @@ module PSX
         cnt: @cnt, stat: @stat, dtc: @dtc,
         key_on: @key_on, key_off: @key_off, endx: @endx,
         voice_active: @voice_active,
+        cd_audio_left_volume: @cd_audio_left_volume,
+        cd_audio_right_volume: @cd_audio_right_volume,
+        cd_audio_fifo: @cd_audio_fifo.dup,
         sample_cycle_accumulator: @sample_cycle_accumulator || 0,
         voices: @voices.map { |v| v.to_h.transform_values { |value| value.is_a?(Array) || value.is_a?(Hash) ? value.dup : value } },
         fifo: @fifo.dup,
@@ -228,6 +231,9 @@ module PSX
       @key_off = s[:key_off] || 0
       @endx = s[:endx] || 0
       @voice_active = s[:voice_active] || 0
+      @cd_audio_left_volume = s[:cd_audio_left_volume] || 0
+      @cd_audio_right_volume = s[:cd_audio_right_volume] || 0
+      @cd_audio_fifo = s[:cd_audio_fifo]&.dup || []
       @sample_cycle_accumulator = s[:sample_cycle_accumulator] || 0
       if s[:voices]
         @voices = s[:voices].map do |voice|
