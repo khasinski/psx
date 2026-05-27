@@ -4,6 +4,39 @@ Snapshot of where the emulator is and what we just spent time on.
 
 ## Latest continuation
 
+2026-05-27 sixth update:
+
+- Added DuckStation-backed SPU DMA request status behavior:
+  - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
+    mode is DMA write and the simplified transfer FIFO is empty.
+  - Leaving DMA transfer modes clears the DMA request bits.
+  - Commit: `8d49fe4 Report SPU DMA write requests`.
+- Tightened digital pad command handling against DuckStation:
+  - After the initial `0x01` select byte, the digital pad now only
+    acknowledges command `0x42`. Unknown controller commands return `0xFF`
+    and end the transfer instead of continuing as a normal pad read.
+  - Commit: `b019264 Reject unknown digital pad commands`.
+- Fixed a GPU texture/CLUT raster bug:
+  - 4-bit/8-bit CLUT lookups now wrap horizontally within the VRAM row.
+    DuckStation explicitly wraps CLUT loads when an 8-bit palette crosses
+    x=1023; the old Ruby sampler spilled into the next row, which can produce
+    wrong-colour/wrong-half texture artifacts for palettes near row end.
+  - Commit: `fa3061e Wrap GPU CLUT lookups within row`.
+- Verification:
+  - After the SPU change, full suite passed:
+    `313 runs, 790 assertions, 0 failures`.
+  - After the SIO change, full suite passed:
+    `314 runs, 793 assertions, 0 failures`.
+  - After the GPU CLUT wrap change, full suite passed:
+    `315 runs, 794 assertions, 0 failures`.
+- Remaining Rage-specific caveat:
+  - The Rage Europe Start-to-skip-intro complaint has not been proven fixed.
+    The pad command change is accuracy work, not yet proof that intro skip
+    works.
+  - The title/logo texture issue may be helped by the earlier texture-flip
+    fix and this CLUT wrap fix, but it still needs a Rage screenshot smoke
+    run to verify.
+
 2026-05-27 fifth update:
 
 - Fixed the Rage Europe intro FMV presentation path. The main issue after the
