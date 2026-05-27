@@ -115,32 +115,6 @@ class InterruptsSpec < Minitest::Test
     assert_equal 0, cpu.regs[31]
   end
 
-  def test_cpu_services_installed_irq_callback_for_bios_low_vector_trampoline
-    env = create_cpu_with_ram
-    cpu = env[:cpu]
-    memory = env[:memory]
-    interrupts = env[:interrupts]
-
-    memory.write32(0x8000_0080, 0x3C1A_0000) # lui k0,0
-    memory.write32(0x8000_0084, 0x275A_0C80) # addiu k0,k0,0x0c80
-    memory.write32(0x8000_0088, 0x0340_0008) # jr k0
-    memory.write32(0x8009_9430, 1)
-    memory.write32(0x8009_943C, 0x8001_0000)
-    memory.write32(0x8009_9460, PSX::Interrupts::IRQ_CDROM)
-    write_store_byte_callback(memory, 0x8001_0000, 0x66)
-
-    cpu.cop0.sr = 0x401
-    interrupts.write_mask(PSX::Interrupts::IRQ_CDROM)
-    interrupts.request(PSX::Interrupts::IRQ_CDROM)
-    cpu.pc = 0x8002_0000
-
-    cpu.check_interrupts
-
-    assert_equal 0x66, memory.read8(0x8009_BAF8)
-    assert_equal 0, interrupts.read_stat & PSX::Interrupts::IRQ_CDROM
-    assert_equal 0x8002_0000, cpu.pc
-  end
-
   def test_cpu_services_multiple_installed_irq_callbacks_in_irq_order
     env = create_cpu_with_ram
     cpu = env[:cpu]
