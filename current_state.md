@@ -38,6 +38,14 @@ Snapshot of where the emulator is and what we just spent time on.
     IRQs even when SELECT/TXEN do not allow a transfer, matching DuckStation's
     data-register write path. Commit:
     `6f1aad7 Trigger SIO TX interrupts on data writes`.
+  - Split SIO TX interrupts from later serial receive completion. TXINTEN
+    still fires on JOY_DATA writes, but the response byte and RX/ACK side
+    effects now arrive after a short transfer delay instead of immediately.
+    Commit: `04ab2ed Delay SIO receive completion`.
+  - Hardened the installed-callback IRQ fallback for corrupted low exception
+    vectors. A recognizable `j/jal` vector or Rage's `k0` trampoline still
+    vectors normally; all-zero or garbage vectors use the installed callback
+    table. Commit: `bdb12fa Handle corrupted IRQ vectors`.
   - Fixed MDEC signed colour output. 24-bit/15-bit colour conversion now
     honors command bit 26: signed output no longer receives the unsigned
     +128 bias. Commit: `c412ed7 Honor signed MDEC colour output`.
@@ -71,6 +79,23 @@ Snapshot of where the emulator is and what we just spent time on.
       `329 runs, 830 assertions, 0 failures`.
     - After unsupported CD-ROM valid-arity specs: full suite passed
       `332 runs, 839 assertions, 0 failures`.
+    - After delayed SIO receive completion: full suite passed
+      `333 runs, 842 assertions, 0 failures`.
+    - After corrupted IRQ vector handling: full suite passed
+      `336 runs, 851 assertions, 0 failures`.
+
+- Current Rage Europe input/title blocker:
+  - The Start issue is still not proven fixed. A 2.9B-cycle scripted-Start run
+    after the SIO receive-delay fix still produced RGB-black screenshots.
+  - The immediate failure now reproduces earlier than title input: by 400M
+    cycles Rage has taken an arithmetic-overflow exception in the MDEC/Huffman
+    decode loop at `EPC=80064760` (`add $t0,$t0,$a2`). The low exception vector
+    is corrupted with stream-looking data, so without a real instruction-cache
+    model the game cannot run its normal exception handler.
+  - This points back to stream/decode data correctness rather than keyboard
+    Start mapping: the pad path is active enough to print Namco's
+    `PS-X Control PAD Driver  Ver 3.0`, but Rage does not reach a stable title
+    input point in the current tree.
 
 - Added DuckStation-backed SPU DMA request status behavior:
   - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
