@@ -48,6 +48,31 @@ module PSX
 
     DEFAULT_STAT_DISC    = SF_MOTOR_ON
     DEFAULT_STAT_NO_DISC = SF_SHELL_OPEN
+    COMMAND_PARAMETER_COUNTS = {
+      0x01 => 0..0,   # GetStat
+      0x02 => 3..3,   # SetLoc
+      0x03 => 0..1,   # Play
+      0x06 => 0..0,   # ReadN
+      0x07 => 0..0,   # MotorOn/Standby
+      0x08 => 0..0,   # Stop
+      0x09 => 0..0,   # Pause
+      0x0A => 0..0,   # Init
+      0x0B => 0..0,   # Mute
+      0x0C => 0..0,   # Demute
+      0x0D => 2..2,   # SetFilter
+      0x0E => 1..1,   # SetMode
+      0x0F => 0..0,   # GetParam
+      0x10 => 0..0,   # GetLocL
+      0x11 => 0..0,   # GetLocP
+      0x13 => 0..0,   # GetTN
+      0x14 => 1..1,   # GetTD
+      0x15 => 0..0,   # SeekL
+      0x16 => 0..0,   # SeekP
+      0x19 => 1..16,  # Test
+      0x1A => 0..0,   # GetID
+      0x1B => 0..0,   # ReadS
+      0x1E => 0..0,   # ReadTOC
+    }.freeze
 
     attr_reader :stat
     attr_accessor :cdda_sink, :xa_adpcm_sink
@@ -452,6 +477,12 @@ module PSX
 
       @pending_group += 1
       @current_response_group = @pending_group
+
+      expected_params = COMMAND_PARAMETER_COUNTS[cmd]
+      if expected_params && !expected_params.cover?(params.size)
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        return
+      end
 
       case cmd
       when 0x01 then cmd_getstat

@@ -389,6 +389,42 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
   end
 
+  def test_getstat_errors_for_stray_parameter
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x01) # GetStat expects no params
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_play_errors_for_too_many_parameters
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x01)
+    @cdrom.write8(2, 0x02)
+    @cdrom.write8(1, 0x03) # Play accepts at most one param
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_test_command_errors_without_subcommand
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x19) # Test requires one subcommand byte
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
   def test_get_tn_errors_when_drive_not_ready
     enable_irqs(0x1F)
     @cdrom.write8(0, 0)
