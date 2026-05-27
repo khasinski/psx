@@ -164,7 +164,11 @@ module PSX
         end
       when SPUCNT
         prev_mode = mode
+        was_enabled = (@cnt & (1 << 15)) != 0
         @cnt = v
+        if was_enabled && (@cnt & (1 << 15)).zero?
+          force_all_voices_off
+        end
         # SPUSTAT bits 0-5 mirror SPUCNT bits 0-5 (real hardware applies a
         # short delay; we apply immediately, which is enough for software
         # that polls in a loop).
@@ -310,6 +314,17 @@ module PSX
 
         @voices[voice].adsr_phase = :release
         update_adsr_envelope(voice)
+      end
+    end
+
+    def force_all_voices_off
+      @voice_active = 0
+      24.times do |voice|
+        @voices[voice].adsr_phase = :off
+        @voices[voice].adsr_volume = 0
+        adsr_offset = 0xC00 + voice * 0x10 + 0x0C
+        @regs.setbyte(adsr_offset - 0xC00, 0)
+        @regs.setbyte(adsr_offset - 0xC00 + 1, 0)
       end
     end
 

@@ -269,6 +269,19 @@ class SPUSpec < Minitest::Test
     assert_equal [1234, 5678], @spu.instance_variable_get(:@cd_audio_fifo)
   end
 
+  def test_clearing_spucnt_enable_forces_active_voices_off
+    @spu.write16(0xC00 + 0x0C, 0x4000)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 15)
+
+    @spu.write16(PSX::SPU::SPUCNT, 0)
+
+    voice = @spu.instance_variable_get(:@voices)[0]
+    assert_equal 0, @spu.instance_variable_get(:@voice_active)
+    assert_equal :off, voice.adsr_phase
+    assert_equal 0, @spu.read16(0xC00 + 0x0C)
+  end
+
   def test_irq9_fires_when_transfer_address_matches_irq_address
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
