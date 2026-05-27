@@ -1019,8 +1019,10 @@ module PSX
           px = x + dx
           next if px < al || px > ar || px < 0 || px >= VRAM_WIDTH
 
-          u = (@texture_x_flip ? tex_u - dx : tex_u + dx) & 0xFF
-          v = (@texture_y_flip ? tex_v - dy : tex_v + dy) & 0xFF
+          u = tex_u + (@texture_x_flip ? (w - 1 - dx) : dx)
+          v = tex_v + (@texture_y_flip ? (h - 1 - dy) : dy)
+          u &= 0xFF
+          v &= 0xFF
           texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp)
           next if texel == 0
 
