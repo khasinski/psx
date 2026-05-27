@@ -4,6 +4,34 @@ Snapshot of where the emulator is and what we just spent time on.
 
 ## Latest continuation
 
+2026-05-28 continuation:
+
+- Fixed R3000A load-delay timing. Loaded values now commit after the
+  immediately following instruction executes, so that instruction still sees
+  the old register value. Writes to the same register cancel the pending load.
+- Matched DuckStation's `lwl`/`lwr` load-delay merge behavior: a consecutive
+  unaligned load pair now merges through the pending load-delayed value for
+  the same target register.
+- Added CPU specs for the delayed `lw` visibility, pending-load cancellation,
+  and consecutive `lwr`/`lwl` merge case. Save states now preserve the new
+  pending load-commit slot.
+- Verification:
+  - Focused CPU/savestate specs passed:
+    `27 runs, 30 assertions, 0 failures`.
+  - Full suite passed:
+    `339 runs, 855 assertions, 0 failures`.
+- Rage Europe status:
+  - The CPU load-delay fixes are correct accuracy work but do not resolve the
+    current Rage intro blocker. A 500M-cycle smoke still reaches the same
+    early stream decoder failure: by 200M the low exception vector is
+    overwritten with stream-looking data (`0x1D842FE7...`) and PC is stuck at
+    `0x80000080/84`.
+  - Re-testing the old scoped Rage intro IRQ policy on the current tree also
+    did not restore the title path; queue entries are already state `2` and
+    the decoder still overruns. The remaining lead is still the software STR
+    bitstream decode/terminator path or another CPU/data-path issue, not pad
+    Start handling.
+
 2026-05-27 sixth update:
 
 - Additional continuation after the sixth update:
