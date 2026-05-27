@@ -776,8 +776,10 @@ module PSX
       @texture_page_y = ((value >> 4) & 0x01) * 256
       @semi_transparency = (value >> 5) & 0x03
       @texture_depth = (value >> 7) & 0x03
-      @texture_x_flip = (value & (1 << 12)) != 0
-      @texture_y_flip = (value & (1 << 13)) != 0
+      unless preserve_draw_mode_bits
+        @texture_x_flip = (value & (1 << 12)) != 0
+        @texture_y_flip = (value & (1 << 13)) != 0
+      end
 
       status_mask = preserve_draw_mode_bits ? 0x01FF : 0x07FF
       @status = (@status & ~status_mask) | (value & status_mask)

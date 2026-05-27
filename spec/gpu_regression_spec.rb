@@ -137,6 +137,34 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x001F, @gpu.vram[0], "rectangle should use the tpage set by the preceding polygon"
   end
 
+  def test_textured_polygon_tpage_does_not_update_draw_mode_texture_flip
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_08_02)
+    @gpu.gp0(0xE1_00_01_10) # direct-color texture page at Y=256, no flip
+
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 8] = 0x001F
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 9] = 0x03E0
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 10] = 0x7C00
+
+    @gpu.gp0(0x25_7F_7F_7F) # raw textured triangle
+    @gpu.gp0(0x00_20_00_20)
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_20_00_21)
+    @gpu.gp0(0x1110_00_00) # bit 12 set in polygon texpage word; should not set x-flip
+    @gpu.gp0(0x00_21_00_20)
+    @gpu.gp0(0x0000_00_00)
+
+    @gpu.gp0(0x65_7F_7F_7F) # raw textured variable rectangle
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x0000_00_08)
+    @gpu.gp0(0x00_01_00_03)
+
+    refute @gpu.instance_variable_get(:@texture_x_flip)
+    assert_equal 0x001F, @gpu.vram[0], "polygon tpage bit 12 must not flip following rectangles"
+    assert_equal 0x03E0, @gpu.vram[1]
+    assert_equal 0x7C00, @gpu.vram[2]
+  end
+
   def test_textured_rectangle_honors_draw_mode_x_flip
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_08_02)
