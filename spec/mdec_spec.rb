@@ -19,6 +19,10 @@ class MDECSpec < Minitest::Test
     assert (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
   end
 
+  def test_status_reports_duckstation_current_block_encoding
+    assert_equal 4, (@mdec.read32_status >> 16) & 0x7
+  end
+
   def test_starting_command_clears_pending_output_fifo
     load_flat_identity_tables
 

@@ -279,6 +279,7 @@ module PSX
         quant_chroma: @quant_chroma.dup,
         idct_table: @idct_table.dup,
         decode_buffer: @decode_buffer.dup,
+        current_block: @current_block,
         load_target: @load_target,
         load_offset: @load_offset,
         load_includes_chroma: @load_includes_chroma,
@@ -299,6 +300,7 @@ module PSX
       @quant_chroma = s[:quant_chroma]&.dup || Array.new(64, 0)
       @idct_table = s[:idct_table]&.dup || Array.new(64, 0)
       @decode_buffer = s[:decode_buffer]&.dup || []
+      @current_block = s[:current_block] || 0
       @load_target = s[:load_target]
       @load_offset = s[:load_offset] || 0
       @load_includes_chroma = s[:load_includes_chroma]

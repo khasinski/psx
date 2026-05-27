@@ -94,6 +94,7 @@ module PSX
       # Buffer of decode-command parameter words (RLE + scale headers).
       # Phase 3 will consume this and produce pixel data.
       @decode_buffer    = []
+      @current_block    = 0
       # Sub-state during a multi-word command load (so write32_data knows
       # what to do with each successive word).
       @load_target      = nil   # :quant_luma | :quant_chroma | :idct | :decode_data | nil
@@ -134,6 +135,7 @@ module PSX
       status |= (@output_depth & 0x3) << 25
       status |= (1 << 24) if @output_signed
       status |= (1 << 23) if @output_bit15
+      status |= (((@current_block || 0) + 4) % 6) << 16
       # Bits 15..0 = (param count - 1), clamped to 0xFFFF when no command
       # is pending. Reads of this field are what games poll to know how
       # many words they still owe the decoder.
