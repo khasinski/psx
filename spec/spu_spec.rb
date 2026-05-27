@@ -65,6 +65,12 @@ class SPUSpec < Minitest::Test
     assert_equal [0, 0], last
   end
 
+  def test_transfer_data_register_reads_as_ff_ff
+    @spu.write16(PSX::SPU::SPU_FIFO, 0x1234)
+
+    assert_equal 0xFFFF, @spu.read16(PSX::SPU::SPU_FIFO)
+  end
+
   def test_reserved_adpcm_shift_values_decode_as_shift_9
     block = {
       shift_filter: 0x0D,

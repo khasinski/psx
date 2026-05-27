@@ -112,6 +112,7 @@ module PSX
       when PITCH_MOD_LOW     then @pitch_modulation_enable & 0xFFFF
       when PITCH_MOD_HIGH    then (@pitch_modulation_enable >> 16) & 0xFFFF
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
+      when SPU_FIFO          then 0xFFFF
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
       when SPUSTAT           then @stat
