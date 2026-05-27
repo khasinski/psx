@@ -318,6 +318,8 @@ module PSX
       h[:data_buffer] = @data_buffer&.dup
       h[:last_sector_header] = @last_sector_header.dup
       h[:last_sector_subheader] = @last_sector_subheader.dup
+      h[:last_subq] = @last_subq.dup
+      h[:last_subq_valid] = @last_subq_valid
       h[:xa_last_samples] = @xa_last_samples.dup
       h
     end
@@ -330,6 +332,8 @@ module PSX
       @data_buffer = s[:data_buffer]&.dup
       @last_sector_header = s[:last_sector_header]&.dup || [0, 0, 0, 0]
       @last_sector_subheader = s[:last_sector_subheader]&.dup || [0, 0, 0, 0]
+      @last_subq = s[:last_subq]&.dup || [0, 0, 0, 0, 0, 0, 0, 0]
+      @last_subq_valid = s[:last_subq_valid] || false
       @xa_last_samples = s[:xa_last_samples]&.dup || [0, 0, 0, 0]
     end
   end

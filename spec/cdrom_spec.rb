@@ -176,6 +176,40 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
   end
 
+  def test_getloc_p_returns_last_delivered_subq_not_next_read_lba
+    @cdrom.disc = build_disc([
+      ("ONE!" + "\x00" * 2044).b,
+      ("TWO!" + "\x00" * 2044).b,
+    ])
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)   # SetLoc LBA 0
+    drain_response
+    @cdrom.write8(1, 0x06)   # ReadN
+    drain_response
+    assert drive_until_int(1, max_ticks: 20)
+    ack_response
+
+    @cdrom.write8(1, 0x11)   # GetlocP
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+
+    assert_equal [0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00], bytes
+  end
+
+  def test_getloc_p_errors_before_any_subq_is_available
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x11) # GetlocP
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+  end
+
   def test_getparam_returns_mode_and_xa_filter
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

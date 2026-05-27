@@ -94,6 +94,8 @@ module PSX
       @last_sector_header = [0, 0, 0, 0]
       @last_sector_subheader = [0, 0, 0, 0]
       @last_sector_header_valid = false
+      @last_subq = [0, 0, 0, 0, 0, 0, 0, 0]
+      @last_subq_valid = false
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
 
       # CDDA (redbook audio) playback state. Independent of @reading so a
@@ -269,6 +271,7 @@ module PSX
           @stat &= ~SF_PLAYING_CDDA
           break
         end
+        update_last_subq(@cdda_lba)
         @cdda_sink&.call(bytes)
         @cdda_lba += 1
         @cdda_cycles += period
@@ -322,7 +325,23 @@ module PSX
       @last_sector_header = whole.byteslice(0, 4).bytes
       @last_sector_subheader = whole.byteslice(4, 4).bytes
       @last_sector_header_valid = true
+      update_last_subq(lba)
       whole
+    end
+
+    def update_last_subq(lba)
+      track = @disc&.track_for_lba(lba)
+      track_no = track&.number || 1
+      relative_lba = track ? [lba - track.lba_start, 0].max : lba
+      rm, rs, rf = Disc.lba_to_msf(relative_lba)
+      am, as, af = Disc.lba_to_msf(lba)
+      @last_subq = [
+        Disc.to_bcd(track_no),
+        0x01,
+        Disc.to_bcd(rm), Disc.to_bcd(rs), Disc.to_bcd(rf),
+        Disc.to_bcd(am), Disc.to_bcd(as), Disc.to_bcd(af),
+      ]
+      @last_subq_valid = true
     end
 
     def sector_payload(whole)
@@ -630,17 +649,11 @@ module PSX
     end
 
     def cmd_getloc_p
-      m, s, f = Disc.lba_to_msf(@read_lba)
-      track = @disc&.track_for_lba(@read_lba)
-      track_no = track&.number || 1
-      # Track-relative MSF
-      tm, ts, tf = Disc.lba_to_msf((@read_lba - (track&.lba_start || 0)).clamp(0, @read_lba))
-      queue_response(0, 3, [
-        Disc.to_bcd(track_no),
-        0x01,                      # index
-        Disc.to_bcd(tm), Disc.to_bcd(ts), Disc.to_bcd(tf),
-        Disc.to_bcd(m),  Disc.to_bcd(s),  Disc.to_bcd(f)
-      ])
+      if @disc && @last_subq_valid
+        queue_response(0, 3, @last_subq)
+      else
+        queue_response(0, 5, [SF_ERROR | @stat, 0x80])
+      end
     end
 
     def cmd_get_tn
