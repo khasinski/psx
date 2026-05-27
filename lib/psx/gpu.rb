@@ -99,6 +99,7 @@ module PSX
       @cmd_buffer = []
       @cmd_remaining = 0
       @current_cmd = 0
+      @polyline_active = false
 
       # VRAM transfer state
       @vram_transfer_x = 0
@@ -113,6 +114,7 @@ module PSX
       # Framebuffer caching
       @framebuffer_dirty = true
       @framebuffer_cache = nil
+      @gpu_info_latch = 0
 
       # DMA direction
       @dma_direction = 0
@@ -147,12 +149,17 @@ module PSX
       if @vram_transfer_mode == :vram_to_cpu && !@vram_read_buffer.empty?
         @vram_read_buffer.shift
       else
-        0
+        @gpu_info_latch
       end
     end
 
     # GP0 - Rendering commands and VRAM access
     def gp0(value)
+      if @polyline_active
+        handle_polyline_word(value)
+        return
+      end
+
       if @vram_transfer_mode == :cpu_to_vram
         vram_write_data(value)
         return
@@ -176,7 +183,7 @@ module PSX
       when CMD_NOP
         # Do nothing
       when CMD_CLEAR_CACHE
-        # Clear texture cache - ignore for now
+        # Clear texture cache - no software cache is modeled yet
       when CMD_FILL_RECT
         @cmd_remaining = 2
       when 0x20..0x3F
@@ -184,7 +191,11 @@ module PSX
         @cmd_remaining = polygon_word_count(cmd) - 1
       when 0x40..0x5F
         # Lines
-        @cmd_remaining = line_word_count(cmd) - 1
+        if (cmd & 0x08) != 0
+          @polyline_active = true
+        else
+          @cmd_remaining = line_word_count(cmd) - 1
+        end
       when 0x60..0x7F
         # Rectangles
         @cmd_remaining = rectangle_word_count(cmd) - 1
@@ -210,7 +221,7 @@ module PSX
         # Unknown command - ignore
       end
 
-      execute_gp0_command if @cmd_remaining == 0 && @cmd_buffer.length > 0
+      execute_gp0_command if !@polyline_active && @cmd_remaining == 0 && @cmd_buffer.length > 0
     end
 
     # GP1 - Display control
@@ -254,7 +265,10 @@ module PSX
       # Return cached framebuffer if VRAM hasn't changed
       if !@framebuffer_dirty && @framebuffer_cache &&
          @framebuffer_cache[:width] == @horizontal_res &&
-         @framebuffer_cache[:height] == @vertical_res
+         @framebuffer_cache[:height] == @vertical_res &&
+         @framebuffer_cache[:display_start_x] == @display_start_x &&
+         @framebuffer_cache[:display_start_y] == @display_start_y &&
+         @framebuffer_cache[:color_depth_24] == @color_depth_24
         return @framebuffer_cache
       end
 
@@ -295,7 +309,14 @@ module PSX
       end
 
       @framebuffer_dirty = false
-      @framebuffer_cache = { width: width, height: height, rgba: rgba_arr.pack("C*") }
+      @framebuffer_cache = {
+        width: width,
+        height: height,
+        display_start_x: @display_start_x,
+        display_start_y: @display_start_y,
+        color_depth_24: @color_depth_24,
+        rgba: rgba_arr.pack("C*")
+      }
     end
 
     # Mark framebuffer as needing regeneration (call when VRAM is modified)
@@ -342,6 +363,18 @@ module PSX
 
       @cmd_buffer = []
       @current_cmd = 0
+    end
+
+    def handle_polyline_word(value)
+      if value == 0x5555_5555 || value == 0x5000_5000
+        mark_dirty
+        gp0_polyline
+        @cmd_buffer = []
+        @current_cmd = 0
+        @polyline_active = false
+      else
+        @cmd_buffer << value
+      end
     end
 
     # Word counts for multi-word commands
@@ -472,21 +505,22 @@ module PSX
         # A textured polygon's tpage parameter also rewrites GPUSTAT bits 0-8
         # (and, when GP1 09 allowed it, bit 15 from tpage bit 11). Bits 9-10
         # remain whatever GP0 E1 set them to (verified by ps1-tests gpu/gp0-e1).
-        @status = (@status & ~0x01FF) | (tpage & 0x01FF)
-        tex_disable = (@texture_disable_allow && (tpage & (1 << 11)) != 0) ? 0x8000 : 0
-        @status = (@status & ~0x8000) | tex_disable
+        apply_texture_page(tpage, preserve_draw_mode_bits: true)
 
         if quad
           draw_textured_triangle(points[0], points[1], points[2],
                                  texcoords[0], texcoords[1], texcoords[2],
-                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
+                                 colors[0], colors[1], colors[2], gouraud,
+                                 clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
           draw_textured_triangle(points[1], points[2], points[3],
                                  texcoords[1], texcoords[2], texcoords[3],
-                                 colors[1], clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
+                                 colors[1], colors[2], colors[3], gouraud,
+                                 clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
         else
           draw_textured_triangle(points[0], points[1], points[2],
                                  texcoords[0], texcoords[1], texcoords[2],
-                                 colors[0], clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
+                                 colors[0], colors[1], colors[2], gouraud,
+                                 clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi_transparent)
         end
       else
         if quad
@@ -530,6 +564,50 @@ module PSX
         x1 + @draw_offset_x, y1 + @draw_offset_y,
         color0, color1, gouraud
       )
+    end
+
+    def gp0_polyline
+      cmd = @current_cmd
+      gouraud = (cmd & 0x10) != 0
+      return if @cmd_buffer.length < 3
+
+      color0 = line_color(@cmd_buffer[0])
+      pos0 = line_point(@cmd_buffer[1])
+      idx = 2
+
+      while idx < @cmd_buffer.length
+        if gouraud
+          break if idx + 1 >= @cmd_buffer.length
+
+          color1 = line_color(@cmd_buffer[idx])
+          pos1 = line_point(@cmd_buffer[idx + 1])
+          draw_line(pos0[:x] + @draw_offset_x, pos0[:y] + @draw_offset_y,
+                    pos1[:x] + @draw_offset_x, pos1[:y] + @draw_offset_y,
+                    color0, color1, true)
+          color0 = color1
+          pos0 = pos1
+          idx += 2
+        else
+          pos1 = line_point(@cmd_buffer[idx])
+          draw_line(pos0[:x] + @draw_offset_x, pos0[:y] + @draw_offset_y,
+                    pos1[:x] + @draw_offset_x, pos1[:y] + @draw_offset_y,
+                    color0, color0, false)
+          pos0 = pos1
+          idx += 1
+        end
+      end
+    end
+
+    def line_color(word)
+      { r: word & 0xFF, g: (word >> 8) & 0xFF, b: (word >> 16) & 0xFF }
+    end
+
+    def line_point(word)
+      x = word & 0xFFFF
+      x -= 0x10000 if x >= 0x8000
+      y = (word >> 16) & 0xFFFF
+      y -= 0x10000 if y >= 0x8000
+      { x: x, y: y }
     end
 
     def gp0_rectangle
@@ -688,12 +766,17 @@ module PSX
 
     # GP0 Environment commands
     def gp0_draw_mode(value)
+      apply_texture_page(value, preserve_draw_mode_bits: false)
+    end
+
+    def apply_texture_page(value, preserve_draw_mode_bits:)
       @texture_page_x = (value & 0x0F) * 64
       @texture_page_y = ((value >> 4) & 0x01) * 256
       @semi_transparency = (value >> 5) & 0x03
       @texture_depth = (value >> 7) & 0x03
 
-      @status = (@status & ~0x07FF) | (value & 0x07FF)
+      status_mask = preserve_draw_mode_bits ? 0x01FF : 0x07FF
+      @status = (@status & ~status_mask) | (value & status_mask)
 
       # GPUSTAT bit 15 (Texture Disable) comes from E1 bit 11, but only when
       # GP1 09 ("Allow Texture Disable") has been set. With allow=false an E1
@@ -745,21 +828,40 @@ module PSX
       @display_h_end = 0xC00
       @display_v_start = 0x10
       @display_v_end = 0x100
+      @video_mode = :ntsc
+      @horizontal_res = 320
+      @vertical_res = 240
+      @color_depth_24 = false
+      @interlaced = false
       @draw_area_left = 0
       @draw_area_top = 0
       @draw_area_right = 0
       @draw_area_bottom = 0
       @draw_offset_x = 0
       @draw_offset_y = 0
+      @texture_page_x = 0
+      @texture_page_y = 0
+      @texture_depth = 0
+      @semi_transparency = 0
+      @texture_window_mask_x = 0
+      @texture_window_mask_y = 0
+      @texture_window_offset_x = 0
+      @texture_window_offset_y = 0
+      @texture_disable_allow = false
+      @set_mask_bit = false
+      @check_mask_bit = false
       @cmd_buffer = []
       @cmd_remaining = 0
       @vram_transfer_mode = nil
+      @polyline_active = false
+      mark_dirty
     end
 
     def gp1_reset_command_buffer
       @cmd_buffer = []
       @cmd_remaining = 0
       @vram_transfer_mode = nil
+      @polyline_active = false
       @status |= STAT_CMD_READY
     end
 
@@ -778,6 +880,7 @@ module PSX
     def gp1_display_start(value)
       @display_start_x = value & 0x3FE  # 10 bits, even
       @display_start_y = (value >> 10) & 0x1FF
+      mark_dirty
     end
 
     def gp1_horizontal_range(value)
@@ -814,11 +917,27 @@ module PSX
                 ((@video_mode == :pal ? 1 : 0) << 20) |
                 ((@color_depth_24 ? 1 : 0) << 21) |
                 ((@interlaced ? 1 : 0) << 22)
+      mark_dirty
     end
 
     def gp1_gpu_info(value)
-      # GPU info - returns requested information
-      # For now just acknowledge
+      @gpu_info_latch = case value & 0x0F
+      when 0x02
+        @texture_window_mask_x |
+          (@texture_window_mask_y << 5) |
+          (@texture_window_offset_x << 10) |
+          (@texture_window_offset_y << 15)
+      when 0x03
+        @draw_area_left | (@draw_area_top << 10)
+      when 0x04
+        @draw_area_right | (@draw_area_bottom << 10)
+      when 0x05
+        (@draw_offset_x & 0x7FF) | ((@draw_offset_y & 0x7FF) << 11)
+      when 0x07
+        2
+      else
+        @gpu_info_latch
+      end
     end
 
     # Software rendering
@@ -923,6 +1042,7 @@ module PSX
           end
 
           out = fr5 | (fg5 << 5) | (fb5 << 10)
+          out |= texel & 0x8000
           out |= 0x8000 if smb
           vram[idx] = out
         end
@@ -1181,16 +1301,21 @@ module PSX
     end
 
     # Draw textured triangle with UV interpolation
-    def draw_textured_triangle(p0, p1, p2, t0, t1, t2, base_color, clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi = false)
+    def draw_textured_triangle(p0, p1, p2, t0, t1, t2, c0, c1, c2, gouraud, clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi = false)
       # Extract CLUT position
       clut_x = (clut & 0x3F) * 16
       clut_y = (clut >> 6) & 0x1FF
 
-      # Sort vertices by Y, keeping UVs in sync
-      verts = [[p0, t0], [p1, t1], [p2, t2]].sort_by { |v, _| v[:y] }
-      v0, uv0 = verts[0]
-      v1, uv1 = verts[1]
-      v2, uv2 = verts[2]
+      unless gouraud
+        c1 = c0
+        c2 = c0
+      end
+
+      # Sort vertices by Y, keeping UVs and colors in sync.
+      verts = [[p0, t0, c0], [p1, t1, c1], [p2, t2, c2]].sort_by { |v, _, _| v[:y] }
+      v0, uv0, col0 = verts[0]
+      v1, uv1, col1 = verts[1]
+      v2, uv2, col2 = verts[2]
 
       return if v2[:y] == v0[:y]  # Degenerate triangle
 
@@ -1207,7 +1332,6 @@ module PSX
       cmb = @check_mask_bit; smb = @set_mask_bit
       vram = @vram
       stp_mode = semi ? @semi_transparency : -1
-      br = base_color[:r]; bg_c = base_color[:g]; bb = base_color[:b]
 
       y = y_lo - 1
       while (y += 1) <= y_hi
@@ -1218,24 +1342,28 @@ module PSX
           x1 = v0[:x] + (v1[:x] - v0[:x]) * t1_interp
           u1 = uv0[:u] + (uv1[:u] - uv0[:u]) * t1_interp
           v1_tex = uv0[:v] + (uv1[:v] - uv0[:v]) * t1_interp
+          c_left = interp_color(col0, col1, t1_interp)
         else
           next if v2[:y] == v1[:y]
           t1_interp = (y - v1[:y]).to_f / (v2[:y] - v1[:y])
           x1 = v1[:x] + (v2[:x] - v1[:x]) * t1_interp
           u1 = uv1[:u] + (uv2[:u] - uv1[:u]) * t1_interp
           v1_tex = uv1[:v] + (uv2[:v] - uv1[:v]) * t1_interp
+          c_left = interp_color(col1, col2, t1_interp)
         end
 
         t2_interp = (y - v0[:y]).to_f / (v2[:y] - v0[:y])
         x2 = v0[:x] + (v2[:x] - v0[:x]) * t2_interp
         u2 = uv0[:u] + (uv2[:u] - uv0[:u]) * t2_interp
         v2_tex = uv0[:v] + (uv2[:v] - uv0[:v]) * t2_interp
+        c_right = interp_color(col0, col2, t2_interp)
 
         # Ensure x1 < x2
         if x1 > x2
           x1, x2 = x2, x1
           u1, u2 = u2, u1
           v1_tex, v2_tex = v2_tex, v1_tex
+          c_left, c_right = c_right, c_left
         end
 
         # Draw scanline with texture sampling
@@ -1246,6 +1374,9 @@ module PSX
         inv_span = x_span > 0 ? 1.0 / x_span : 0
         du = u2 - u1
         dv = v2_tex - v1_tex
+        lr = c_left[:r]; lg = c_left[:g]; lb = c_left[:b]
+        rr = c_right[:r]; rg = c_right[:g]; rb = c_right[:b]
+        dr = rr - lr; dg = rg - lg; db = rb - lb
         row = y * VRAM_WIDTH
 
         x = x_start - 1
@@ -1266,6 +1397,9 @@ module PSX
             fg5 = (texel >> 5) & 0x1F
             fb5 = (texel >> 10) & 0x1F
           else
+            br = (lr + dr * t).to_i; br = 0 if br < 0; br = 255 if br > 255
+            bg_c = (lg + dg * t).to_i; bg_c = 0 if bg_c < 0; bg_c = 255 if bg_c > 255
+            bb = (lb + db * t).to_i; bb = 0 if bb < 0; bb = 255 if bb > 255
             tr = (texel & 0x001F)
             tg = (texel & 0x03E0) >> 5
             tb = (texel & 0x7C00) >> 10
@@ -1279,6 +1413,7 @@ module PSX
           end
 
           out = fr5 | (fg5 << 5) | (fb5 << 10)
+          out |= texel & 0x8000
           out |= 0x8000 if smb
           vram[idx] = out
         end

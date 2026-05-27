@@ -112,7 +112,18 @@ class SIO0Test < Minitest::Test
     s = status
     assert (s & (1 << 0)) != 0, "TX Ready 1"
     assert (s & (1 << 2)) != 0, "TX Ready 2"
-    assert (s & (1 << 7)) != 0, "/ACK high by default"
+    assert_equal 0, s & (1 << 7), "/ACK should be high/unasserted by default"
+  end
+
+  def test_ack_input_bit_pulses_when_device_acknowledges
+    tx(0x01)
+    assert_equal 0, status & (1 << 7), "/ACK should not assert immediately"
+
+    @sio.tick(500)
+    assert (status & (1 << 7)) != 0, "/ACK bit should assert after the scheduled delay"
+
+    @sio.tick(250)
+    assert_equal 0, status & (1 << 7), "/ACK pulse should return high"
   end
 
   def test_status_rx_fifo_not_empty_after_tx

@@ -21,7 +21,7 @@ module PSX
     STAT_RX_FIFO_NE   = 1 << 1  # RX FIFO not empty
     STAT_TX_READY_2   = 1 << 2  # No active transfer / TX done
     STAT_RX_PARITY    = 1 << 3
-    STAT_ACK_INPUT    = 1 << 7  # /ACK input level (0=device pulling low)
+    STAT_ACK_INPUT    = 1 << 7  # /ACK input level (1=device pulling low)
     STAT_IRQ_REQUEST  = 1 << 9
 
     # JOY_CTRL (0x1F80104A) bits
@@ -53,6 +53,7 @@ module PSX
       @irq    = false   # JOY_STAT bit 9 (and source of IRQ_CONTROLLER)
       @device_step = 0  # 0 = waiting for select byte
       @pending_ack_cycles = nil  # countdown before /ACK pulse fires
+      @ack_low_cycles = 0
     end
 
     # Drive the /ACK timing. The BIOS clears I_STAT bit 7 right after writing
@@ -60,12 +61,22 @@ module PSX
     # before raising IRQ_CONTROLLER -- otherwise the BIOS clear wipes our IRQ
     # and the poll spins until timeout.
     def tick(cycles)
-      return unless @pending_ack_cycles
-      @pending_ack_cycles -= cycles
-      return if @pending_ack_cycles > 0
-      @pending_ack_cycles = nil
-      @irq = true
-      @interrupts&.request(Interrupts::IRQ_CONTROLLER)
+      ack_started = false
+      if @pending_ack_cycles
+        @pending_ack_cycles -= cycles
+        if @pending_ack_cycles <= 0
+          @pending_ack_cycles = nil
+          @ack_low_cycles = 250
+          ack_started = true
+          @irq = true
+          @interrupts&.request(Interrupts::IRQ_CONTROLLER)
+        end
+      end
+
+      if @ack_low_cycles.positive? && !ack_started
+        @ack_low_cycles -= cycles
+        @ack_low_cycles = 0 if @ack_low_cycles.negative?
+      end
     end
 
     # --- Bus interface -----------------------------------------------------
@@ -142,8 +153,9 @@ module PSX
 
     # Read-side JOY_STAT word.
     def status
-      s = STAT_TX_READY_1 | STAT_TX_READY_2 | STAT_ACK_INPUT
+      s = STAT_TX_READY_1 | STAT_TX_READY_2
       s |= STAT_RX_FIFO_NE unless @rx.empty?
+      s |= STAT_ACK_INPUT if @ack_low_cycles.positive?
       s |= STAT_IRQ_REQUEST if @irq
       s
     end
@@ -230,6 +242,8 @@ module PSX
         # JOY_STAT cleanly afterwards.
         @rx.clear
         @irq = false
+        @pending_ack_cycles = nil
+        @ack_low_cycles = 0
         @device_step = 0
         @mode = 0
         @baud = 0

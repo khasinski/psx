@@ -39,15 +39,42 @@ end
 
 # After PSX_START_AT_CYCLES, alternate press/release Start so attract-mode
 # games drop into their main menu. Active-low, bit 3 = Start.
+# PSX_INPUT_SCRIPT can add deterministic button taps:
+#   start:4000000000:4050000000,cross:4300000000:4350000000
 start_at = Integer((ENV["PSX_START_AT_CYCLES"] || "0").gsub("_", ""))
+button_bits = {
+  "select" => 0,
+  "start" => 3,
+  "up" => 4,
+  "right" => 5,
+  "down" => 6,
+  "left" => 7,
+  "l2" => 8,
+  "r2" => 9,
+  "l1" => 10,
+  "r1" => 11,
+  "triangle" => 12,
+  "circle" => 13,
+  "cross" => 14,
+  "square" => 15
+}
+input_script = (ENV["PSX_INPUT_SCRIPT"] || "").split(",").filter_map do |entry|
+  button, first, last = entry.split(":")
+  next if button.nil? || first.nil? || last.nil?
+  bit = button_bits.fetch(button.downcase)
+  [bit, Integer(first.gsub("_", "")), Integer(last.gsub("_", ""))]
+end
 ran_global = 0
 start_pressed = false
 emu.controller_state_proc = -> do
+  state = 0xFFFF
   if start_at > 0 && ran_global >= start_at && start_pressed
-    0xFFFF & ~(1 << 3)
-  else
-    0xFFFF
+    state &= ~(1 << 3)
   end
+  input_script.each do |bit, first, last|
+    state &= ~(1 << bit) if ran_global >= first && ran_global < last
+  end
+  state
 end
 
 if fast_boot
@@ -79,8 +106,15 @@ while ran < cycles_tot
 
   pc = emu.cpu.pc
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-  printf "[%6.1fs ran=%11d PC=%08X] last tty: %s\n",
-         elapsed, ran, pc,
+  gpu = emu.gpu
+  display_mode = gpu.instance_variable_get(:@color_depth_24) ? "24" : "15"
+  display_start = [gpu.instance_variable_get(:@display_start_x),
+                   gpu.instance_variable_get(:@display_start_y)]
+  display_size = [gpu.instance_variable_get(:@horizontal_res),
+                  gpu.instance_variable_get(:@vertical_res)]
+  printf "[%6.1fs ran=%11d PC=%08X GPU=%sbit %dx%d @%d,%d] last tty: %s\n",
+         elapsed, ran, pc, display_mode, display_size[0], display_size[1],
+         display_start[0], display_start[1],
          captured.lines.last(1).map(&:strip).join("")[0, 70]
 
   # Snapshot every N chunks
@@ -102,3 +136,8 @@ end
 
 puts "\n=== final captured TTY (last 40 lines) ==="
 puts captured.lines.last(40).join
+
+if ENV["PSX_SAVE_STATE"]
+  emu.save_state(ENV["PSX_SAVE_STATE"])
+  puts "Saved state to #{ENV["PSX_SAVE_STATE"]}"
+end

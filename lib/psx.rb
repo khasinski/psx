@@ -189,6 +189,7 @@ module PSX
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
           frame_count += 1
+          refresh_bios_pad_buffers
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank
         end
@@ -459,6 +460,48 @@ module PSX
 
     private
 
+    BIOS_PAD1_BUFFER_PTR = 0x8000_74C8
+    BIOS_PAD2_BUFFER_PTR = 0x8000_74CC
+    BIOS_PAD1_BUFFER_LEN = 0x8000_74D8
+    BIOS_PAD2_BUFFER_LEN = 0x8000_74DC
+
+    def refresh_bios_pad_buffers
+      refresh_bios_pad1_buffer
+      refresh_bios_pad2_buffer
+    end
+
+    def refresh_bios_pad1_buffer
+      addr = @memory.read32(BIOS_PAD1_BUFFER_PTR)
+      length = @memory.read32(BIOS_PAD1_BUFFER_LEN)
+      return unless bios_pad_buffer?(addr, length)
+
+      state = @controller_state_proc.call & 0xFFFF
+      @memory.write8(addr, 0x00)
+      @memory.write8(addr + 1, SIO0::DIGITAL_PAD_IDHI)
+      @memory.write8(addr + 2, state & 0xFF)
+      @memory.write8(addr + 3, (state >> 8) & 0xFF)
+    rescue StandardError
+      # Treat host input failures as no pad state change.
+    end
+
+    def refresh_bios_pad2_buffer
+      addr = @memory.read32(BIOS_PAD2_BUFFER_PTR)
+      length = @memory.read32(BIOS_PAD2_BUFFER_LEN)
+      return unless bios_pad_buffer?(addr, length)
+
+      @memory.write8(addr, 0xFF)
+      @memory.write8(addr + 1, 0x00)
+      @memory.write8(addr + 2, 0x00)
+      @memory.write8(addr + 3, 0x00)
+    end
+
+    def bios_pad_buffer?(addr, length)
+      return false if addr.zero? || length < 4
+
+      phys = addr & Memory::REGION_MASK[(addr >> 29) & 0x7]
+      phys < Memory::RAM_SIZE && phys + 3 < Memory::RAM_SIZE
+    end
+
     def tick_devices
       @cycle_count += 1
 
@@ -474,6 +517,7 @@ module PSX
       if @cycle_count >= CYCLES_PER_FRAME
         @cycle_count = 0
         @frame_count += 1
+        refresh_bios_pad_buffers
         @interrupts.request(Interrupts::IRQ_VBLANK)
         @gpu.vblank  # Toggle interlace field
       end

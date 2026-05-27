@@ -210,4 +210,5 @@ class GPUSpec < Minitest::Test
     assert_equal 0x55, fb[:rgba].getbyte(5), "Second pixel green should come from byte 4"
     assert_equal 0x44, fb[:rgba].getbyte(6), "Second pixel blue should come from byte 3"
   end
+
 end

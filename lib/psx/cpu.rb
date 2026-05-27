@@ -369,11 +369,14 @@ module PSX
 
     def service_installed_interrupt_callbacks
       cdrom = @memory.cdrom
-      return false unless cdrom &&
+      return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
+      rage_intro_stream = cdrom &&
                           cdrom.instance_variable_get(:@whole_sector) &&
                           cdrom.instance_variable_get(:@reading) &&
                           cdrom.instance_variable_get(:@seek_lba) == 304
-      return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
+      rage_skip_transition = @memory.read32(0x8009_F094) == 2 &&
+                             @memory.read32(CALLBACK_TABLE_BASE) == 0x8006_E75C
+      return false unless rage_intro_stream || rage_skip_transition
 
       pending = @memory.read16(0x1F80_1070) & @memory.read16(0x1F80_1074)
       pending &= @memory.read32(CALLBACK_TABLE_MASK)
@@ -395,6 +398,11 @@ module PSX
 
       if (pending & 0x008) != 0
         service_rage_mdec_dma_callback
+      end
+
+      if (pending & 0x080) != 0
+        callback = @memory.read32(CALLBACK_TABLE_BASE + 7 * 4)
+        execute_interrupt_callback(callback) if callback != 0
       end
 
       @interrupts.write_stat((~pending) & 0x7FF)

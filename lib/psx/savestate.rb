@@ -166,14 +166,14 @@ module PSX
     GPU_IVARS = %i[
       status display_enabled display_start_x display_start_y
       display_h_start display_h_end display_v_start display_v_end
-      video_mode horizontal_res vertical_res interlaced
+      video_mode horizontal_res vertical_res color_depth_24 interlaced
       draw_area_left draw_area_top draw_area_right draw_area_bottom
       draw_offset_x draw_offset_y
       texture_page_x texture_page_y texture_depth semi_transparency
       texture_window_mask_x texture_window_mask_y
       texture_window_offset_x texture_window_offset_y
       texture_disable_allow set_mask_bit check_mask_bit
-      cmd_remaining current_cmd
+      cmd_remaining current_cmd polyline_active
       vram_transfer_x vram_transfer_y vram_transfer_start_x
       vram_transfer_width vram_transfer_height vram_transfer_count
       vram_transfer_mode
