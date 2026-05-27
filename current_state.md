@@ -15,6 +15,15 @@ Snapshot of where the emulator is and what we just spent time on.
     now validate as zero-parameter commands, return not-ready INT5 unless
     CDDA playback is active, and ACK while playing, matching DuckStation's
     command path. Commit: `09e9f61 Handle CDROM scan commands`.
+  - Added CD-ROM ReadT command handling. Command `0x12` now requires one
+    session parameter, rejects session zero, ACKs session 1, and completes
+    later with INT2, matching DuckStation's single-session path.
+    Commit: `db33a29 Handle CDROM ReadT command`.
+  - Completed CD-ROM command parameter-count validation for the remaining
+    DuckStation table entries: SetClock, GetClock, Reset, GetQ, and VideoCD.
+    Unsupported commands still return invalid-command after valid arity, but
+    wrong arity now returns incorrect-number-of-parameters first.
+    Commit: `47f052f Validate remaining CDROM command counts`.
   - Fixed MDEC signed colour output. 24-bit/15-bit colour conversion now
     honors command bit 26: signed output no longer receives the unsigned
     +128 bias. Commit: `c412ed7 Honor signed MDEC colour output`.
@@ -36,6 +45,10 @@ Snapshot of where the emulator is and what we just spent time on.
       `318 runs, 798 assertions, 0 failures`.
     - After CD-ROM Forward/Backward: full suite passed
       `320 runs, 805 assertions, 0 failures`.
+    - After CD-ROM ReadT: full suite passed
+      `323 runs, 815 assertions, 0 failures`.
+    - After remaining CD-ROM command counts: full suite passed
+      `326 runs, 824 assertions, 0 failures`.
 
 - Added DuckStation-backed SPU DMA request status behavior:
   - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
