@@ -18,7 +18,8 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::KEY_OFF_LOW, 0x0001)
 
     assert_equal 0x0001, @spu.read16(PSX::SPU::KEY_OFF_LOW)
-    assert_equal 0x0080_0002, @spu.instance_variable_get(:@voice_active)
+    assert_equal 0x0080_0003, @spu.instance_variable_get(:@voice_active)
+    assert_equal :release, @spu.instance_variable_get(:@voices)[0].adsr_phase
   end
 
   def test_key_on_clears_endx_for_started_voices
@@ -152,7 +153,18 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
-    assert_equal PSX::SPU::ADSR_ATTACK_STEP, @spu.read16(0xC00 + 0x0C)
+    assert_equal 0x3800, @spu.read16(0xC00 + 0x0C)
+  end
+
+  def test_attack_rate_7f_holds_adsr_volume
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    @spu.write16(0xC00 + 0x08, 0x7F00)
+    write_adpcm_block(0, flags: 0x00, first_data_byte: 0x11)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 4)
+
+    assert_equal 0, @spu.read16(0xC00 + 0x0C)
   end
 
   def test_irq9_fires_when_transfer_address_matches_irq_address

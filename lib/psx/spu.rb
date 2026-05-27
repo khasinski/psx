@@ -28,12 +28,13 @@ module PSX
     MODE_MANUAL = 1
     MODE_DMA_W  = 2
     MODE_DMA_R  = 3
-    ADSR_ATTACK_STEP = 0x0800
-
     VoiceState = Struct.new(
       :current_address,
       :repeat_address,
       :adsr_volume,
+      :adsr_phase,
+      :adsr_target,
+      :adsr_envelope,
       :last_samples,
       :decoded_samples,
       :current_block_flags,
@@ -64,6 +65,9 @@ module PSX
           current_address: 0,
           repeat_address: 0,
           adsr_volume: 0,
+          adsr_phase: :off,
+          adsr_target: 0,
+          adsr_envelope: reset_volume_envelope(0, 0, false, false, false),
           last_samples: [0, 0],
           decoded_samples: [],
           current_block_flags: 0,
@@ -253,16 +257,23 @@ module PSX
         @voices[voice].current_address = start_address
         @voices[voice].repeat_address = read16(0xC00 + voice * 0x10 + 0x0E) & ~1
         @voices[voice].adsr_volume = 0
+        @voices[voice].adsr_phase = :attack
         @voices[voice].last_samples = [0, 0]
         @voices[voice].sample_index = 0
         @voices[voice].sample_counter = 0
+        update_adsr_envelope(voice)
         decode_voice_block(voice)
       end
     end
 
     def key_off(mask)
       mask &= 0x00FF_FFFF
-      @voice_active &= ~mask
+      24.times do |voice|
+        next if (mask & (1 << voice)).zero?
+
+        @voices[voice].adsr_phase = :release
+        update_adsr_envelope(voice)
+      end
     end
 
     def write_word_to_ram(v)
@@ -338,12 +349,123 @@ module PSX
 
     def tick_voice_adsr(voice_index)
       voice = @voices[voice_index]
-      return if voice.adsr_volume >= 0x7FFF
+      return if voice.adsr_phase == :off
 
-      voice.adsr_volume = [voice.adsr_volume + ADSR_ATTACK_STEP, 0x7FFF].min
+      tick_adsr_envelope(voice)
       adsr_offset = voice_index * 0x10 + 0x0C
       @regs.setbyte(adsr_offset, voice.adsr_volume & 0xFF)
       @regs.setbyte(adsr_offset + 1, (voice.adsr_volume >> 8) & 0xFF)
+
+      reached_target =
+        if voice.adsr_envelope[:decreasing]
+          voice.adsr_volume <= voice.adsr_target
+        else
+          voice.adsr_volume >= voice.adsr_target
+        end
+      return unless reached_target && voice.adsr_phase != :sustain
+
+      voice.adsr_phase = next_adsr_phase(voice.adsr_phase)
+      if voice.adsr_phase == :off
+        @voice_active &= ~(1 << voice_index)
+      else
+        update_adsr_envelope(voice_index)
+      end
+    end
+
+    def update_adsr_envelope(voice_index)
+      voice = @voices[voice_index]
+      adsr = read16(0xC00 + voice_index * 0x10 + 0x08) |
+             (read16(0xC00 + voice_index * 0x10 + 0x0A) << 16)
+
+      case voice.adsr_phase
+      when :attack
+        rate = (adsr >> 8) & 0x7F
+        voice.adsr_target = 0x7FFF
+        voice.adsr_envelope = reset_volume_envelope(rate, 0x7F, false, (adsr & (1 << 15)) != 0, false)
+      when :decay
+        sustain_level = adsr & 0x0F
+        rate = ((adsr >> 4) & 0x0F) << 2
+        voice.adsr_target = [(sustain_level + 1) * 0x800, 0x7FFF].min
+        voice.adsr_envelope = reset_volume_envelope(rate, 0x1F << 2, true, true, false)
+      when :sustain
+        rate = (adsr >> 22) & 0x7F
+        voice.adsr_target = 0
+        voice.adsr_envelope = reset_volume_envelope(rate, 0x7F, (adsr & (1 << 30)) != 0, (adsr & (1 << 31)) != 0, false)
+      when :release
+        rate = ((adsr >> 16) & 0x1F) << 2
+        voice.adsr_target = 0
+        voice.adsr_envelope = reset_volume_envelope(rate, 0x1F << 2, true, (adsr & (1 << 21)) != 0, false)
+      else
+        voice.adsr_target = 0
+        voice.adsr_envelope = reset_volume_envelope(0, 0, false, false, false)
+      end
+    end
+
+    def next_adsr_phase(phase)
+      case phase
+      when :attack then :decay
+      when :decay then :sustain
+      when :release then :off
+      else :sustain
+      end
+    end
+
+    def reset_volume_envelope(rate, rate_mask, decreasing, exponential, phase_invert)
+      phase_invert &&= !(decreasing && exponential)
+      base_step = 7 - (rate & 3)
+      step = ((decreasing ^ phase_invert) || (decreasing && exponential)) ? ~base_step : base_step
+      counter_increment = 0x8000
+
+      if rate < 44
+        step <<= 11 - (rate >> 2)
+      elsif rate >= 48
+        counter_increment >>= (rate >> 2) - 11
+        counter_increment = [counter_increment, 1].max if (rate & rate_mask) != rate_mask
+      end
+
+      {
+        rate: rate,
+        decreasing: decreasing,
+        exponential: exponential,
+        phase_invert: phase_invert,
+        counter: 0,
+        counter_increment: counter_increment,
+        step: step,
+      }
+    end
+
+    def tick_adsr_envelope(voice)
+      envelope = voice.adsr_envelope
+      increment = envelope[:counter_increment]
+      step = envelope[:step]
+
+      if envelope[:exponential]
+        if envelope[:decreasing]
+          step = (step * voice.adsr_volume) >> 15
+        elsif voice.adsr_volume >= 0x6000
+          rate = envelope[:rate]
+          if rate < 40
+            step >>= 2
+          elsif rate >= 44
+            increment >>= 2
+          else
+            step >>= 1
+            increment >>= 1
+          end
+        end
+      end
+
+      envelope[:counter] += increment
+      return if (envelope[:counter] & 0x8000).zero?
+
+      envelope[:counter] = 0
+      new_level = voice.adsr_volume + step
+      if envelope[:decreasing]
+        new_level = envelope[:phase_invert] ? [[new_level, -32_768].max, 0].min : [new_level, 0].max
+      else
+        new_level = [[new_level, -32_768].max, 32_767].min
+      end
+      voice.adsr_volume = new_level
     end
 
     def apply_volume(sample, volume)

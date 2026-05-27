@@ -212,7 +212,7 @@ module PSX
         key_on: @key_on, key_off: @key_off, endx: @endx,
         voice_active: @voice_active,
         sample_cycle_accumulator: @sample_cycle_accumulator || 0,
-        voices: @voices.map { |v| v.to_h.transform_values { |value| value.is_a?(Array) ? value.dup : value } },
+        voices: @voices.map { |v| v.to_h.transform_values { |value| value.is_a?(Array) || value.is_a?(Hash) ? value.dup : value } },
         fifo: @fifo.dup,
       }
     end
@@ -235,6 +235,9 @@ module PSX
             current_address: voice[:current_address],
             repeat_address: voice[:repeat_address],
             adsr_volume: voice[:adsr_volume],
+            adsr_phase: voice[:adsr_phase] || :off,
+            adsr_target: voice[:adsr_target] || 0,
+            adsr_envelope: (voice[:adsr_envelope] || reset_volume_envelope(0, 0, false, false, false)).dup,
             last_samples: (voice[:last_samples] || [0, 0]).dup,
             decoded_samples: (voice[:decoded_samples] || []).dup,
             current_block_flags: voice[:current_block_flags] || 0,
