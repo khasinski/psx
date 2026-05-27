@@ -24,12 +24,20 @@ Snapshot of where the emulator is and what we just spent time on.
     Unsupported commands still return invalid-command after valid arity, but
     wrong arity now returns incorrect-number-of-parameters first.
     Commit: `47f052f Validate remaining CDROM command counts`.
+  - Added specs for the valid-arity unsupported CD-ROM command path. GetClock,
+    GetQ, and VideoCD now have explicit coverage that they return
+    invalid-command after passing their DuckStation-backed parameter counts.
+    Commit: `cfbcaa8 Spec unsupported CDROM command arity`.
   - Added SIO RX interrupt behavior. JOY_CTRL bit 11 now raises
     IRQ_CONTROLLER when a response byte enters the RX FIFO, matching
     DuckStation's `RXINTEN` path. Commit: `227f0cc Raise SIO RX interrupts`.
   - Added SIO TX interrupt behavior. JOY_CTRL bit 10 now raises
     IRQ_CONTROLLER when a transmit byte is accepted, matching DuckStation's
     `TXINTEN` path. Commit: `347c964 Raise SIO TX interrupts`.
+  - Tightened SIO TX interrupt ordering. JOY_DATA writes now raise TXINTEN
+    IRQs even when SELECT/TXEN do not allow a transfer, matching DuckStation's
+    data-register write path. Commit:
+    `6f1aad7 Trigger SIO TX interrupts on data writes`.
   - Fixed MDEC signed colour output. 24-bit/15-bit colour conversion now
     honors command bit 26: signed output no longer receives the unsigned
     +128 bias. Commit: `c412ed7 Honor signed MDEC colour output`.
@@ -59,6 +67,10 @@ Snapshot of where the emulator is and what we just spent time on.
       `327 runs, 826 assertions, 0 failures`.
     - After SIO TX interrupt behavior: full suite passed
       `328 runs, 828 assertions, 0 failures`.
+    - After SIO TX data-write ordering: full suite passed
+      `329 runs, 830 assertions, 0 failures`.
+    - After unsupported CD-ROM valid-arity specs: full suite passed
+      `332 runs, 839 assertions, 0 failures`.
 
 - Added DuckStation-backed SPU DMA request status behavior:
   - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
