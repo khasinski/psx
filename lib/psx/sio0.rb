@@ -232,6 +232,8 @@ module PSX
       @irq    = false   # JOY_STAT bit 9 (and source of IRQ_CONTROLLER)
       @device_step = 0  # 0 = waiting for select byte
       @active_device = nil
+      @pending_tx = nil
+      @pending_transfer_cycles = nil
       @pending_ack_cycles = nil  # countdown before /ACK pulse fires
       @ack_low_cycles = 0
     end
@@ -241,6 +243,11 @@ module PSX
     # before raising IRQ_CONTROLLER -- otherwise the BIOS clear wipes our IRQ
     # and the poll spins until timeout.
     def tick(cycles)
+      if @pending_transfer_cycles
+        @pending_transfer_cycles -= cycles
+        complete_pending_transfer if @pending_transfer_cycles <= 0
+      end
+
       ack_started = false
       if @pending_ack_cycles
         @pending_ack_cycles -= cycles
@@ -359,6 +366,16 @@ module PSX
       trigger_irq if (@ctrl & CTRL_TX_INT_EN) != 0
       return unless (@ctrl & (CTRL_TXEN | CTRL_JOYN_OUTPUT)) == (CTRL_TXEN | CTRL_JOYN_OUTPUT)
 
+      @pending_tx = byte & 0xFF
+      @pending_transfer_cycles = transfer_cycles
+    end
+
+    def complete_pending_transfer
+      byte = @pending_tx
+      @pending_tx = nil
+      @pending_transfer_cycles = nil
+      return if byte.nil?
+
       # Only slot 1 has devices; slot 2 stays silent (no /ACK -> BIOS timeout)
       if (@ctrl & CTRL_SLOT) != 0
         @rx.push(0xFF)
@@ -376,6 +393,13 @@ module PSX
       if (@ctrl & CTRL_ACK_INT_EN) != 0 && ack
         @pending_ack_cycles = 500
       end
+    end
+
+    def transfer_cycles
+      # A controller byte is shifted serially after JOY_DATA is written.
+      # Keep this short enough for BIOS poll loops, but separate TXINTEN from
+      # the later RX/ACK side effects.
+      256
     end
 
     def trigger_irq
@@ -458,6 +482,8 @@ module PSX
         @ctrl = 0
         @rx.clear
         @irq = false
+        @pending_tx = nil
+        @pending_transfer_cycles = nil
         @pending_ack_cycles = nil
         @ack_low_cycles = 0
         @device_step = 0
@@ -477,6 +503,8 @@ module PSX
         @active_device = nil
         @memory_card.reset_transfer
         @rx.clear
+        @pending_tx = nil
+        @pending_transfer_cycles = nil
       end
 
       # /JOYn falling edge -> deselect, reset protocol state.
@@ -484,6 +512,8 @@ module PSX
         @device_step = 0
         @active_device = nil
         @memory_card.reset_transfer
+        @pending_tx = nil
+        @pending_transfer_cycles = nil
       end
     end
 

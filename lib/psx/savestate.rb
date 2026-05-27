@@ -406,6 +406,8 @@ module PSX
         irq: @irq,
         device_step: @device_step,
         active_device: @active_device,
+        pending_tx: @pending_tx,
+        pending_transfer_cycles: @pending_transfer_cycles,
         pending_ack_cycles: @pending_ack_cycles,
         ack_low_cycles: @ack_low_cycles,
         memory_card: @memory_card.state_snapshot,
@@ -418,6 +420,8 @@ module PSX
       @irq = s[:irq]
       @device_step = s[:device_step]
       @active_device = s[:active_device]
+      @pending_tx = s[:pending_tx]
+      @pending_transfer_cycles = s[:pending_transfer_cycles]
       @pending_ack_cycles = s[:pending_ack_cycles]
       @ack_low_cycles = s[:ack_low_cycles] || 0
       @memory_card.restore_state(s[:memory_card]) if s[:memory_card]

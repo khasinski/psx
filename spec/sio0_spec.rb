@@ -29,6 +29,7 @@ class SIO0Test < Minitest::Test
 
   def tx(byte)
     @sio.write8(0x40, byte)
+    @sio.tick(300)
   end
 
   def rx
@@ -100,6 +101,17 @@ class SIO0Test < Minitest::Test
     assert (@irqs.stat & PSX::Interrupts::IRQ_CONTROLLER) != 0,
            "RX interrupt should be raised as soon as the response byte enters RX"
     assert status & (1 << 9) != 0
+  end
+
+  def test_response_byte_is_delayed_after_transmit_write
+    @sio.write8(0x40, 0x01)
+
+    assert_equal 0, status & (1 << 1), "RX FIFO should stay empty until the serial byte completes"
+
+    @sio.tick(300)
+
+    assert status & (1 << 1) != 0
+    assert_equal 0xFF, rx
   end
 
   def test_tx_interrupt_fires_when_transmit_byte_is_written
