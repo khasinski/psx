@@ -125,6 +125,18 @@ class SIO0Test < Minitest::Test
     assert_equal bytes.pack("C*"), memcard_read_frame(5)
   end
 
+  def test_state_snapshot_preserves_memory_card_contents
+    bytes = Array.new(128) { |i| (0x80 + i) & 0xFF }
+    memcard_write_frame(9, bytes)
+    snapshot = @sio.state_snapshot
+
+    restored = PSX::SIO0.new(interrupts: @irqs, controller_state: -> { @button_state })
+    restored.restore_state(snapshot)
+    @sio = restored
+
+    assert_equal bytes.pack("C*"), memcard_read_frame(9)
+  end
+
   def test_slot2_does_not_respond
     @sio.write16(0x4A, CTRL_TXEN | CTRL_JOYN_OUTPUT | CTRL_ACK_INT_EN | CTRL_SLOT)
     @irqs.instance_variable_set(:@stat, 0)

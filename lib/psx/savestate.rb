@@ -315,14 +315,40 @@ module PSX
   end
 
   class SIO0
+    class MemoryCard
+      def state_snapshot
+        {
+          data: @data.pack("C*"),
+          state: @state,
+          address: @address,
+          offset: @offset,
+          checksum: @checksum,
+          last_byte: @last_byte,
+          flag: @flag,
+        }
+      end
+
+      def restore_state(s)
+        @data = s[:data].bytes
+        @state = s[:state]
+        @address = s[:address]
+        @offset = s[:offset]
+        @checksum = s[:checksum]
+        @last_byte = s[:last_byte]
+        @flag = s[:flag]
+      end
+    end
+
     def state_snapshot
       {
         ctrl: @ctrl, mode: @mode, baud: @baud,
         rx: @rx.dup,
         irq: @irq,
         device_step: @device_step,
+        active_device: @active_device,
         pending_ack_cycles: @pending_ack_cycles,
-        ack_suppressed: @ack_suppressed,
+        ack_low_cycles: @ack_low_cycles,
+        memory_card: @memory_card.state_snapshot,
       }
     end
 
@@ -331,8 +357,10 @@ module PSX
       @rx = s[:rx].dup
       @irq = s[:irq]
       @device_step = s[:device_step]
+      @active_device = s[:active_device]
       @pending_ack_cycles = s[:pending_ack_cycles]
-      @ack_suppressed = s[:ack_suppressed]
+      @ack_low_cycles = s[:ack_low_cycles] || 0
+      @memory_card.restore_state(s[:memory_card]) if s[:memory_card]
     end
   end
 
