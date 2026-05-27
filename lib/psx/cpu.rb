@@ -86,6 +86,15 @@ module PSX
       next_pc = @next_pc
       @current_pc = pc
 
+      if pc == 0x8000_0080 && @interrupts&.pending? && exception_vector_unusable?
+        resume_pc = @cop0.epc
+        if service_installed_interrupt_callbacks
+          @cop0.return_from_exception
+          self.pc = resume_pc
+          return @step_cycles
+        end
+      end
+
       # Optional TTY hook: intercept BIOS A-table entry so PS-EXE programs
       # built against the standard BIOS putchar/puts functions can be tested
       # without depending on a working CD-ROM/Shell. Returns true when the
@@ -326,7 +335,7 @@ module PSX
         # exception vectors. Until the emulator has an instruction-cache
         # model, vectoring through an all-zero 0x80000080 just executes a
         # long NOP sled and strands retail games during IRQ-heavy loaders.
-        if @memory.read32(0x8000_0080).zero?
+        if exception_vector_unusable?
           service_installed_interrupt_callbacks
           return
         end
@@ -337,6 +346,19 @@ module PSX
     end
 
     private
+
+    def exception_vector_unusable?
+      first = @memory.read32(0x8000_0080)
+      return true if first.zero?
+
+      opcode = (first >> 26) & 0x3F
+      return false if opcode == 0x02 || opcode == 0x03 # j / jal
+
+      rt = (first >> 16) & 0x1F
+      return false if opcode == 0x0F && rt == 26 && @memory.read32(0x8000_0088) == 0x0340_0008
+
+      true
+    end
 
     def service_installed_interrupt_callbacks
       return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1

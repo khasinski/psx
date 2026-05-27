@@ -87,6 +87,26 @@ class InterruptsSpec < Minitest::Test
     assert_equal 0x8001_0000, cpu.cop0.epc
   end
 
+  def test_cpu_takes_interrupt_when_exception_vector_is_k0_trampoline
+    env = create_cpu_with_ram
+    cpu = env[:cpu]
+    memory = env[:memory]
+    interrupts = env[:interrupts]
+
+    memory.write32(0x8000_0080, 0x3C1A_0000) # lui k0,0
+    memory.write32(0x8000_0084, 0x275A_0C80) # addiu k0,k0,0x0c80
+    memory.write32(0x8000_0088, 0x0340_0008) # jr k0
+    cpu.cop0.sr = 0x401
+    interrupts.write_mask(PSX::Interrupts::IRQ_VBLANK)
+    interrupts.request(PSX::Interrupts::IRQ_VBLANK)
+    cpu.pc = 0x8001_0000
+
+    cpu.check_interrupts
+
+    assert_equal 0x8000_0080, cpu.pc
+    assert_equal PSX::COP0::EXC_INT << 2, cpu.cop0.cause & 0x7C
+  end
+
   def test_cpu_services_installed_irq_callback_when_exception_vector_is_unusable
     env = create_cpu_with_ram
     cpu = env[:cpu]
@@ -113,6 +133,59 @@ class InterruptsSpec < Minitest::Test
     assert_equal 0, interrupts.read_stat & PSX::Interrupts::IRQ_CDROM
     assert_equal 0x8002_0000, cpu.pc
     assert_equal 0, cpu.regs[31]
+  end
+
+  def test_cpu_services_installed_irq_callback_when_exception_vector_is_garbage
+    env = create_cpu_with_ram
+    cpu = env[:cpu]
+    memory = env[:memory]
+    interrupts = env[:interrupts]
+
+    memory.write32(0x8000_0080, 0x1D84_2FE7)
+    memory.write32(0x8000_0084, 0x4FA2_5152)
+    memory.write32(0x8009_9430, 1)
+    memory.write32(0x8009_9434, 0x8001_0000)
+    memory.write32(0x8009_9460, PSX::Interrupts::IRQ_VBLANK)
+    write_store_byte_callback(memory, 0x8001_0000, 0x66)
+
+    cpu.cop0.sr = 0x401
+    interrupts.write_mask(PSX::Interrupts::IRQ_VBLANK)
+    interrupts.request(PSX::Interrupts::IRQ_VBLANK)
+    cpu.pc = 0x8002_0000
+
+    cpu.check_interrupts
+
+    assert_equal 0x66, memory.read8(0x8009_BAF8)
+    assert_equal 0, interrupts.read_stat & PSX::Interrupts::IRQ_VBLANK
+    assert_equal 0x8002_0000, cpu.pc
+  end
+
+  def test_cpu_recovers_if_exception_vector_is_corrupted_after_irq_entry
+    env = create_cpu_with_ram
+    cpu = env[:cpu]
+    memory = env[:memory]
+    interrupts = env[:interrupts]
+
+    memory.write32(0x8000_0080, 0x3C1A_0000) # initially valid trampoline
+    memory.write32(0x8000_0088, 0x0340_0008)
+    memory.write32(0x8009_9430, 1)
+    memory.write32(0x8009_9434, 0x8001_0000)
+    memory.write32(0x8009_9460, PSX::Interrupts::IRQ_VBLANK)
+    write_store_byte_callback(memory, 0x8001_0000, 0x77)
+
+    cpu.cop0.sr = 0x401
+    interrupts.write_mask(PSX::Interrupts::IRQ_VBLANK)
+    interrupts.request(PSX::Interrupts::IRQ_VBLANK)
+    cpu.pc = 0x8002_0000
+    cpu.check_interrupts
+
+    memory.write32(0x8000_0080, 0x1D84_2FE7)
+    cpu.step
+
+    assert_equal 0x77, memory.read8(0x8009_BAF8)
+    assert_equal 0, interrupts.read_stat & PSX::Interrupts::IRQ_VBLANK
+    assert_equal 0x8002_0000, cpu.pc
+    assert_equal 0x01, cpu.cop0.sr & 0x3F
   end
 
   def test_cpu_services_multiple_installed_irq_callbacks_in_irq_order
