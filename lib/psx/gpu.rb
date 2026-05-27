@@ -1269,7 +1269,7 @@ module PSX
         index = (word >> shift) & 0x0F
 
         # Look up in CLUT
-        clut_addr = clut_y * VRAM_WIDTH + clut_x + index
+        clut_addr = clut_y * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)
         @vram[clut_addr] || 0
 
       when 1  # 8-bit CLUT
@@ -1283,7 +1283,7 @@ module PSX
         index = (word >> shift) & 0xFF
 
         # Look up in CLUT
-        clut_addr = clut_y * VRAM_WIDTH + clut_x + index
+        clut_addr = clut_y * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)
         @vram[clut_addr] || 0
 
       when 2  # 15-bit direct

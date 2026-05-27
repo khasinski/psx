@@ -201,6 +201,23 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x001F, @gpu.vram[PSX::GPU::VRAM_WIDTH * 2], "last row should sample the rectangle's top edge"
   end
 
+  def test_8bit_clut_lookup_wraps_at_vram_row_end
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_01_01)
+    @gpu.gp0(0xE1_00_00_90) # 8-bit texture page at Y=256
+
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x0014 # first texture byte: palette index 20
+    @gpu.vram[4] = 0x001F
+    @gpu.vram[PSX::GPU::VRAM_WIDTH + 4] = 0x03E0
+
+    @gpu.gp0(0x65_7F_7F_7F) # raw textured variable rectangle
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x003F_00_00) # CLUT starts at x=1008; index 20 wraps to x=4
+    @gpu.gp0(0x00_01_00_01)
+
+    assert_equal 0x001F, @gpu.vram[0], "8-bit CLUT lookup should wrap within the palette row"
+  end
+
   def test_gp1_info_reads_internal_gpu_registers
     @gpu.gp0(0xE2_00_8C_43)
     @gpu.gp0(0xE3_00_10_20)
