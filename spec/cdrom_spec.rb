@@ -319,6 +319,47 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_PLAYING_CDDA, @cdrom.read8(1)
   end
 
+  def test_read_t_requires_one_session_parameter
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x12) # ReadT without session param
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_read_t_session_zero_errors
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x12) # ReadT session 0
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INVALID_ARGUMENT, @cdrom.read8(1)
+  end
+
+  def test_read_t_session_one_acknowledges_and_completes
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x01)
+    @cdrom.write8(1, 0x12) # ReadT session 1
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    ack_response
+
+    assert drive_until_int(2, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+  end
+
   def test_test_command_60_requires_two_address_bytes
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

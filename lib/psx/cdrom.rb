@@ -66,6 +66,7 @@ module PSX
       0x0F => 0..0,   # GetParam
       0x10 => 0..0,   # GetLocL
       0x11 => 0..0,   # GetLocP
+      0x12 => 1..1,   # ReadT
       0x13 => 0..0,   # GetTN
       0x14 => 1..1,   # GetTD
       0x15 => 0..0,   # SeekL
@@ -504,6 +505,7 @@ module PSX
       when 0x0F then cmd_getparam
       when 0x10 then cmd_getloc_l
       when 0x11 then cmd_getloc_p
+      when 0x12 then cmd_read_t(params)
       when 0x13 then cmd_get_tn
       when 0x14 then cmd_get_td(params)
       when 0x15 then cmd_seek_l
@@ -737,6 +739,22 @@ module PSX
         queue_response(0, 3, @last_subq)
       else
         queue_response(0, 5, [SF_ERROR | @stat, 0x80])
+      end
+    end
+
+    def cmd_read_t(params)
+      if @disc.nil? || @reading || @cdda_playing
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
+      elsif params[0].zero?
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_ARGUMENT])
+      else
+        @stat |= SF_MOTOR_ON
+        queue_response(0, 3, [@stat])
+        if params[0] == 0x01
+          queue_response(CYCLES_PER_RESPONSE * 8, 2, [@stat])
+        else
+          queue_response(CYCLES_PER_RESPONSE * 8, 5, [SF_SEEK_ERROR | @stat, ERROR_REASON_INVALID_COMMAND])
+        end
       end
     end
 
