@@ -21,6 +21,7 @@ module PSX
     KEY_OFF_HIGH      = 0xD8E
     ENDX_LOW          = 0xD9C
     ENDX_HIGH         = 0xD9E
+    SPU_IRQ_ADDR      = 0xDA4
 
     # SPUCNT bits 4-5 = transfer mode
     MODE_STOP   = 0
@@ -28,8 +29,10 @@ module PSX
     MODE_DMA_W  = 2
     MODE_DMA_R  = 3
 
-    def initialize
+    def initialize(interrupts: nil)
+      @interrupts = interrupts
       @ram = ("\x00" * RAM_SIZE).b
+      @irq_addr = 0
       @transfer_addr = 0   # latched value (byte address)
       @current_addr  = 0   # advances during transfers
       @cnt = 0
@@ -57,6 +60,7 @@ module PSX
       when KEY_OFF_HIGH      then (@key_off >> 16) & 0xFFFF
       when ENDX_LOW          then @endx & 0xFFFF
       when ENDX_HIGH         then (@endx >> 16) & 0xFFFF
+      when SPU_IRQ_ADDR      then @irq_addr
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
@@ -88,9 +92,13 @@ module PSX
       when KEY_OFF_HIGH
         @key_off = (@key_off & 0x0000_FFFF) | (v << 16)
         key_off(v << 16)
+      when SPU_IRQ_ADDR
+        @irq_addr = v
+        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
       when SPU_TRANSFER_ADDR
         @transfer_addr = (v * 8) & (RAM_SIZE - 1)
         @current_addr = @transfer_addr
+        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
       when SPU_FIFO
         if mode == MODE_MANUAL
           # In ManualWrite mode each FIFO write streams straight to SPU RAM,
@@ -108,6 +116,11 @@ module PSX
         # short delay; we apply immediately, which is enough for software
         # that polls in a loop).
         @stat = (@stat & ~0x3F) | (@cnt & 0x3F)
+        unless irq_enabled?
+          @stat &= ~(1 << 6)
+        else
+          trigger_ram_irq if irq_transfer_match?(@current_addr)
+        end
         drain_fifo if mode == MODE_MANUAL && prev_mode != MODE_MANUAL
       when SPUDTC
         @dtc = v
@@ -119,6 +132,7 @@ module PSX
     def dma_read_word
       word = 0
       4.times do |i|
+        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
         word |= @ram.getbyte(@current_addr) << (i * 8)
         @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
       end
@@ -127,6 +141,7 @@ module PSX
 
     def dma_write_word(word)
       4.times do |i|
+        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
         @ram.setbyte(@current_addr, (word >> (i * 8)) & 0xFF)
         @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
       end
@@ -136,6 +151,19 @@ module PSX
 
     def mode
       (@cnt >> 4) & 0x3
+    end
+
+    def irq_enabled?
+      (@cnt & (1 << 6)) != 0 && (@stat & (1 << 6)).zero?
+    end
+
+    def irq_transfer_match?(addr)
+      ((@irq_addr * 8) & (RAM_SIZE - 1)) == (addr & (RAM_SIZE - 1))
+    end
+
+    def trigger_ram_irq
+      @stat |= (1 << 6)
+      @interrupts&.request(Interrupts::IRQ_SPU)
     end
 
     def key_on(mask)
@@ -157,8 +185,10 @@ module PSX
     end
 
     def write_word_to_ram(v)
+      trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
       @ram.setbyte(@current_addr, v & 0xFF)
       @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
+      trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
       @ram.setbyte(@current_addr, (v >> 8) & 0xFF)
       @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
     end

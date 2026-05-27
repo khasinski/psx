@@ -4,7 +4,8 @@ require_relative "spec_helper"
 
 class SPUSpec < Minitest::Test
   def setup
-    @spu = PSX::SPU.new
+    @interrupts = PSX::Interrupts.new
+    @spu = PSX::SPU.new(interrupts: @interrupts)
   end
 
   def test_key_on_and_key_off_registers_read_back
@@ -47,5 +48,36 @@ class SPUSpec < Minitest::Test
 
     assert_equal 0x0040, restored.read16(PSX::SPU::KEY_ON_LOW)
     assert_equal 0x0040, restored.instance_variable_get(:@voice_active)
+  end
+
+  def test_irq9_fires_when_transfer_address_matches_irq_address
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
+  def test_enabling_irq9_checks_current_transfer_address
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
+
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+ 
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
+  def test_disabling_irq9_clears_spustat_irq_flag
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
+
+    @spu.write16(PSX::SPU::SPUCNT, 0)
+
+    assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
   end
 end

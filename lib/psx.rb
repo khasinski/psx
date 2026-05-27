@@ -35,7 +35,7 @@ module PSX
       bios = BIOS.new(bios_path, fast_boot: fast_boot)
       ram = RAM.new
       @interrupts = Interrupts.new
-      @spu = SPU.new
+      @spu = SPU.new(interrupts: @interrupts)
       @mdec = MDEC.new
       disc = disc_path ? Disc.open(disc_path) : nil
       @cdrom = CDROM.new(interrupts: @interrupts, disc: disc)
