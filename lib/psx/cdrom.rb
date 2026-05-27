@@ -116,8 +116,8 @@ module PSX
         v & 0xFF
       when 2
         # Data FIFO — single byte read.
-        b = (@data_buffer && @data_pos < @data_buffer.bytesize) ? @data_buffer.getbyte(@data_pos) : 0
-        @data_pos += 1 if @data_buffer && @data_pos < @data_buffer.bytesize
+        b = (@bfrd_active && @data_buffer && @data_pos < @data_buffer.bytesize) ? @data_buffer.getbyte(@data_pos) : 0
+        @data_pos += 1 if @bfrd_active && @data_buffer && @data_pos < @data_buffer.bytesize
         b
       when 3
         case @index
@@ -130,7 +130,7 @@ module PSX
     # Pull a 32-bit word out of the data FIFO. Used by DMA channel 3 and by
     # any programmed-I/O code that reads the FIFO 32 bits at a time.
     def dma_read_word
-      return 0 unless @data_buffer
+      return 0 unless @bfrd_active && @data_buffer
       buf = @data_buffer
       sz = buf.bytesize
       b0 = (@data_pos     < sz) ? buf.getbyte(@data_pos)     : 0
@@ -171,9 +171,9 @@ module PSX
           # before kicking off DMA — clearing the buffer on the 0-write
           # would mean DMA reads zeros. Real hardware preserves the sector
           # data across BFRD toggles; the bit just opens/closes the read
-          # port. Rising edge resets the FIFO read pointer.
+          # port. Clearing BFRD resets the FIFO read pointer.
           bfrd = (v & 0x80) != 0
-          if bfrd && !@bfrd_active
+          if !bfrd && @bfrd_active
             @data_pos = 0
           end
           @bfrd_active = bfrd
@@ -292,7 +292,7 @@ module PSX
       s |= STAT_PARAMETER_FIFO_EMPTY    if @parameters.empty?
       s |= STAT_PARAMETER_FIFO_NOT_FULL if @parameters.size < 16
       s |= STAT_RESPONSE_FIFO_NOT_EMPTY unless @response.empty?
-      s |= STAT_DATA_FIFO_NOT_EMPTY     if data_fifo_has_data?
+      s |= STAT_DATA_FIFO_NOT_EMPTY     if @bfrd_active
       s
     end
 

@@ -54,6 +54,48 @@ class CDROMSpec < Minitest::Test
     assert_equal 0xDDCCBBAA, @cdrom.dma_read_word, "first word must be the original sector data"
   end
 
+  def test_data_fifo_reads_are_gated_by_bfrd
+    @cdrom.disc = build_one_sector_disc(("\x11\x22\x33\x44" + ("\x00" * 2044)).b)
+    deliver_first_sector
+
+    assert @cdrom.data_fifo_has_data?, "sector buffer is present before BFRD is armed"
+    assert_equal 0, @cdrom.read8(2), "data port should be closed while BFRD is clear"
+    assert_equal 0, @cdrom.dma_read_word, "DMA should not drain the sector while BFRD is clear"
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+
+    assert_equal 0x11, @cdrom.read8(2), "BFRD opens the data port"
+    assert_equal 0x44_33_22, @cdrom.dma_read_word & 0x00FF_FFFF
+  end
+
+  def test_status_drq_bit_follows_bfrd_request
+    @cdrom.disc = build_one_sector_disc(("\xAA" * 2048).b)
+    deliver_first_sector
+
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY,
+                 "DRQ/status bit should stay clear until BFRD is set"
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+    assert_equal PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY,
+                 @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY
+  end
+
+  def test_clearing_bfrd_resets_data_fifo_read_position
+    @cdrom.disc = build_one_sector_disc(("\x01\x02\x03\x04" + ("\x00" * 2044)).b)
+    deliver_first_sector
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+    assert_equal 0x01, @cdrom.read8(2)
+
+    @cdrom.write8(3, 0x00)
+    @cdrom.write8(3, 0x80)
+
+    assert_equal 0x01, @cdrom.read8(2), "BFRD clear rewinds the current sector buffer"
+  end
+
   # ReadN + Pause back-to-back is the BIOS pattern for "read exactly one
   # sector". The Pause arrives well before the cycle-paced INT1 would have
   # delivered the sector, but the BIOS expects to still get one INT1 with
@@ -75,6 +117,8 @@ class CDROMSpec < Minitest::Test
     int1_fired = drive_until_int(1, max_ticks: 200)
     assert int1_fired, "Pause should still let one INT1 land for the in-flight sector"
     assert @cdrom.data_fifo_has_data?, "Data FIFO should hold the sector after the INT1"
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
     # And the first word should be the magic we baked in.
     assert_equal 0x21445650, @cdrom.dma_read_word, "First word should be 'PVD!' (LE)"
   end
@@ -441,6 +485,18 @@ class CDROMSpec < Minitest::Test
     @cdrom.write8(0, 1)
     @cdrom.write8(3, 0x1F)     # ack all IRQ flag bits
     @cdrom.write8(0, 0)
+  end
+
+  def deliver_first_sector
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+    assert drive_until_int(1, max_ticks: 20)
+    ack_response
   end
 end
 
