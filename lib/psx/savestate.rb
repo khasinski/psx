@@ -29,6 +29,8 @@ module PSX
         branch_target: @branch_target,
         load_delay_reg: @load_delay_reg,
         load_delay_value: @load_delay_value,
+        load_delay_commit_reg: @load_delay_commit_reg,
+        load_delay_commit_value: @load_delay_commit_value,
         cop0: @cop0.state_snapshot,
         gte: @gte.state_snapshot,
       }
@@ -42,6 +44,8 @@ module PSX
       @branch_target = s[:branch_target]
       @load_delay_reg = s[:load_delay_reg]
       @load_delay_value = s[:load_delay_value]
+      @load_delay_commit_reg = s[:load_delay_commit_reg] || 0
+      @load_delay_commit_value = s[:load_delay_commit_value] || 0
       @cop0.restore_state(s[:cop0])
       @gte.restore_state(s[:gte])
     end

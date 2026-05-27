@@ -52,6 +52,8 @@ module PSX
       # Delayed load handling
       @load_delay_reg = 0
       @load_delay_value = 0
+      @load_delay_commit_reg = 0
+      @load_delay_commit_value = 0
 
       # Branch delay slot tracking. exception() reads @next_in_delay_slot
       # directly to decide whether the current instruction is in a delay
@@ -135,12 +137,12 @@ module PSX
       @pc = next_pc
       @next_pc = (next_pc + 4) & 0xFFFF_FFFF
 
-      # Apply pending load (inlined for performance)
-      load_reg = @load_delay_reg
-      if load_reg != 0
-        @regs[load_reg] = @load_delay_value
-        @load_delay_reg = 0
-      end
+      # R3000A load delay: a load result is not visible to the immediately
+      # following instruction. Snapshot the pending load now, execute the
+      # current instruction with the old register value, then commit below.
+      @load_delay_commit_reg = @load_delay_reg
+      @load_delay_commit_value = @load_delay_value
+      @load_delay_reg = 0
 
       # Execute (skip NOP). Hot opcodes inlined directly so YJIT can
       # specialize the full fetch -> decode -> op chain in one frame.
@@ -153,7 +155,7 @@ module PSX
           rt = (instruction >> 16) & 0x1F
           imm = instruction & 0xFFFF
           imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
-          @load_delay_reg = 0 if @load_delay_reg == rt
+          cancel_load_delay_for(rt)
           @regs[rt] = (@regs[rs] + imm) & 0xFFFF_FFFF if rt != 0
         when 0x23  # LW
           rs = (instruction >> 21) & 0x1F
@@ -170,6 +172,7 @@ module PSX
                   else
                     @memory.read32(addr) & 0xFFFF_FFFF
                   end
+            @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
             @load_delay_reg = rt
             @load_delay_value = val
             @step_cycles += 2
@@ -214,12 +217,12 @@ module PSX
           end
         when 0x0F  # LUI
           rt = (instruction >> 16) & 0x1F
-          @load_delay_reg = 0 if @load_delay_reg == rt
+          cancel_load_delay_for(rt)
           @regs[rt] = ((instruction & 0xFFFF) << 16) & 0xFFFF_FFFF if rt != 0
         when 0x0D  # ORI
           rs = (instruction >> 21) & 0x1F
           rt = (instruction >> 16) & 0x1F
-          @load_delay_reg = 0 if @load_delay_reg == rt
+          cancel_load_delay_for(rt)
           @regs[rt] = (@regs[rs] | (instruction & 0xFFFF)) & 0xFFFF_FFFF if rt != 0
         when 0x00  # SPECIAL: nested decode for hot subops
           funct = instruction & 0x3F
@@ -228,19 +231,19 @@ module PSX
             rt = (instruction >> 16) & 0x1F
             rd = (instruction >> 11) & 0x1F
             shamt = (instruction >> 6) & 0x1F
-            @load_delay_reg = 0 if @load_delay_reg == rd
+            cancel_load_delay_for(rd)
             @regs[rd] = (@regs[rt] << shamt) & 0xFFFF_FFFF if rd != 0
           when 0x21  # ADDU
             rs = (instruction >> 21) & 0x1F
             rt = (instruction >> 16) & 0x1F
             rd = (instruction >> 11) & 0x1F
-            @load_delay_reg = 0 if @load_delay_reg == rd
+            cancel_load_delay_for(rd)
             @regs[rd] = (@regs[rs] + @regs[rt]) & 0xFFFF_FFFF if rd != 0
           when 0x23  # SUBU
             rs = (instruction >> 21) & 0x1F
             rt = (instruction >> 16) & 0x1F
             rd = (instruction >> 11) & 0x1F
-            @load_delay_reg = 0 if @load_delay_reg == rd
+            cancel_load_delay_for(rd)
             @regs[rd] = (@regs[rs] - @regs[rt]) & 0xFFFF_FFFF if rd != 0
           when 0x2A  # SLT
             rs = (instruction >> 21) & 0x1F
@@ -248,7 +251,7 @@ module PSX
             rd = (instruction >> 11) & 0x1F
             a = @regs[rs]; a -= 0x1_0000_0000 if (a & 0x8000_0000) != 0
             b = @regs[rt]; b -= 0x1_0000_0000 if (b & 0x8000_0000) != 0
-            @load_delay_reg = 0 if @load_delay_reg == rd
+            cancel_load_delay_for(rd)
             @regs[rd] = (a < b ? 1 : 0) if rd != 0
           else
             execute_special(instruction)
@@ -288,6 +291,12 @@ module PSX
         else
           exception(COP0::EXC_RI)
         end
+      end
+
+      load_reg = @load_delay_commit_reg
+      if load_reg != 0
+        @regs[load_reg] = @load_delay_commit_value
+        @load_delay_commit_reg = 0
       end
 
       # Handle branch delay (check @branch_target as instruction may have set
@@ -413,6 +422,8 @@ module PSX
       saved_next_in_delay_slot = @next_in_delay_slot
       saved_load_delay_reg = @load_delay_reg
       saved_load_delay_value = @load_delay_value
+      saved_load_delay_commit_reg = @load_delay_commit_reg
+      saved_load_delay_commit_value = @load_delay_commit_value
       saved_hi = @hi
       saved_lo = @lo
       saved_regs = @regs.dup
@@ -432,6 +443,8 @@ module PSX
       @next_in_delay_slot = saved_next_in_delay_slot
       @load_delay_reg = saved_load_delay_reg
       @load_delay_value = saved_load_delay_value
+      @load_delay_commit_reg = saved_load_delay_commit_reg
+      @load_delay_commit_value = saved_load_delay_commit_value
       @hi = saved_hi
       @lo = saved_lo
       @regs = saved_regs
@@ -573,14 +586,20 @@ module PSX
       end
     end
 
+    def cancel_load_delay_for(reg)
+      @load_delay_reg = 0 if @load_delay_reg == reg
+      @load_delay_commit_reg = 0 if @load_delay_commit_reg == reg
+    end
+
     def set_reg(reg, value)
       # If we're setting a register that has a pending load, cancel the load
-      @load_delay_reg = 0 if @load_delay_reg == reg
+      cancel_load_delay_for(reg)
       @regs[reg] = value & 0xFFFF_FFFF if reg != 0
     end
 
     def set_reg_delayed(reg, value)
       # Delayed loads - value appears after next instruction
+      @load_delay_commit_reg = 0 if @load_delay_commit_reg == reg
       @load_delay_reg = reg
       @load_delay_value = value & 0xFFFF_FFFF
     end
@@ -778,7 +797,7 @@ module PSX
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
       shamt = (instruction >> 6) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rt] << shamt) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -786,7 +805,7 @@ module PSX
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
       shamt = (instruction >> 6) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rt] >> shamt) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -932,7 +951,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rs] + @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -954,7 +973,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rs] - @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -962,7 +981,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rs] & @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -970,7 +989,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rs] | @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -978,7 +997,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rs] ^ @regs[rt]) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -986,7 +1005,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (~(@regs[rs] | @regs[rt])) & 0xFFFF_FFFF if rd != 0
     end
 
@@ -996,7 +1015,7 @@ module PSX
       rd = (instruction >> 11) & 0x1F
       a = @regs[rs]; a -= 0x1_0000_0000 if (a & 0x8000_0000) != 0
       b = @regs[rt]; b -= 0x1_0000_0000 if (b & 0x8000_0000) != 0
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (a < b ? 1 : 0) if rd != 0
     end
 
@@ -1004,7 +1023,7 @@ module PSX
       rs = (instruction >> 21) & 0x1F
       rt = (instruction >> 16) & 0x1F
       rd = (instruction >> 11) & 0x1F
-      @load_delay_reg = 0 if @load_delay_reg == rd
+      cancel_load_delay_for(rd)
       @regs[rd] = (@regs[rs] < @regs[rt] ? 1 : 0) if rd != 0
     end
 
@@ -1030,7 +1049,7 @@ module PSX
       imm = instruction & 0xFFFF
       # Inline sign_extend16 and set_reg for hot path
       imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
-      @load_delay_reg = 0 if @load_delay_reg == rt
+      cancel_load_delay_for(rt)
       @regs[rt] = (@regs[rs] + imm) & 0xFFFF_FFFF if rt != 0
     end
 
@@ -1075,7 +1094,7 @@ module PSX
     def op_lui(instruction)
       rt = (instruction >> 16) & 0x1F
       imm = instruction & 0xFFFF
-      @load_delay_reg = 0 if @load_delay_reg == rt
+      cancel_load_delay_for(rt)
       @regs[rt] = (imm << 16) & 0xFFFF_FFFF if rt != 0
     end
 
@@ -1174,6 +1193,7 @@ module PSX
             else
               @memory.read32(addr) & 0xFFFF_FFFF
             end
+      @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
       @load_delay_reg = rt
       @load_delay_value = val
       @step_cycles += 2
@@ -1187,6 +1207,7 @@ module PSX
       imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
       addr = (@regs[rs] + imm) & 0xFFFF_FFFF
       # Inline set_reg_delayed
+      @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
       @load_delay_reg = rt
       @load_delay_value = @memory.read8(addr)
       @step_cycles += 1
@@ -1213,8 +1234,9 @@ module PSX
       aligned = addr & ~3
       val = @memory.read32(aligned)
 
-      # Merge with existing register value
-      current = @regs[rt]
+      # LWL/LWR pairs merge through a pending load-delay value when the
+      # previous instruction loaded the same target register.
+      current = (@load_delay_commit_reg == rt) ? @load_delay_commit_value : @regs[rt]
       case addr & 3
       when 0 then result = (current & 0x00FF_FFFF) | (val << 24)
       when 1 then result = (current & 0x0000_FFFF) | (val << 16)
@@ -1232,7 +1254,7 @@ module PSX
       aligned = addr & ~3
       val = @memory.read32(aligned)
 
-      current = @regs[rt]
+      current = (@load_delay_commit_reg == rt) ? @load_delay_commit_value : @regs[rt]
       case addr & 3
       when 0 then result = val
       when 1 then result = (current & 0xFF00_0000) | (val >> 8)

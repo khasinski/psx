@@ -144,6 +144,62 @@ class CPUSpec < Minitest::Test
     assert_equal 0xDEAD_BEEF, get_reg(9)
   end
 
+  def test_lw_delay_slot_uses_old_register_value
+    @ram.write32(0x100, 0xDEAD_BEEF)
+    set_reg(8, 0x100) # $t0 = base
+    set_reg(9, 5)     # $t1 = old value
+
+    @memory.write32(0x8000_0000, 0x8D09_0000) # lw    $t1, 0($t0)
+    @memory.write32(0x8000_0004, 0x252A_0001) # addiu $t2, $t1, 1
+    @memory.write32(0x8000_0008, 0x0000_0000) # nop
+    @cpu.pc = 0x8000_0000
+
+    @cpu.step
+    @cpu.step
+
+    assert_equal 6, get_reg(10),
+                 "instruction after lw should see the old register value"
+    assert_equal 0xDEAD_BEEF, get_reg(9),
+                 "loaded value should commit after the delay-slot instruction"
+  end
+
+  def test_write_to_load_target_cancels_pending_load
+    @ram.write32(0x100, 0xDEAD_BEEF)
+    set_reg(8, 0x100)
+
+    @memory.write32(0x8000_0000, 0x8D09_0000) # lw    $t1, 0($t0)
+    @memory.write32(0x8000_0004, 0x2409_0007) # addiu $t1, $zero, 7
+    @memory.write32(0x8000_0008, 0x0000_0000) # nop
+    @cpu.pc = 0x8000_0000
+
+    @cpu.step
+    @cpu.step
+    @cpu.step
+
+    assert_equal 7, get_reg(9)
+  end
+
+  def test_lwl_lwr_pair_merges_through_pending_load_delay
+    @ram.write8(0x100, 0x00)
+    @ram.write8(0x101, 0x11)
+    @ram.write8(0x102, 0x22)
+    @ram.write8(0x103, 0x33)
+    @ram.write8(0x104, 0x44)
+    set_reg(8, 0x101)
+    set_reg(9, 0xAA_AA_AA_AA)
+
+    @memory.write32(0x8000_0000, 0x9909_0000) # lwr $t1, 0($t0)
+    @memory.write32(0x8000_0004, 0x8909_0003) # lwl $t1, 3($t0)
+    @memory.write32(0x8000_0008, 0x0000_0000) # nop
+    @cpu.pc = 0x8000_0000
+
+    @cpu.step
+    @cpu.step
+    @cpu.step
+
+    assert_equal 0x4433_2211, get_reg(9)
+  end
+
   def test_sw_instruction
     set_reg(8, 0x200)       # Base address
     set_reg(9, 0xCAFE_BABE) # Value to store
