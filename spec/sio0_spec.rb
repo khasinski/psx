@@ -167,6 +167,14 @@ class SIO0Test < Minitest::Test
     assert_equal 0, status & (1 << 7), "/ACK pulse should return high"
   end
 
+  def test_status_read_clears_ack_input_latch
+    tx(0x01)
+    @sio.tick(500)
+
+    assert (status & (1 << 7)) != 0, "first status read observes /ACK"
+    assert_equal 0, status & (1 << 7), "second status read sees the latch cleared"
+  end
+
   def test_status_rx_fifo_not_empty_after_tx
     tx(0x01)
     assert (status & (1 << 1)) != 0, "RX FIFO not empty"
@@ -186,6 +194,8 @@ class SIO0Test < Minitest::Test
     tx(0x01); rx
     tx(0x42); rx  # we're now mid-sequence
     @sio.write16(0x4A, CTRL_RESET)
+    assert_equal 0, @sio.read16(0x4A), "JOY_CTRL reset bit should not remain latched"
+
     # Re-select and verify protocol restarts at step 0
     select_slot_1
     tx(0x01)

@@ -266,10 +266,10 @@ module PSX
       case offset
       when 0x40 then pop_rx
       when 0x41, 0x42, 0x43 then 0
-      when 0x44 then status & 0xFF
-      when 0x45 then (status >> 8) & 0xFF
-      when 0x46 then (status >> 16) & 0xFF
-      when 0x47 then (status >> 24) & 0xFF
+      when 0x44 then read_status & 0xFF
+      when 0x45 then (read_status >> 8) & 0xFF
+      when 0x46 then (read_status >> 16) & 0xFF
+      when 0x47 then (read_status >> 24) & 0xFF
       when 0x48 then @mode & 0xFF
       when 0x49 then (@mode >> 8) & 0xFF
       when 0x4A then @ctrl & 0xFF
@@ -283,8 +283,8 @@ module PSX
     def read16(offset)
       case offset
       when 0x40 then pop_rx
-      when 0x44 then status & 0xFFFF
-      when 0x46 then (status >> 16) & 0xFFFF
+      when 0x44 then read_status & 0xFFFF
+      when 0x46 then (read_status >> 16) & 0xFFFF
       when 0x48 then @mode
       when 0x4A then @ctrl
       when 0x4E then @baud
@@ -295,7 +295,7 @@ module PSX
     def read32(offset)
       case offset
       when 0x40 then pop_rx
-      when 0x44 then status
+      when 0x44 then read_status
       when 0x48 then @mode | (@ctrl << 16)
       when 0x4C then @baud # unaligned but harmless
       else 0
@@ -341,6 +341,12 @@ module PSX
     end
 
     private
+
+    def read_status
+      s = status
+      @ack_low_cycles = 0
+      s
+    end
 
     def pop_rx
       return 0xFF if @rx.empty?
@@ -437,6 +443,7 @@ module PSX
       if (value & CTRL_RESET) != 0
         # Reset clears most state but the BIOS expects to be able to read
         # JOY_STAT cleanly afterwards.
+        @ctrl = 0
         @rx.clear
         @irq = false
         @pending_ack_cycles = nil
