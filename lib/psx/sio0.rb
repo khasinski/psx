@@ -356,9 +356,8 @@ module PSX
     # BIOS writes a TX byte: we look up the device response and (if a device
     # is "answering") drop it into the RX FIFO and raise the ACK interrupt.
     def transmit(byte)
-      return unless (@ctrl & (CTRL_TXEN | CTRL_JOYN_OUTPUT)) == (CTRL_TXEN | CTRL_JOYN_OUTPUT)
-
       trigger_irq if (@ctrl & CTRL_TX_INT_EN) != 0
+      return unless (@ctrl & (CTRL_TXEN | CTRL_JOYN_OUTPUT)) == (CTRL_TXEN | CTRL_JOYN_OUTPUT)
 
       # Only slot 1 has devices; slot 2 stays silent (no /ACK -> BIOS timeout)
       if (@ctrl & CTRL_SLOT) != 0

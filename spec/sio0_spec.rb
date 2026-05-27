@@ -114,6 +114,17 @@ class SIO0Test < Minitest::Test
     assert status & (1 << 9) != 0
   end
 
+  def test_tx_interrupt_is_not_gated_by_select_or_tx_enable
+    @sio.write16(0x4A, CTRL_TX_INT_EN)
+    @irqs.write_stat(0)
+    @irqs.write_mask(PSX::Interrupts::IRQ_CONTROLLER)
+
+    tx(0x01)
+
+    assert (@irqs.stat & PSX::Interrupts::IRQ_CONTROLLER) != 0
+    assert_equal 0, status & (1 << 1), "disabled transfer should not push a response byte"
+  end
+
   def test_last_byte_does_not_ack
     # ACK IRQ should fire for bytes 0..3 but not the 5th (last) byte.
     [0x01, 0x42, 0x00, 0x00].each do |b|
