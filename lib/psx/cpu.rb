@@ -17,9 +17,7 @@ module PSX
     CALLBACK_TABLE_BASE = 0x8009_9434
     CALLBACK_TABLE_MASK = 0x8009_9460
     CALLBACK_RETURN_SENTINEL = 0x8000_FFFC
-    RAGE_STREAM_QUEUE_ADVANCE_PC = 0x8006_DB08
-    RAGE_MDEC_DMA_CALLBACK = 0x8001_EBC8
-    RAGE_CDROM_DMA_CALLBACK = 0x8006_CE78
+    DMA_CALLBACK_TABLE_BASE = 0x8009_A4F8
 
     attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte, :step_cycles
     attr_accessor :tty_handler
@@ -295,7 +293,6 @@ module PSX
       else
         @next_in_delay_slot = false
       end
-      service_rage_stream_group_completion if pc == RAGE_STREAM_QUEUE_ADVANCE_PC
       @step_cycles
     end
 
@@ -341,30 +338,6 @@ module PSX
 
     private
 
-    def service_rage_stream_group_completion
-      cdrom = @memory.cdrom
-      return unless cdrom &&
-                    cdrom.instance_variable_get(:@whole_sector) &&
-                    cdrom.instance_variable_get(:@reading) &&
-                    cdrom.instance_variable_get(:@seek_lba) == 304
-      return unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
-      return unless @memory.read32(0x8009_A504) == RAGE_CDROM_DMA_CALLBACK
-
-      queue = @memory.read32(0x801E_8AAC)
-      write_index = @memory.read32(0x801E_6C74)
-      return if queue.zero? || write_index.zero?
-
-      entry = queue + (write_index - 1) * 32
-      return unless @memory.read16(entry) == 3
-
-      sector_info = @memory.read32(entry + 4)
-      sector_count = (sector_info >> 16) & 0xFFFF
-      sector_index = sector_info & 0xFFFF
-      return if sector_count.zero? || sector_index + 1 != sector_count
-
-      execute_interrupt_callback(RAGE_CDROM_DMA_CALLBACK)
-    end
-
     def service_installed_interrupt_callbacks
       return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
 
@@ -377,7 +350,7 @@ module PSX
         next if (pending & bit).zero?
 
         if bit == Interrupts::IRQ_DMA
-          service_rage_mdec_dma_callback
+          service_dma_channel_callbacks
           next
         end
 
@@ -393,21 +366,21 @@ module PSX
       true
     end
 
-    def service_rage_mdec_dma_callback
+    def service_dma_channel_callbacks
       dma = @memory.dma
       return unless dma
 
       dicr_flags = dma.dicr & 0x7F00_0000
       return if dicr_flags.zero?
 
-      if (dicr_flags & 0x0200_0000) != 0
-        dma.write(0x74, (dma.dicr & 0x00FF_803F) | 0x0200_0000)
-        callback = @memory.read32(0x8009_A4FC)
-        execute_interrupt_callback(callback) if callback == RAGE_MDEC_DMA_CALLBACK
-      end
+      7.times do |channel|
+        flag = 1 << (24 + channel)
+        next if (dicr_flags & flag).zero?
 
-      remaining_flags = dicr_flags & ~0x0200_0000
-      dma.write(0x74, (dma.dicr & 0x00FF_803F) | remaining_flags) if remaining_flags != 0
+        dma.write(0x74, (dma.dicr & 0x00FF_803F) | flag)
+        callback = @memory.read32(DMA_CALLBACK_TABLE_BASE + channel * 4)
+        execute_interrupt_callback(callback) if callback != 0
+      end
     end
 
     def execute_interrupt_callback(callback)

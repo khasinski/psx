@@ -147,6 +147,35 @@ class InterruptsSpec < Minitest::Test
     assert_equal 0xBBBB, cpu.regs[31]
   end
 
+  def test_cpu_services_dma_channel_callbacks_from_bios_dma_table
+    env = create_cpu_with_ram
+    cpu = env[:cpu]
+    memory = env[:memory]
+    interrupts = env[:interrupts]
+    dma = memory.dma
+
+    memory.write32(0x8009_9430, 1)
+    memory.write32(0x8009_9460, PSX::Interrupts::IRQ_DMA)
+    memory.write32(0x8009_A4FC, 0x8001_0000) # DMA channel 1 callback
+    memory.write32(0x8009_A504, 0x8001_0020) # DMA channel 3 callback
+    write_store_byte_callback(memory, 0x8001_0000, 0x44)
+    write_store_byte_callback(memory, 0x8001_0020, 0x55)
+    dma.instance_variable_set(:@dicr, 0x0A00_0000) # Channel 1 and 3 flags
+
+    cpu.cop0.sr = 0x401
+    interrupts.write_mask(PSX::Interrupts::IRQ_DMA)
+    interrupts.request(PSX::Interrupts::IRQ_DMA)
+    cpu.pc = 0x8002_0000
+
+    cpu.check_interrupts
+
+    assert_equal 0x44, memory.read8(0x8009_BAF8)
+    assert_equal 0x55, memory.read8(0x8009_BAF9)
+    assert_equal 0, dma.dicr & 0x0A00_0000
+    assert_equal 0, interrupts.read_stat & PSX::Interrupts::IRQ_DMA
+    assert_equal 0x8002_0000, cpu.pc
+  end
+
   def test_cpu_prefers_real_exception_vector_over_installed_callback_fallback
     env = create_cpu_with_ram
     cpu = env[:cpu]
