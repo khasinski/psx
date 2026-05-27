@@ -165,7 +165,6 @@ module PSX
       word &= 0xFFFF_FFFF
       if (word & CTRL_RESET) != 0
         reset
-        return
       end
       @dma_in_enabled  = (word & CTRL_ENABLE_DMA_IN)  != 0
       @dma_out_enabled = (word & CTRL_ENABLE_DMA_OUT) != 0

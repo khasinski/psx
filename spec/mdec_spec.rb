@@ -19,6 +19,12 @@ class MDECSpec < Minitest::Test
     assert (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
   end
 
+  def test_control_reset_write_still_applies_dma_enable_bits
+    @mdec.write32_control(PSX::MDEC::CTRL_RESET | PSX::MDEC::CTRL_ENABLE_DMA_IN)
+
+    assert (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
+  end
+
   def test_status_reports_duckstation_current_block_encoding
     assert_equal 4, (@mdec.read32_status >> 16) & 0x7
   end
