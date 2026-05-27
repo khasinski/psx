@@ -325,8 +325,6 @@ module PSX
       return unless @interrupts
       @cop0.set_hardware_irq(@interrupts.pending?)
       if @cop0.interrupt_pending?
-        return if service_installed_interrupt_callbacks
-
         # The real BIOS uses cache tricks while setting up the low-RAM
         # exception vectors. Until the emulator has an instruction-cache
         # model, vectoring through an all-zero 0x80000080 just executes a
@@ -368,40 +366,22 @@ module PSX
     end
 
     def service_installed_interrupt_callbacks
-      cdrom = @memory.cdrom
       return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
-      rage_intro_stream = cdrom &&
-                          cdrom.instance_variable_get(:@whole_sector) &&
-                          cdrom.instance_variable_get(:@reading) &&
-                          cdrom.instance_variable_get(:@seek_lba) == 304
-      rage_skip_transition = @memory.read32(0x8009_F094) == 2 &&
-                             @memory.read32(CALLBACK_TABLE_BASE) == 0x8006_E75C
-      return false unless rage_intro_stream || rage_skip_transition
 
       pending = @memory.read16(0x1F80_1070) & @memory.read16(0x1F80_1074)
       pending &= @memory.read32(CALLBACK_TABLE_MASK)
       return false if pending.zero?
 
-      service_rage_intro_irqs(pending)
-    end
+      11.times do |irq|
+        bit = 1 << irq
+        next if (pending & bit).zero?
 
-    def service_rage_intro_irqs(pending)
-      if (pending & 0x001) != 0
-        callback = @memory.read32(CALLBACK_TABLE_BASE)
-        execute_interrupt_callback(callback) if callback != 0
-      end
+        if bit == Interrupts::IRQ_DMA
+          service_rage_mdec_dma_callback
+          next
+        end
 
-      if (pending & 0x004) != 0
-        callback = @memory.read32(CALLBACK_TABLE_BASE + 8)
-        execute_interrupt_callback(callback) if callback != 0
-      end
-
-      if (pending & 0x008) != 0
-        service_rage_mdec_dma_callback
-      end
-
-      if (pending & 0x080) != 0
-        callback = @memory.read32(CALLBACK_TABLE_BASE + 7 * 4)
+        callback = @memory.read32(CALLBACK_TABLE_BASE + irq * 4)
         execute_interrupt_callback(callback) if callback != 0
       end
 

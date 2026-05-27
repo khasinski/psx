@@ -87,7 +87,7 @@ class InterruptsSpec < Minitest::Test
     assert_equal 0x8001_0000, cpu.cop0.epc
   end
 
-  def test_cpu_services_rage_intro_cdrom_irq_when_exception_vector_is_unusable
+  def test_cpu_services_installed_irq_callback_when_exception_vector_is_unusable
     env = create_cpu_with_ram
     cpu = env[:cpu]
     memory = env[:memory]
@@ -101,12 +101,6 @@ class InterruptsSpec < Minitest::Test
     memory.write32(0x8001_0008, 0xA062_BAF8) # sb v0,-17672(v1)
     memory.write32(0x8001_000C, 0x03E0_0008) # jr ra
     memory.write32(0x8001_0010, 0x0000_0000) # nop
-    memory.cdrom = PSX::CDROM.new(interrupts: interrupts)
-    memory.cdrom.instance_variable_set(:@whole_sector, true)
-    memory.cdrom.instance_variable_set(:@reading, true)
-    memory.cdrom.instance_variable_set(:@seek_lba, 304)
-    memory.cdrom.instance_variable_set(:@irq_flags, 1)
-    memory.cdrom.instance_variable_get(:@response) << 0x22
 
     cpu.cop0.sr = 0x401 # IEc + interrupt mask bit 2
     interrupts.write_mask(PSX::Interrupts::IRQ_CDROM)
@@ -119,6 +113,73 @@ class InterruptsSpec < Minitest::Test
     assert_equal 0, interrupts.read_stat & PSX::Interrupts::IRQ_CDROM
     assert_equal 0x8002_0000, cpu.pc
     assert_equal 0, cpu.regs[31]
+  end
+
+  def test_cpu_services_multiple_installed_irq_callbacks_in_irq_order
+    env = create_cpu_with_ram
+    cpu = env[:cpu]
+    memory = env[:memory]
+    interrupts = env[:interrupts]
+
+    memory.write32(0x8009_9430, 1)
+    memory.write32(0x8009_9434, 0x8001_0000) # VBlank callback
+    memory.write32(0x8009_9450, 0x8001_0020) # Pad callback
+    memory.write32(0x8009_9460, PSX::Interrupts::IRQ_VBLANK | PSX::Interrupts::IRQ_CONTROLLER)
+
+    write_store_byte_callback(memory, 0x8001_0000, 0x11)
+    write_store_byte_callback(memory, 0x8001_0020, 0x22)
+
+    cpu.cop0.sr = 0x401
+    cpu.regs[2] = 0xAAAA
+    cpu.regs[31] = 0xBBBB
+    interrupts.write_mask(PSX::Interrupts::IRQ_VBLANK | PSX::Interrupts::IRQ_CONTROLLER)
+    interrupts.request(PSX::Interrupts::IRQ_CONTROLLER)
+    interrupts.request(PSX::Interrupts::IRQ_VBLANK)
+    cpu.pc = 0x8002_0000
+
+    cpu.check_interrupts
+
+    assert_equal 0x11, memory.read8(0x8009_BAF8)
+    assert_equal 0x22, memory.read8(0x8009_BAF9)
+    assert_equal 0, interrupts.read_stat & (PSX::Interrupts::IRQ_VBLANK | PSX::Interrupts::IRQ_CONTROLLER)
+    assert_equal 0x8002_0000, cpu.pc
+    assert_equal 0xAAAA, cpu.regs[2]
+    assert_equal 0xBBBB, cpu.regs[31]
+  end
+
+  def test_cpu_prefers_real_exception_vector_over_installed_callback_fallback
+    env = create_cpu_with_ram
+    cpu = env[:cpu]
+    memory = env[:memory]
+    interrupts = env[:interrupts]
+
+    memory.write32(0x8000_0080, 0x0800_0000)
+    memory.write32(0x8009_9430, 1)
+    memory.write32(0x8009_9434, 0x8001_0000)
+    memory.write32(0x8009_9460, PSX::Interrupts::IRQ_VBLANK)
+    write_store_byte_callback(memory, 0x8001_0000, 0x33)
+
+    cpu.cop0.sr = 0x401
+    interrupts.write_mask(PSX::Interrupts::IRQ_VBLANK)
+    interrupts.request(PSX::Interrupts::IRQ_VBLANK)
+    cpu.pc = 0x8002_0000
+
+    cpu.check_interrupts
+
+    assert_equal 0x8000_0080, cpu.pc
+    assert_equal 0, memory.read8(0x8009_BAF8)
+    assert_equal PSX::COP0::EXC_INT << 2, cpu.cop0.cause & 0x7C
+  end
+
+  private
+
+  def write_store_byte_callback(memory, addr, value)
+    offset = addr == 0x8001_0000 ? 0 : 1
+    memory.write32(addr, 0x3C03_800A) # lui v1,0x800A
+    memory.write32(addr + 4, 0x3402_0000 | value) # ori v0,zero,value
+    memory.write32(addr + 8, 0xA062_BAF8 + offset) # sb v0,-17672(v1)
+    memory.write32(addr + 12, 0x03E0_0008) # jr ra
+    memory.write32(addr + 16, 0x0000_0000) # nop
   end
 end
 
