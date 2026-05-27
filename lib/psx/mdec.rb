@@ -424,7 +424,7 @@ module PSX
           cv = cb[((block_y + y) >> 1) * 8 + ((block_x + x) >> 1)]
           rv = cr[((block_y + y) >> 1) * 8 + ((block_x + x) >> 1)]
           r, g, b = ycbcr_to_rgb(yv, cv, rv)
-          pix = ((r >> 3) & 0x1F) | (((g >> 3) & 0x1F) << 5) | (((b >> 3) & 0x1F) << 10) | bit15
+          pix = rgb888_to_rgb555(r, g, b) | bit15
           output_bytes << (pix & 0xFF)
           output_bytes << ((pix >> 8) & 0xFF)
           end
@@ -462,6 +462,13 @@ module PSX
     def output_byte(v)
       v = [[v, -128].max, 127].min
       @output_signed ? (v & 0xFF) : v + 128
+    end
+
+    def rgb888_to_rgb555(r, g, b)
+      r5 = [[(r + 4) >> 3, 0x1F].min, 0].max
+      g5 = [[(g + 4) >> 3, 0x1F].min, 0].max
+      b5 = [[(b + 4) >> 3, 0x1F].min, 0].max
+      r5 | (g5 << 5) | (b5 << 10)
     end
 
     def clamp_byte(v)
