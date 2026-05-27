@@ -360,6 +360,44 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
   end
 
+  def test_get_q_requires_two_parameters_before_invalid_command_handling
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x1D) # GetQ without its two params
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_videocd_requires_at_least_six_parameters
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    5.times { @cdrom.write8(2, 0x00) }
+    @cdrom.write8(1, 0x1F) # VideoCD with too few params
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_get_clock_rejects_stray_parameter_before_invalid_command_handling
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x18) # GetClock with stray param
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
   def test_test_command_60_requires_two_address_bytes
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

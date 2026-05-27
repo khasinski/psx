@@ -71,10 +71,15 @@ module PSX
       0x14 => 1..1,   # GetTD
       0x15 => 0..0,   # SeekL
       0x16 => 0..0,   # SeekP
+      0x17 => 0..0,   # SetClock
+      0x18 => 0..0,   # GetClock
       0x19 => 1..16,  # Test
       0x1A => 0..0,   # GetID
       0x1B => 0..0,   # ReadS
+      0x1C => 0..0,   # Reset
+      0x1D => 2..2,   # GetQ
       0x1E => 0..0,   # ReadTOC
+      0x1F => 6..16,  # VideoCD
     }.freeze
 
     attr_reader :stat
