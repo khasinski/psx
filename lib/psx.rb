@@ -70,6 +70,7 @@ module PSX
       @audio_dev = Audio.open_device(freq: 44_100, channels: 2)
       if @audio_dev
         @cdrom.cdda_sink = ->(bytes) { Audio.queue(@audio_dev, bytes) }
+        @cdrom.xa_adpcm_sink = ->(bytes) { Audio.queue(@audio_dev, bytes) }
       else
         warn "Audio: failed to open device, running silent"
       end

@@ -45,12 +45,13 @@ module PSX
     DEFAULT_STAT_NO_DISC = SF_SHELL_OPEN
 
     attr_reader :stat
-    attr_accessor :cdda_sink   # callable: receives 2352-byte stereo S16LE chunks
+    attr_accessor :cdda_sink, :xa_adpcm_sink
 
     def initialize(interrupts:, disc: nil)
       @interrupts = interrupts
       @disc = disc
       @cdda_sink = nil
+      @xa_adpcm_sink = nil
       reset
     end
 
@@ -83,6 +84,7 @@ module PSX
       @xa_enabled = false
       @xa_filter_file = 0
       @xa_filter_channel = 0
+      @xa_last_samples = [0, 0, 0, 0]
       @reading = false
       @sector_cycles = 0
       @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
@@ -234,6 +236,7 @@ module PSX
 
       whole = read_sector(lba)
       if xa_audio_sector?(whole)
+        process_xa_audio_sector(whole)
         @read_lba += 1
         @sector_cycles += next_sector_cycles
         return
@@ -270,6 +273,13 @@ module PSX
         @cdda_lba += 1
         @cdda_cycles += period
       end
+    end
+
+    def decode_xa_adpcm_sector(whole)
+      coding = @last_sector_subheader[3] || whole.getbyte(7) || 0
+      stereo = (coding & 0x01) != 0
+      eight_bit = (coding & 0x10) != 0
+      decode_xa_adpcm_chunks(whole.byteslice(12, 18 * 128), stereo: stereo, eight_bit: eight_bit)
     end
 
     private
@@ -327,6 +337,78 @@ module PSX
       realtime = (submode & 0x40) != 0
       audio = (submode & 0x04) != 0
       realtime && audio
+    end
+
+    def process_xa_audio_sector(whole)
+      if (@mode & 0x08) != 0 &&
+         (@last_sector_subheader[0] != @xa_filter_file || @last_sector_subheader[1] != @xa_filter_channel)
+        return
+      end
+
+      @xa_adpcm_sink&.call(decode_xa_adpcm_sector(whole))
+    end
+
+    def decode_xa_adpcm_chunks(chunks, stereo:, eight_bit:)
+      filter_pos = [0, 60, 115, 98, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      filter_neg = [0, 0, -52, -55, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      blocks = eight_bit ? 4 : 8
+      output = []
+
+      18.times do |chunk|
+        chunk_offset = chunk * 128
+        decoded = Array.new((eight_bit ? 112 : 224), 0)
+        blocks.times do |block|
+          header = chunks.getbyte(chunk_offset + 4 + block) || 0
+          shift = header & 0x0F
+          shift = 9 if shift > 12
+          filter = (header >> 4) & 0x0F
+          previous = stereo ? @xa_last_samples[(block & 1) * 2, 2] : @xa_last_samples[0, 2]
+
+          28.times do |word|
+            word_offset = chunk_offset + 16 + word * 4
+            word_data =
+              (chunks.getbyte(word_offset) || 0) |
+              ((chunks.getbyte(word_offset + 1) || 0) << 8) |
+              ((chunks.getbyte(word_offset + 2) || 0) << 16) |
+              ((chunks.getbyte(word_offset + 3) || 0) << 24)
+            raw = eight_bit ? ((word_data >> (block * 8)) & 0xFF) : ((word_data >> (block * 4)) & 0x0F)
+            signed = sign_extend_xa_sample(raw, eight_bit)
+            sample = signed >> shift
+            sample += (previous[0] * filter_pos[filter]) >> 6
+            sample += (previous[1] * filter_neg[filter]) >> 6
+            sample = [[sample, -32_768].max, 32_767].min
+            previous[1] = previous[0]
+            previous[0] = sample
+
+            index = stereo ? (block / 2) * 56 + word * 2 + (block % 2) : block * 28 + word
+            decoded[index] = sample
+          end
+
+          if stereo
+            @xa_last_samples[(block & 1) * 2] = previous[0]
+            @xa_last_samples[(block & 1) * 2 + 1] = previous[1]
+          else
+            @xa_last_samples[0] = previous[0]
+            @xa_last_samples[1] = previous[1]
+          end
+        end
+
+        if stereo
+          output.concat(decoded)
+        else
+          decoded.each { |sample| output << sample << sample }
+        end
+      end
+
+      output.pack("s<*")
+    end
+
+    def sign_extend_xa_sample(raw, eight_bit)
+      if eight_bit
+        ((raw << 8) & 0xFFFF) >= 0x8000 ? ((raw << 8) & 0xFFFF) - 0x1_0000 : (raw << 8)
+      else
+        ((raw << 12) & 0xFFFF) >= 0x8000 ? ((raw << 12) & 0xFFFF) - 0x1_0000 : (raw << 12)
+      end
     end
 
     def execute_command(cmd)
@@ -479,6 +561,7 @@ module PSX
       return if track.nil? || track.audio?
       whole = read_sector(lba)
       if xa_audio_sector?(whole)
+        process_xa_audio_sector(whole)
         @read_lba += 1
         return
       end

@@ -250,6 +250,74 @@ class CDROMSpec < Minitest::Test
     assert_equal "DATA".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
   end
 
+  def test_decodes_simple_mono_xa_adpcm_sector_to_stereo_pcm
+    whole = xa_adpcm_whole_sector(coding: 0x00, first_word: 0x0000_0001)
+    @cdrom.instance_variable_set(:@last_sector_subheader, [0x12, 0x34, 0x44, 0x00])
+
+    pcm = @cdrom.decode_xa_adpcm_sector(whole)
+    samples = pcm.unpack("s<*")
+
+    assert_equal 4032 * 2, samples.length
+    assert_equal [4096, 4096], samples[0, 2]
+  end
+
+  def test_xa_audio_sector_is_decoded_to_sink_while_stream_continues_to_data_sector
+    xa_payload = xa_adpcm_payload(first_word: 0x0000_0001)
+    data_payload = ("DATA" + "\x00" * 2044).b
+    audio_subheader = [0x12, 0x34, 0x44, 0x00] # realtime + audio, mono 4-bit
+    data_subheader = [0x12, 0x34, 0x08, 0x00]
+    @cdrom.disc = build_disc([xa_payload, data_payload], subheaders: [audio_subheader, data_subheader])
+    decoded = []
+    @cdrom.xa_adpcm_sink = ->(bytes) { decoded << bytes }
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x40)   # SetMode params: bit 6 = XA enable
+    @cdrom.write8(1, 0x0E)
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+
+    assert drive_until_int(1, max_ticks: 40)
+    assert_equal 1, decoded.length
+    assert_equal [4096, 4096], decoded.first.unpack("s<*")[0, 2]
+    assert_equal "DATA".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+  end
+
+  def test_xa_filter_suppresses_mismatched_audio_sector_sink
+    xa_payload = xa_adpcm_payload(first_word: 0x0000_0001)
+    data_payload = ("DATA" + "\x00" * 2044).b
+    audio_subheader = [0x12, 0x34, 0x44, 0x00]
+    data_subheader = [0x12, 0x34, 0x08, 0x00]
+    @cdrom.disc = build_disc([xa_payload, data_payload], subheaders: [audio_subheader, data_subheader])
+    decoded = []
+    @cdrom.xa_adpcm_sink = ->(bytes) { decoded << bytes }
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x48)   # XA enable + XA filter
+    @cdrom.write8(1, 0x0E)
+    drain_response
+    @cdrom.write8(2, 0x99)
+    @cdrom.write8(2, 0x88)
+    @cdrom.write8(1, 0x0D)
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+
+    assert drive_until_int(1, max_ticks: 40)
+    assert_empty decoded
+    assert_equal "DATA".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+  end
+
   # Default (no whole_sector) still returns just the 2048-byte user-data
   # slice. Critical for the BIOS shell path that doesn't touch SetMode.
   def test_default_mode_serves_user_data_only
@@ -296,6 +364,21 @@ class CDROMSpec < Minitest::Test
     end
     tmp.close
     PSX::Disc.from_bin(tmp.path)
+  end
+
+  def xa_adpcm_whole_sector(coding:, first_word:)
+    header = "\x00\x02\x00\x02".b
+    sub = [0x12, 0x34, 0x44, coding].pack("C*") * 2
+    header + sub + xa_adpcm_payload(first_word: first_word) + ("\x00" * 280).b
+  end
+
+  def xa_adpcm_payload(first_word:)
+    chunks = ("\x00" * (18 * 128)).b
+    chunks.setbyte(16, first_word & 0xFF)
+    chunks.setbyte(17, (first_word >> 8) & 0xFF)
+    chunks.setbyte(18, (first_word >> 16) & 0xFF)
+    chunks.setbyte(19, (first_word >> 24) & 0xFF)
+    chunks.byteslice(0, 2048)
   end
 
   def enable_irqs(mask)
