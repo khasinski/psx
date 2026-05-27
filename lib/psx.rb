@@ -71,6 +71,7 @@ module PSX
       if @audio_dev
         @cdrom.cdda_sink = ->(bytes) { Audio.queue(@audio_dev, bytes) }
         @cdrom.xa_adpcm_sink = ->(bytes) { Audio.queue(@audio_dev, bytes) }
+        @spu.pcm_sink = ->(bytes) { Audio.queue(@audio_dev, bytes) }
       else
         warn "Audio: failed to open device, running silent"
       end

@@ -129,6 +129,32 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0002, voice.repeat_address
   end
 
+  def test_tick_outputs_decoded_voice_pcm_to_sink
+    @spu.write16(0xC00 + 0x00, 0x7FFF) # voice 0 left volume
+    @spu.write16(0xC00 + 0x02, 0x4000) # voice 0 right volume
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    write_adpcm_block(0, flags: 0x00, first_data_byte: 0x11)
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 2)
+
+    assert_equal [0, 0], frames[0], "first sample uses the reset ADSR level"
+    assert_operator frames[1][0], :>, 0
+    assert_in_delta frames[1][0] / 2.0, frames[1][1], 2
+  end
+
+  def test_tick_advances_basic_adsr_current_volume
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    write_adpcm_block(0, flags: 0x00, first_data_byte: 0x11)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal PSX::SPU::ADSR_ATTACK_STEP, @spu.read16(0xC00 + 0x0C)
+  end
+
   def test_irq9_fires_when_transfer_address_matches_irq_address
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)

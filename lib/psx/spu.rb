@@ -3,9 +3,8 @@
 module PSX
   # SPU — partial register/DMA model. It satisfies programs that probe
   # SPUCNT/SPUSTAT, round-trips data through SPU RAM via FIFO and DMA
-  # channel 4, and tracks basic voice key on/off state.
-  #
-  # Full audio synthesis is still TODO.
+  # channel 4, tracks voice key on/off state, and produces basic decoded
+  # ADPCM PCM output.
   class SPU
     RAM_SIZE = 512 * 1024
 
@@ -29,6 +28,7 @@ module PSX
     MODE_MANUAL = 1
     MODE_DMA_W  = 2
     MODE_DMA_R  = 3
+    ADSR_ATTACK_STEP = 0x0800
 
     VoiceState = Struct.new(
       :current_address,
@@ -42,8 +42,11 @@ module PSX
       keyword_init: true
     )
 
+    attr_accessor :pcm_sink
+
     def initialize(interrupts: nil)
       @interrupts = interrupts
+      @pcm_sink = nil
       @ram = ("\x00" * RAM_SIZE).b
       @irq_addr = 0
       @transfer_addr = 0   # latched value (byte address)
@@ -278,12 +281,21 @@ module PSX
     end
 
     def tick_sample
+      left_sum = 0
+      right_sum = 0
+
       24.times do |voice_index|
         next if (@voice_active & (1 << voice_index)).zero?
 
         voice = @voices[voice_index]
         pitch = [read16(0xC00 + voice_index * 0x10 + 0x04), 0x3FFF].min
         next if pitch.zero?
+
+        sample = voice.decoded_samples[voice.sample_index] || 0
+        volume = apply_volume(sample, voice.adsr_volume)
+        left_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10)))
+        right_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10 + 0x02)))
+        tick_voice_adsr(voice_index)
 
         voice.sample_counter += pitch
         while voice.sample_counter >= 0x1000
@@ -295,6 +307,8 @@ module PSX
           break if (@voice_active & (1 << voice_index)).zero?
         end
       end
+
+      @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
     end
 
     def decode_voice_block(voice_index)
@@ -320,6 +334,28 @@ module PSX
       end
 
       decode_voice_block(voice_index) if (@voice_active & mask) != 0
+    end
+
+    def tick_voice_adsr(voice_index)
+      voice = @voices[voice_index]
+      return if voice.adsr_volume >= 0x7FFF
+
+      voice.adsr_volume = [voice.adsr_volume + ADSR_ATTACK_STEP, 0x7FFF].min
+      adsr_offset = voice_index * 0x10 + 0x0C
+      @regs.setbyte(adsr_offset, voice.adsr_volume & 0xFF)
+      @regs.setbyte(adsr_offset + 1, (voice.adsr_volume >> 8) & 0xFF)
+    end
+
+    def apply_volume(sample, volume)
+      (sample * volume) >> 15
+    end
+
+    def signed16(value)
+      value >= 0x8000 ? value - 0x1_0000 : value
+    end
+
+    def clamp16(value)
+      [[value, -32_768].max, 32_767].min
     end
   end
 end
