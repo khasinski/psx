@@ -176,6 +176,27 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
   end
 
+  def test_getparam_returns_mode_and_xa_filter
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0xA0)
+    @cdrom.write8(1, 0x0E) # SetMode
+    drain_response
+
+    @cdrom.write8(2, 0x12)
+    @cdrom.write8(2, 0x34)
+    @cdrom.write8(1, 0x0D) # Setfilter
+    drain_response
+
+    @cdrom.write8(1, 0x0F) # Getparam
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 5.times.map { @cdrom.read8(1) }
+
+    assert_equal [PSX::CDROM::DEFAULT_STAT_DISC, 0xA0, 0x00, 0x12, 0x34], bytes
+  end
+
   # CD-XA streams are often software-filtered by file/channel. Rage Racer
   # reads a 44-byte XA/STR prefix for unwanted sectors and leaves the payload
   # unread; that must not stall the sector stream forever.

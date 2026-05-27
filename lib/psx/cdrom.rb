@@ -77,8 +77,11 @@ module PSX
       @data_pos = 0
       @seek_lba = 0
       @read_lba = 0
+      @mode = 0
       @speed_2x = false
       @whole_sector = false  # SetMode bit 5 — read 2340 bytes vs 2048
+      @xa_filter_file = 0
+      @xa_filter_channel = 0
       @reading = false
       @sector_cycles = 0
       @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
@@ -332,7 +335,7 @@ module PSX
       when 0x0A then cmd_init
       when 0x0B then cmd_mute
       when 0x0C then cmd_demute
-      when 0x0D then cmd_setfilter
+      when 0x0D then cmd_setfilter(params)
       when 0x0E then cmd_setmode(params)
       when 0x0F then cmd_getparam
       when 0x10 then cmd_getloc_l
@@ -491,20 +494,23 @@ module PSX
       queue_response(0, 3, [@stat])
     end
 
-    def cmd_setfilter
+    def cmd_setfilter(params)
+      raise "Setfilter needs 2 params" if params.size < 2
+      @xa_filter_file = params[0] & 0xFF
+      @xa_filter_channel = params[1] & 0xFF
       queue_response(0, 3, [@stat])
     end
 
     def cmd_setmode(params)
       raise "Setmode needs 1 param" if params.empty?
-      mode = params[0]
-      @speed_2x = (mode & 0x80) != 0
-      @whole_sector = (mode & 0x20) != 0
+      @mode = params[0] & 0xFF
+      @speed_2x = (@mode & 0x80) != 0
+      @whole_sector = (@mode & 0x20) != 0
       queue_response(0, 3, [@stat])
     end
 
     def cmd_getparam
-      queue_response(0, 3, [@stat, 0x00, 0x00, 0x00])
+      queue_response(0, 3, [@stat, @mode, 0x00, @xa_filter_file, @xa_filter_channel])
     end
 
     def cmd_getloc_l
