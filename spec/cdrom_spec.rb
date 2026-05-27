@@ -289,6 +289,36 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x00, 0x00], 2.times.map { @cdrom.read8(1) }
   end
 
+  def test_forward_errors_when_cdda_is_not_playing
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x04) # Forward
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_NOT_READY, @cdrom.read8(1)
+  end
+
+  def test_forward_and_backward_ack_while_cdda_is_playing
+    @cdrom.disc = build_audio_disc(sectors: 4)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x03) # Play
+    drain_response
+
+    @cdrom.write8(1, 0x04) # Forward
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_PLAYING_CDDA, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.write8(1, 0x05) # Backward
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_PLAYING_CDDA, @cdrom.read8(1)
+  end
+
   def test_test_command_60_requires_two_address_bytes
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

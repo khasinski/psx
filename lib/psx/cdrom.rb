@@ -52,6 +52,8 @@ module PSX
       0x01 => 0..0,   # GetStat
       0x02 => 3..3,   # SetLoc
       0x03 => 0..1,   # Play
+      0x04 => 0..0,   # Forward
+      0x05 => 0..0,   # Backward
       0x06 => 0..0,   # ReadN
       0x07 => 0..0,   # MotorOn/Standby
       0x08 => 0..0,   # Stop
@@ -488,6 +490,8 @@ module PSX
       when 0x01 then cmd_getstat
       when 0x02 then cmd_setloc(params)
       when 0x03 then cmd_play(params)
+      when 0x04 then cmd_forward
+      when 0x05 then cmd_backward
       when 0x06 then cmd_read
       when 0x07 then cmd_motor_on
       when 0x08 then cmd_stop
@@ -591,6 +595,22 @@ module PSX
       @stat |= SF_MOTOR_ON | SF_PLAYING_CDDA
       @stat &= ~SF_READING
       queue_response(0, 3, [@stat])
+    end
+
+    def cmd_forward
+      if @disc.nil? || !@cdda_playing
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
+      else
+        queue_response(0, 3, [@stat])
+      end
+    end
+
+    def cmd_backward
+      if @disc.nil? || !@cdda_playing
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
+      else
+        queue_response(0, 3, [@stat])
+      end
     end
 
     def cmd_motor_on
