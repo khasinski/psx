@@ -90,6 +90,45 @@ class SPUSpec < Minitest::Test
     assert_equal(-4096, voice.decoded_samples[1])
   end
 
+  def test_voice_tick_sets_endx_and_stops_on_loop_end_without_repeat
+    @spu.write16(0xC00 + 0x04, 0x1000) # voice 0 pitch: one decoded sample per SPU tick
+    @spu.write16(0xC00 + 0x06, 0)
+    write_adpcm_block(0, flags: 0x01)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 28)
+
+    assert_equal 0x0001, @spu.read16(PSX::SPU::ENDX_LOW)
+    assert_equal 0, @spu.instance_variable_get(:@voice_active) & 0x0001
+  end
+
+  def test_voice_tick_loops_to_repeat_address_when_loop_repeat_is_set
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    @spu.write16(0xC00 + 0x06, 0)
+    @spu.write16(0xC00 + 0x0E, 0x0004)
+    write_adpcm_block(0, flags: 0x03)
+    write_adpcm_block(4, flags: 0x00, first_data_byte: 0x01)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 28)
+
+    voice = @spu.instance_variable_get(:@voices)[0]
+    assert_equal 0x0001, @spu.read16(PSX::SPU::ENDX_LOW)
+    assert_equal 0x0001, @spu.instance_variable_get(:@voice_active) & 0x0001
+    assert_equal 0x0004, voice.current_address
+    assert_equal 4096, voice.decoded_samples[0]
+  end
+
+  def test_loop_start_flag_updates_voice_repeat_address
+    @spu.write16(0xC00 + 0x06, 0x0002)
+    write_adpcm_block(2, flags: 0x04)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    voice = @spu.instance_variable_get(:@voices)[0]
+    assert_equal 0x0002, voice.repeat_address
+  end
+
   def test_irq9_fires_when_transfer_address_matches_irq_address
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
@@ -119,5 +158,13 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::SPUCNT, 0)
 
     assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+  end
+
+  private
+
+  def write_adpcm_block(address, flags:, first_data_byte: 0)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, address)
+    @spu.dma_write_word((first_data_byte << 16) | (flags << 8))
+    3.times { @spu.dma_write_word(0) }
   end
 end

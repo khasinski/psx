@@ -22,6 +22,7 @@ module PSX
     ENDX_LOW          = 0xD9C
     ENDX_HIGH         = 0xD9E
     SPU_IRQ_ADDR      = 0xDA4
+    CYCLES_PER_SAMPLE = 768
 
     # SPUCNT bits 4-5 = transfer mode
     MODE_STOP   = 0
@@ -29,7 +30,17 @@ module PSX
     MODE_DMA_W  = 2
     MODE_DMA_R  = 3
 
-    VoiceState = Struct.new(:current_address, :repeat_address, :adsr_volume, :last_samples, :decoded_samples, keyword_init: true)
+    VoiceState = Struct.new(
+      :current_address,
+      :repeat_address,
+      :adsr_volume,
+      :last_samples,
+      :decoded_samples,
+      :current_block_flags,
+      :sample_index,
+      :sample_counter,
+      keyword_init: true
+    )
 
     def initialize(interrupts: nil)
       @interrupts = interrupts
@@ -51,7 +62,10 @@ module PSX
           repeat_address: 0,
           adsr_volume: 0,
           last_samples: [0, 0],
-          decoded_samples: []
+          decoded_samples: [],
+          current_block_flags: 0,
+          sample_index: 0,
+          sample_counter: 0
         )
       end
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
@@ -194,6 +208,15 @@ module PSX
       [samples, previous]
     end
 
+    def tick(cycles)
+      @sample_cycle_accumulator ||= 0
+      @sample_cycle_accumulator += cycles
+      while @sample_cycle_accumulator >= CYCLES_PER_SAMPLE
+        @sample_cycle_accumulator -= CYCLES_PER_SAMPLE
+        tick_sample
+      end
+    end
+
     private
 
     def mode
@@ -228,10 +251,9 @@ module PSX
         @voices[voice].repeat_address = read16(0xC00 + voice * 0x10 + 0x0E) & ~1
         @voices[voice].adsr_volume = 0
         @voices[voice].last_samples = [0, 0]
-        block = read_adpcm_block(start_address)
-        samples, last = decode_adpcm_block(block, @voices[voice].last_samples)
-        @voices[voice].decoded_samples = samples
-        @voices[voice].last_samples = last
+        @voices[voice].sample_index = 0
+        @voices[voice].sample_counter = 0
+        decode_voice_block(voice)
       end
     end
 
@@ -253,6 +275,51 @@ module PSX
       until @fifo.empty?
         write_word_to_ram(@fifo.shift)
       end
+    end
+
+    def tick_sample
+      24.times do |voice_index|
+        next if (@voice_active & (1 << voice_index)).zero?
+
+        voice = @voices[voice_index]
+        pitch = [read16(0xC00 + voice_index * 0x10 + 0x04), 0x3FFF].min
+        next if pitch.zero?
+
+        voice.sample_counter += pitch
+        while voice.sample_counter >= 0x1000
+          voice.sample_counter -= 0x1000
+          voice.sample_index += 1
+          next if voice.sample_index < 28
+
+          advance_voice_block(voice_index)
+          break if (@voice_active & (1 << voice_index)).zero?
+        end
+      end
+    end
+
+    def decode_voice_block(voice_index)
+      voice = @voices[voice_index]
+      block = read_adpcm_block(voice.current_address)
+      samples, last = decode_adpcm_block(block, voice.last_samples)
+      voice.decoded_samples = samples
+      voice.last_samples = last
+      voice.current_block_flags = block[:flags]
+      voice.repeat_address = voice.current_address if (block[:flags] & 0x04) != 0
+    end
+
+    def advance_voice_block(voice_index)
+      mask = 1 << voice_index
+      voice = @voices[voice_index]
+      voice.sample_index -= 28
+      voice.current_address = (voice.current_address + 2) & 0xFFFF
+
+      if (voice.current_block_flags & 0x01) != 0
+        @endx |= mask
+        voice.current_address = voice.repeat_address & ~1
+        @voice_active &= ~mask if (voice.current_block_flags & 0x02).zero?
+      end
+
+      decode_voice_block(voice_index) if (@voice_active & mask) != 0
     end
   end
 end

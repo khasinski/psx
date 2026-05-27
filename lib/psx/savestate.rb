@@ -208,6 +208,7 @@ module PSX
         cnt: @cnt, stat: @stat, dtc: @dtc,
         key_on: @key_on, key_off: @key_off, endx: @endx,
         voice_active: @voice_active,
+        sample_cycle_accumulator: @sample_cycle_accumulator || 0,
         voices: @voices.map { |v| v.to_h.transform_values { |value| value.is_a?(Array) ? value.dup : value } },
         fifo: @fifo.dup,
       }
@@ -224,14 +225,18 @@ module PSX
       @key_off = s[:key_off] || 0
       @endx = s[:endx] || 0
       @voice_active = s[:voice_active] || 0
+      @sample_cycle_accumulator = s[:sample_cycle_accumulator] || 0
       if s[:voices]
         @voices = s[:voices].map do |voice|
           SPU::VoiceState.new(
             current_address: voice[:current_address],
             repeat_address: voice[:repeat_address],
             adsr_volume: voice[:adsr_volume],
-            last_samples: voice[:last_samples].dup,
-            decoded_samples: voice[:decoded_samples].dup
+            last_samples: (voice[:last_samples] || [0, 0]).dup,
+            decoded_samples: (voice[:decoded_samples] || []).dup,
+            current_block_flags: voice[:current_block_flags] || 0,
+            sample_index: voice[:sample_index] || 0,
+            sample_counter: voice[:sample_counter] || 0
           )
         end
       end
