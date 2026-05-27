@@ -358,6 +358,8 @@ module PSX
     def transmit(byte)
       return unless (@ctrl & (CTRL_TXEN | CTRL_JOYN_OUTPUT)) == (CTRL_TXEN | CTRL_JOYN_OUTPUT)
 
+      trigger_irq if (@ctrl & CTRL_TX_INT_EN) != 0
+
       # Only slot 1 has devices; slot 2 stays silent (no /ACK -> BIOS timeout)
       if (@ctrl & CTRL_SLOT) != 0
         @rx.push(0xFF)
