@@ -6,12 +6,15 @@
 A work-in-progress PlayStation 1 emulator written in pure Ruby.
 
 It boots the SCPH1001 BIOS into the **Memory Card / CD-ROM shell**, reads
-`.bin`/`.cue` disc images via an emulated CD-ROM controller, and can
-fast-boot a PS-EXE out of an ISO9660 filesystem. It runs a chunk of the
-[JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests) suite.
-There is no audio, no PGXP, and the BIOS license check isn't bypassed yet
-(retail discs need `--fast-boot`), so don't expect to play full games.
-Think of it as an executable spec for the PS1.
+`.bin`/`.cue` disc images, and runs real retail discs end-to-end through
+the BIOS license check (no patching). MDEC is wired up through Phase 3
+(RLC + dequant + IDCT + YCbCr). Save states (F5/F8 in the SDL window)
+round-trip the full machine state. There is no audio synthesis and no
+PGXP, and many retail games still hit content-specific blockers (FMV
+codec init, CD-XA streaming), so don't expect to play full games yet.
+Think of it as an executable spec for the PS1. 216/216 unit tests,
+18/21 of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
+cases that have a `psx.log` reference.
 
 ![Memory Card menu rendered by the BIOS](docs/shell_menu.png)
 
@@ -56,10 +59,13 @@ Run `psx --help` for the option list. Keyboard controls (slot 1 digital pad):
 | Space          | Select   |
 | Q / W          | L1 / R1  |
 | E / R          | L2 / R2  |
+| F5             | Quicksave to `tmp/quicksave.psxstate` |
+| F8             | Quickload from `tmp/quicksave.psxstate` |
 | Escape         | Quit     |
 
 The BIOS shell idles on the Sony logo until you press Triangle, which opens
-the Memory Card / CD-ROM menu.
+the Memory Card / CD-ROM menu. Set `PSX_QUICKSAVE=path.psxstate` to point
+F5 / F8 elsewhere.
 
 ## Programmatic use
 
@@ -81,7 +87,8 @@ emu.run(steps: 50_000_000)
 
 The emulator exposes the major components individually: `emu.cpu`,
 `emu.memory`, `emu.gpu`, `emu.dma`, `emu.cdrom`, `emu.sio0`, `emu.interrupts`,
-`emu.timers`.
+`emu.timers`, `emu.spu`, `emu.mdec`. Save/restore the whole machine with
+`emu.save_state("scene.psxstate")` / `PSX::Emulator.from_state(path, bios:, disc:)`.
 
 ## Development
 
@@ -93,23 +100,47 @@ bundle exec rake test
 ```
 
 The `bin/` directory contains development tools that are *not* shipped with
-the gem:
+the gem.
 
-| Script            | Purpose                                                                 |
-| ----------------- | ----------------------------------------------------------------------- |
-| `bin/psx-ruby`        | Headless boot of the BIOS (no SDL window).                              |
-| `bin/psx-test`        | Run a PS-EXE on top of the BIOS, diff against ps1-tests reference logs. |
-| `bin/psx-smoke`       | Boot the BIOS and dump PPM screenshots at intervals.                    |
+Runners and test harnesses:
+
+| Script                   | Purpose                                                                 |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `bin/psx-ruby`           | Headless boot of the BIOS (no SDL window).                              |
+| `bin/psx-test`           | Run a PS-EXE on top of the BIOS, diff against ps1-tests reference logs. |
+| `bin/psx-conformance`    | Run the amidog CPU/CPx/GPU/GTE conformance tests, tally per-subtest pass/fail. |
+| `bin/psx-amidog-smoke`   | Boot every amidog test, check it reaches its startup banner.            |
+| `bin/build-test-disc`    | Wrap a PS-EXE in a minimal MODE2/2352 disc image (needs mkisofs).       |
+| `bin/fetch-amidog-tests` | Download and unpack the amidog test suite into `.tests-amidog/`.        |
+| `bin/fetch-redux-tests`  | Sparse-clone PCSX-Redux's `src/mips/` into `.tests-redux/`.             |
+| `bin/_ps1tests-baseline` | Run the JaCzekanski ps1-tests baseline and print pass/fail tally.       |
+
+Tracing and inspection:
+
+| Script                | Purpose                                                                 |
+| --------------------- | ----------------------------------------------------------------------- |
 | `bin/psx-trace`       | PC histogram + I_STAT/I_MASK summary at checkpoints.                    |
 | `bin/psx-disasm`      | Disassemble a range of physical addresses after N cycles of boot.       |
 | `bin/psx-biostrace`   | Tally A/B/C jump-table calls; dump the last N calls.                    |
 | `bin/psx-puts-trace`  | Capture the kernel's debug TTY (`puts2`, `printf`, …).                  |
 | `bin/psx-memwatch`    | Log reads/writes to specific addresses with the PC that did them.       |
 | `bin/psx-dumpmem`     | Hex-dump a range of memory after N cycles of boot.                      |
-| `bin/build-test-disc` | Wrap a PS-EXE in a minimal MODE2/2352 disc image (needs mkisofs).       |
-| `bin/fetch-amidog-tests` | Download and unpack the amidog test suite into `.tests-amidog/`.     |
-| `bin/fetch-redux-tests`  | Sparse-clone PCSX-Redux's `src/mips/` into `.tests-redux/`.          |
-| `bin/psx-amidog-smoke`   | Boot every amidog test, check it reaches its startup banner.         |
+| `bin/psx-smoke`       | Boot the BIOS and dump PPM screenshots at intervals.                    |
+
+Benchmarks, save states, and game-specific drivers:
+
+| Script                  | Purpose                                                                 |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `bin/_psx-bench`        | Headless throughput bench (cycles/sec) on the BIOS boot path.           |
+| `bin/_psx-state-bench`  | Bench forward from a `.psxstate` snapshot (skip BIOS-boot replay).      |
+| `bin/_psx-makestate`    | Build a `.psxstate` snapshot from a fresh BIOS-boot + N cycles.         |
+| `bin/_psx-bootmap`      | Flame graph + ASCII histogram of where time goes during BIOS boot.      |
+| `bin/_psx-profile`      | stackprof a BIOS-boot run, flat report.                                 |
+| `bin/_psx-gtebench`     | Synthetic GTE micro-bench in a tight Ruby loop.                         |
+| `bin/_psx-gteprofile`   | stackprof the GTE bench.                                                |
+| `bin/_psx-exe-display`  | Boot BIOS then load a PS-EXE into the SDL window (for visual GPU tests).|
+| `bin/_gte-timing-shot`  | Render amidog `psxtest_gte` long enough for the OFFICIAL.TIMING block.  |
+| `bin/_ridge-boot`       | Headless boot of Ridge Racer (EU) with periodic PPM screenshots.        |
 
 ### Running test suites
 
@@ -145,41 +176,55 @@ bundle exec ruby bin/fetch-redux-tests
 
 What works:
 
-- MIPS R3000A CPU with delay slots, exceptions, COP0
-- GTE (passes the `gte/test-all` shape, several coverage gaps)
+- MIPS R3000A CPU with delay slots, exceptions, COP0, branch-target
+  handling, load-delay slots
+- GTE (passes `gte/test-all`, nocash per-opcode timing through Timer 2
+  sysclock; some coverage gaps)
 - GPU: GP0 polygons / lines / rectangles, textured / shaded / semi-transparent
   primitives, CPU↔VRAM blits, mask bit. Software rasteriser, no PGXP.
-- DMA channels for OTC, GPU (block / linked list), SPU, CD-ROM
-- Interrupt controller, root counters
+- DMA channels for OTC, GPU (block / linked list), SPU, CD-ROM, MDEC in/out
+- Interrupt controller, root counters (Timer 0/1/2 with sysclock / dotclock /
+  hblank sources)
 - CD-ROM controller backed by `.bin`/`.cue` images, with SetLoc / ReadN /
-  Pause / SeekL / GetlocL / GetTN / GetTD / GetID / Init / SetMode and
-  cycle-paced INT1 sector delivery
+  ReadS / Pause / SeekL / GetlocL / GetTN / GetTD / GetID / Init / SetMode
+  (including `whole_sector` bit-5 mode for CD-XA reads) and cycle-paced
+  INT1 sector delivery
 - ISO9660 reader for SYSTEM.CNF + PS-EXE extraction
-- Fast-boot: skip the BIOS shell + license check, run the disc's PS-EXE directly
+- BIOS shell boots real retail discs end-to-end via the license check,
+  no patching required (`--fast-boot` is still available for synthetic
+  / homebrew discs)
 - SIO0 digital pad (slot 1)
 - SPU stub (mirrors SPUCNT → SPUSTAT, register window read-back; no
   actual audio synthesis)
-- Boots SCPH1001 into the Memory Card menu
+- MDEC: register surface (Phase 1), quant + IDCT tables and DMA 0/1
+  ingress / egress (Phase 2), real RLC + dequant + IDCT + YCbCr → RGB
+  decoder (Phase 3). DMA1 completion IRQ wired. Phase 5 (full CD-XA
+  streaming integration with SPU) still open.
+- Save states: F5 / F8 in the SDL window quicksave / quickload, full
+  machine round-trip via `Marshal` (CPU + GTE + COP0 + RAM + GPU VRAM +
+  SPU + MDEC + CD-ROM + timers + interrupts).
+- Symmetric upper-RAM mirror (matches real hardware — writes to
+  `0x80200000+` alias back to the populated 2 MB chip).
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 18/18 of the JaCzekanski/ps1-tests cases that have a `psx.log`
-  reference and don't require a disc image (cpu/, dma/, gpu/, gte/,
-  mdec/, spu/, timers/) — see `bin/_ps1tests-baseline`
+- 216/216 unit tests pass.
+- 18/21 of the JaCzekanski/ps1-tests cases that have a `psx.log`
+  reference (cpu/, dma/, gpu/, gte/, mdec/, spu/, timers/) — see
+  `bin/_ps1tests-baseline`.
 
 What doesn't:
 
 - No SPU audio synthesis (no sound)
-- CD-ROM ps1-tests (`cdrom/disc-swap`, `cdrom/getloc`, `cdrom/timing`)
-  can't run via `bin/psx-test` because no disc image is wired into
-  the bare-EXE loader path
+- The 3 remaining ps1-tests failures are all CD-ROM (`cdrom/disc-swap`,
+  `cdrom/getloc`, `cdrom/timing`) — they need a disc image wired into
+  the bare-EXE loader path that `bin/psx-test` doesn't currently provide.
 - DMA timing isn't cycle-accurate — `dma/chopping` runs but reports
   `29 CPU cycles` for every block size where real hardware sees
-  thousands; structural test pass, not bit-perfect timing
-- GTE op timing matches nocash per-opcode cycle counts when measured
-  through Timer 2 in sysclock mode (see `spec/gte_timing_spec.rb`);
-  visual verification against amidog's psxtest_gte OFFICIAL.TIMING
-  column hasn't been completed
+  thousands; structural test passes, not bit-perfect timing.
+- Retail games that drive FMV (Rage Racer, Ridge Racer, …) get past
+  the BIOS shell and SCE / publisher splash but stall on game-specific
+  codec / streaming code that we don't yet emulate correctly.
 
 ## License
 

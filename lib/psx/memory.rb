@@ -25,7 +25,7 @@ module PSX
     ].freeze
 
     attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0, :spu, :mdec
-    attr_reader :ram_words, :bios_words  # exposed so CPU can inline read32/fetch32 fast paths
+    attr_reader :ram_words, :bios_words, :isolated_cache_words  # exposed so CPU can inline read32/fetch32 fast paths
 
     def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil, mdec: nil)
       @bios = bios
@@ -42,6 +42,7 @@ module PSX
       @gpu = nil  # Set later when GPU is created
       @scratchpad = ("\x00" * SCRATCHPAD_SIZE).b  # Force binary encoding
       @cache_isolated = false
+      @isolated_cache_words = {}
     end
 
     def tick_dma
@@ -123,7 +124,12 @@ module PSX
     # the cpu.step hot path so we save a method dispatch per CPU step.
     def fetch32(addr)
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
-      return @ram_words[(phys & RAM_MIRROR_MASK) >> 2] if phys < 0x0080_0000
+      if phys < 0x0080_0000
+        index = (phys & RAM_MIRROR_MASK) >> 2
+        ram_word = @ram_words[index]
+        return ram_word unless ram_word.zero?
+        return @isolated_cache_words.fetch(index) { ram_word }
+      end
       return @bios_words[(phys - BIOS_START) >> 2] if phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
       # Rare paths: IO/DMA/GPU/SPU/SBUS regions that DO respond to fetch.
       if phys >= 0x1F80_1000 && phys < 0x1F80_3000
@@ -232,10 +238,15 @@ module PSX
     end
 
     def write32(addr, value)
-      return if @cache_isolated
-
       # Fast path: translate virtual to physical
       phys = addr & REGION_MASK[(addr >> 29) & 0x7]
+
+      if @cache_isolated
+        if phys < 0x0080_0000 && (phys & 3).zero?
+          @isolated_cache_words[(phys & RAM_MIRROR_MASK) >> 2] = value & 0xFFFF_FFFF
+        end
+        return
+      end
 
       # Inlined RAM fast path (see write8 note on symmetric mirror).
       if phys < 0x0080_0000

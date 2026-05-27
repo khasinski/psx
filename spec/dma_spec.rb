@@ -211,4 +211,104 @@ class DMASpec < Minitest::Test
     assert elapsed < 5.0, "transfer_gpu_linked_list ran for #{elapsed}s on a self-loop"
     refute @dma.channels[2].active?, "GPU channel should be marked finished after the bounded walk"
   end
+
+  def test_cdrom_dma_waits_for_next_sector_when_fifo_empties
+    ram = PSX::RAM.new
+    bios_data = "\x00" * 512 * 1024
+    bios = PSX::BIOS.allocate
+    bios.instance_variable_set(:@data, bios_data)
+    memory = PSX::Memory.new(
+      bios: bios,
+      ram: ram,
+      interrupts: @interrupts,
+      dma: @dma,
+      timers: PSX::Timers.new(interrupts: @interrupts)
+    )
+
+    fake_cdrom = Class.new do
+      def initialize(words)
+        @words = words
+      end
+
+      def data_fifo_has_data?
+        !@words.empty?
+      end
+
+      def dma_read_word
+        @words.shift
+      end
+    end
+
+    @dma.cdrom = fake_cdrom.new([0x1111_1111, 0x2222_2222])
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::CDROM * 4 + 3)))
+    @dma.write(0x30, 0x0000_1000)
+    @dma.write(0x34, (1 << 16) | 4) # one four-word request
+    @dma.write(0x38, PSX::DMA::CTRL_START_BUSY | (PSX::DMA::SYNC_REQUEST << 9))
+
+    @dma.tick(memory)
+
+    assert @dma.channels[PSX::DMA::CDROM].active?
+    assert_equal 0x0000_1008, @dma.channels[PSX::DMA::CDROM].base_addr
+    assert_equal((1 << 16) | 2, @dma.channels[PSX::DMA::CDROM].block_ctrl)
+    assert_equal 0x1111_1111, ram.read32(0x1000)
+    assert_equal 0x2222_2222, ram.read32(0x1004)
+
+    @dma.cdrom = fake_cdrom.new([0x3333_3333, 0x4444_4444])
+    @dma.tick(memory)
+
+    refute @dma.channels[PSX::DMA::CDROM].active?
+    assert_equal 0x3333_3333, ram.read32(0x1008)
+    assert_equal 0x4444_4444, ram.read32(0x100C)
+  end
+
+  def test_mdec_out_dma_waits_until_output_is_available
+    ram = PSX::RAM.new
+    bios_data = "\x00" * 512 * 1024
+    bios = PSX::BIOS.allocate
+    bios.instance_variable_set(:@data, bios_data)
+    memory = PSX::Memory.new(
+      bios: bios,
+      ram: ram,
+      interrupts: @interrupts,
+      dma: @dma,
+      timers: PSX::Timers.new(interrupts: @interrupts)
+    )
+    @dma.memory = memory
+
+    fake_mdec = Class.new do
+      def initialize
+        @words = []
+      end
+
+      def provide(words)
+        @words.concat(words)
+      end
+
+      def data_out_available?
+        !@words.empty?
+      end
+
+      def read32_data
+        @words.shift || 0
+      end
+    end.new
+
+    @dma.mdec = fake_mdec
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::MDEC_OUT * 4 + 3)))
+    @dma.write(0x10, 0x0000_2000)
+    @dma.write(0x14, (1 << 16) | 2)
+    @dma.write(0x18, PSX::DMA::CTRL_START_BUSY | (PSX::DMA::SYNC_REQUEST << 9))
+
+    @dma.tick(memory)
+
+    assert @dma.channels[PSX::DMA::MDEC_OUT].active?, "MDEC-out DMA should remain armed while FIFO is empty"
+    assert_equal 0, ram.read32(0x2000)
+
+    fake_mdec.provide([0x1111_2222, 0x3333_4444])
+    @dma.tick_cycles(1)
+
+    refute @dma.channels[PSX::DMA::MDEC_OUT].active?
+    assert_equal 0x1111_2222, ram.read32(0x2000)
+    assert_equal 0x3333_4444, ram.read32(0x2004)
+  end
 end

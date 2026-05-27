@@ -79,6 +79,33 @@ class CDROMSpec < Minitest::Test
     assert_equal 0x21445650, @cdrom.dma_read_word, "First word should be 'PVD!' (LE)"
   end
 
+  # Games may issue a new command while an older command's delayed second
+  # response is still pending. The new short INT3 acknowledgement should not
+  # be trapped behind that old long-delay response.
+  def test_new_command_ack_can_overtake_delayed_second_response
+    @cdrom.disc = build_one_sector_disc("PVD!"[0, 4].b + ("\x00" * 2044).b)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x02)     # SetLoc
+    drain_response
+
+    @cdrom.write8(1, 0x06)     # ReadN
+    drain_response
+    @cdrom.write8(1, 0x09)     # Pause queues INT3 and a delayed INT2
+    assert drive_until_int(1, max_ticks: 200), "Pause should deliver the in-flight INT1"
+    ack_response
+    assert drive_until_int(3, max_ticks: 20), "Pause INT3 should arrive"
+    ack_response
+
+    @cdrom.write8(1, 0x01)     # GetStat while Pause INT2 is still pending
+    assert drive_until_int(3, max_ticks: 5),
+           "new command INT3 should not wait for the older delayed INT2"
+  end
+
   # whole_sector mode (SetMode bit 5) makes the data FIFO start at offset
   # 12 of the raw 2352-byte sector — header + sub-header + user data +
   # ECC — instead of the 2048-byte user-data slice. Rage Racer's CD-XA
@@ -123,6 +150,35 @@ class CDROMSpec < Minitest::Test
                  "user data should start at offset 12 in whole_sector mode"
   end
 
+  # CD-XA streams are often software-filtered by file/channel. Rage Racer
+  # reads a 44-byte XA/STR prefix for unwanted sectors and leaves the payload
+  # unread; that must not stall the sector stream forever.
+  def test_whole_sector_filter_prefix_read_does_not_block_next_sector
+    first_payload = ("SKIP" + "\x00" * 2044).b
+    second_payload = ("KEEP" + "\x00" * 2044).b
+    @cdrom.disc = build_disc([first_payload, second_payload])
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0xA0)   # SetMode params: bit 7 = 2x speed, bit 5 = whole_sector
+    @cdrom.write8(1, 0x0E)   # Cmd SetMode
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)   # Cmd SetLoc
+    drain_response
+    @cdrom.write8(1, 0x06)   # Cmd ReadN
+    drain_response
+    assert drive_until_int(1, max_ticks: 20), "first sector should arrive"
+
+    44.times { @cdrom.read8(2) } # Consume only the filter prefix.
+    ack_response
+
+    assert drive_until_int(1, max_ticks: 20),
+           "filter-prefix reads of unwanted XA sectors should not block the next INT1"
+    assert_equal "KEEP".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(12, 4)
+  end
+
   # Default (no whole_sector) still returns just the 2048-byte user-data
   # slice. Critical for the BIOS shell path that doesn't touch SetMode.
   def test_default_mode_serves_user_data_only
@@ -148,14 +204,24 @@ class CDROMSpec < Minitest::Test
   private
 
   def build_one_sector_disc(user_data)
-    raise "user_data must be 2048 bytes" if user_data.bytesize != 2048
+    build_disc([user_data])
+  end
+
+  def build_disc(payloads)
+    payloads.each do |user_data|
+      raise "user_data must be 2048 bytes" if user_data.bytesize != 2048
+    end
+
     tmp = Tempfile.new(["disc", ".bin"])
     tmp.binmode
     sync = "\x00\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00".b
-    msf  = [0x00, 0x02, 0x00].pack("C*")
     sub  = "\x00\x00\x08\x00\x00\x00\x08\x00".b
     ecc  = "\x00" * 280
-    tmp.write(sync + msf + "\x02".b + sub + user_data + ecc)
+    payloads.each_with_index do |user_data, lba|
+      m, s, f = PSX::Disc.lba_to_msf(lba)
+      msf = [PSX::Disc.to_bcd(m), PSX::Disc.to_bcd(s), PSX::Disc.to_bcd(f)].pack("C*")
+      tmp.write(sync + msf + "\x02".b + sub + user_data + ecc)
+    end
     tmp.close
     PSX::Disc.from_bin(tmp.path)
   end
@@ -179,6 +245,10 @@ class CDROMSpec < Minitest::Test
     # Pretend the BIOS reads + acks. 1) read all response bytes, 2) ack
     # the IRQ flag bits.
     drive_until_int(3, max_ticks: 20)
+    ack_response
+  end
+
+  def ack_response
     @cdrom.write8(0, 1)
     @cdrom.write8(3, 0x1F)     # ack all IRQ flag bits
     @cdrom.write8(0, 0)

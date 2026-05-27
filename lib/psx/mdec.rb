@@ -141,6 +141,10 @@ module PSX
       status
     end
 
+    def data_out_available?
+      @output_words_remaining.positive?
+    end
+
     # Write MDEC0: command word OR parameter / RLE data word.
     def write32_data(word)
       word &= 0xFFFF_FFFF
@@ -295,24 +299,29 @@ module PSX
     def decode_block(halfwords, pos, qtable)
       return [nil, pos] if pos >= halfwords.size
 
-      # Skip blocks the encoder marked as empty: a leading EOB means
-      # "this whole block is zero". Output an all-zero 8x8 block; the
-      # IDCT of zeros is just zeros plus the DC offset (also 0 here).
       header = halfwords[pos]
       pos += 1
-      return [Array.new(64, 0), pos] if header == RLC_EOB
+      while header == RLC_EOB
+        return [nil, pos] if pos >= halfwords.size
+        header = halfwords[pos]
+        pos += 1
+      end
 
       q_scale = (header >> 10) & 0x3F
       dc_raw  = header & 0x3FF
       dc_raw  -= 0x400 if dc_raw >= 0x200   # sign-extend 10-bit
 
-      # Reconstruct quantised DCT coefficients in natural (un-zigzagged)
-      # order. The header DC value is at position 0; subsequent RLC pairs
-      # describe (zero-run, AC-value) at zigzag offsets 1..63.
+      # Reconstruct dequantised DCT coefficients in natural order. RLC run
+      # lengths advance in zig-zag order, while the quant table is indexed by
+      # that zig-zag coefficient number as on the hardware.
       coeffs = Array.new(64, 0)
-      coeffs[0] = dc_raw * qtable[0]   # DC is dequantised with quant[0] only
+      coeffs[0] = if q_scale.zero?
+                    clamp_signed_11(dc_raw * 2)
+                  else
+                    clamp_signed_11(dc_raw * qtable[0])
+                  end
 
-      idx = 1
+      idx = 0
       while pos < halfwords.size
         hw = halfwords[pos]
         pos += 1
@@ -322,20 +331,20 @@ module PSX
         val = hw & 0x3FF
         val -= 0x400 if val >= 0x200    # sign-extend 10-bit
 
-        idx += run
+        idx += run + 1
         break if idx >= 64
 
-        # Standard MDEC dequantisation: val * qtable[zigzag_idx] * qscale * 2 / 16.
-        # When q_scale == 0 the formula degenerates to plain val * qtable[idx] * 2
-        # (matches the unscaled case some encoders emit).
-        zz   = ZIGZAG[idx]
         coef = if q_scale.zero?
-                 val * qtable[zz] * 2
+                 val * 2
                else
-                 (val * qtable[zz] * q_scale * 2) / 16
+                 (val * qtable[idx] * q_scale + 4) / 8
                end
-        coeffs[zz] = coef
-        idx += 1
+        coef = if q_scale.zero?
+                 clamp_signed_11(coef)
+               else
+                 clamp_signed_11(coef | 1)
+               end
+        coeffs[ZIGZAG[idx]] = coef
       end
       # End-of-stream without an explicit EOB = implicit EOB; emit the
       # partial block we built up. (Some encoders, including the one
@@ -348,33 +357,27 @@ module PSX
     # Output: 64 ints, signed 9-bit clamped (-256..255), one per pixel.
     # Two-pass: row IDCT then column IDCT.
     def idct_8x8(coeffs)
-      # Pass 1: row IDCT into intermediate buffer
-      tmp = Array.new(64, 0.0)
-      8.times do |y|
-        8.times do |x|
-          sum = 0.0
-          8.times do |k|
-            sum += coeffs[y * 8 + k] * IDCT_COS[k][x]
-          end
-          tmp[y * 8 + x] = sum / 2.0
-        end
-      end
+      idct_pass(idct_pass(coeffs))
+    end
 
-      # Pass 2: column IDCT
-      out = Array.new(64, 0)
+    def idct_pass(src)
+      dst = Array.new(64, 0)
       8.times do |x|
         8.times do |y|
-          sum = 0.0
-          8.times do |k|
-            sum += tmp[k * 8 + x] * IDCT_COS[k][y]
+          sum = 0
+          8.times do |z|
+            sum += src[y + z * 8] * @idct_table[x + z * 8]
           end
-          v = (sum / 2.0).round
-          v = -256 if v < -256
-          v = 255  if v > 255
-          out[y * 8 + x] = v
+          dst[x + y * 8] = ((sum / 8) + 0x0FFF) / 0x2000
         end
       end
-      out
+      dst
+    end
+
+    def clamp_signed_11(v)
+      return -0x400 if v < -0x400
+      return 0x3FF if v > 0x3FF
+      v
     end
 
     # 4-bit indexed output: pack each pixel as a 4-bit nybble, two per
@@ -393,7 +396,7 @@ module PSX
     def pack_8bit_into(output_bytes, block)
       64.times do |i|
         v = block[i]
-        output_bytes << (@output_signed ? (v & 0xFF) : clamp_byte(v))
+        output_bytes << (@output_signed ? (v & 0xFF) : clamp_byte(v + 128))
       end
     end
 
@@ -404,18 +407,20 @@ module PSX
       cr, cb, y0, y1, y2, y3 = blocks
       bit15 = @output_bit15 ? 0x8000 : 0
       ys    = [y0, y1, y2, y3]
-      16.times do |y|
-        16.times do |x|
-          # Pick the Y sub-block (Y0=TL, Y1=TR, Y2=BL, Y3=BR), 8x8 each.
-          yb = ys[(y >> 3) * 2 + (x >> 3)]
-          yv = yb[(y & 7) * 8 + (x & 7)]
-          # Chroma: half-resolution, upsampled by nearest-neighbour.
-          cv = cb[(y >> 1) * 8 + (x >> 1)]
-          rv = cr[(y >> 1) * 8 + (x >> 1)]
+      ys.each_with_index do |yb, block_index|
+        block_x = (block_index & 1) * 8
+        block_y = (block_index >> 1) * 8
+        8.times do |y|
+          8.times do |x|
+          yv = yb[y * 8 + x]
+          # Chroma is half-resolution across the whole 16x16 macroblock.
+          cv = cb[((block_y + y) >> 1) * 8 + ((block_x + x) >> 1)]
+          rv = cr[((block_y + y) >> 1) * 8 + ((block_x + x) >> 1)]
           r, g, b = ycbcr_to_rgb(yv, cv, rv)
           pix = ((r >> 3) & 0x1F) | (((g >> 3) & 0x1F) << 5) | (((b >> 3) & 0x1F) << 10) | bit15
           output_bytes << (pix & 0xFF)
           output_bytes << ((pix >> 8) & 0xFF)
+          end
         end
       end
     end
@@ -432,7 +437,7 @@ module PSX
           cv = cb[(y >> 1) * 8 + (x >> 1)]
           rv = cr[(y >> 1) * 8 + (x >> 1)]
           r, g, b = ycbcr_to_rgb(yv, cv, rv)
-          output_bytes << r << g << b
+          output_bytes << b << g << r
         end
       end
     end

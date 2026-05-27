@@ -267,16 +267,30 @@ module PSX
       dst_i = 0
 
       height.times do |y|
-        vram_row = (@display_start_y + y) * VRAM_WIDTH + @display_start_x
-        width.times do |x|
-          color16 = @vram[vram_row + x] || 0
+        if @color_depth_24
+          base_byte = ((@display_start_y + y) * VRAM_WIDTH + @display_start_x) * 2
+          width.times do |x|
+            b = vram_byte(base_byte + x * 3)
+            g = vram_byte(base_byte + x * 3 + 1)
+            r = vram_byte(base_byte + x * 3 + 2)
+            rgba_arr[dst_i] = r
+            rgba_arr[dst_i + 1] = g
+            rgba_arr[dst_i + 2] = b
+            rgba_arr[dst_i + 3] = 255
+            dst_i += 4
+          end
+        else
+          vram_row = (@display_start_y + y) * VRAM_WIDTH + @display_start_x
+          width.times do |x|
+            color16 = @vram[vram_row + x] || 0
 
-          # Convert 15-bit to 24-bit RGB
-          rgba_arr[dst_i] = (color16 & 0x001F) << 3      # R
-          rgba_arr[dst_i + 1] = (color16 & 0x03E0) >> 2  # G
-          rgba_arr[dst_i + 2] = (color16 & 0x7C00) >> 7  # B
-          rgba_arr[dst_i + 3] = 255                       # A
-          dst_i += 4
+            # Convert 15-bit to 24-bit RGB
+            rgba_arr[dst_i] = (color16 & 0x001F) << 3      # R
+            rgba_arr[dst_i + 1] = (color16 & 0x03E0) >> 2  # G
+            rgba_arr[dst_i + 2] = (color16 & 0x7C00) >> 7  # B
+            rgba_arr[dst_i + 3] = 255                       # A
+            dst_i += 4
+          end
         end
       end
 
@@ -290,6 +304,16 @@ module PSX
     end
 
     private
+
+    def vram_byte(byte_offset)
+      byte_offset %= VRAM_WIDTH * VRAM_HEIGHT * 2
+      word = @vram[byte_offset >> 1] || 0
+      if byte_offset.even?
+        word & 0xFF
+      else
+        (word >> 8) & 0xFF
+      end
+    end
 
     # GP0 command execution
     def execute_gp0_command

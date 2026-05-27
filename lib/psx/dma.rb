@@ -248,6 +248,11 @@ module PSX
         transfer_cdrom(@memory)
       end
 
+      if @memory && @mdec&.data_out_available? && channel_enabled?(MDEC_OUT) &&
+         @channels[MDEC_OUT].active?(needs_trigger: false)
+        transfer_mdec_out(@memory)
+      end
+
       return unless @pending_completions && !@pending_completions.empty?
 
       @pending_completions.reject! do |n|
@@ -398,11 +403,25 @@ module PSX
 
       addr = channel.base_addr
       step = channel.step
+      transferred = 0
 
-      total.times do
+      while transferred < total && @cdrom.data_fifo_has_data?
         word = @cdrom.dma_read_word
         memory.write32(addr & 0x1F_FFFC, word)
         addr = (addr + step) & 0xFFFF_FFFF
+        transferred += 1
+      end
+
+      remaining = total - transferred
+      if remaining.positive?
+        channel.base_addr = addr & 0x00FF_FFFC
+        if remaining <= size
+          channel.block_ctrl = (1 << 16) | remaining
+        else
+          remaining_blocks = (remaining + size - 1) / size
+          channel.block_ctrl = (remaining_blocks << 16) | size
+        end
+        return true
       end
 
       channel.finish!
@@ -500,6 +519,8 @@ module PSX
     # buffer ends up zero-filled — better than hanging.
     def transfer_mdec_out(memory)
       channel = @channels[MDEC_OUT]
+      return unless @mdec&.data_out_available?
+
       size  = channel.block_size; size  = 0x10000 if size.zero?
       count = channel.block_count; count = 1     if count.zero?
       total = size * count

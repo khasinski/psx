@@ -148,6 +148,17 @@ class MemorySpec < Minitest::Test
     result = @memory.read32(0x8000_0000)
     refute_equal 0xDEADBEEF, result, "Write should be blocked when cache isolated"
   end
+
+  def test_cache_isolated_word_write_is_fetchable_as_cached_instruction
+    @memory.cache_isolated = true
+    @memory.write32(0x8000_0080, 0x3C1A_0000)
+    @memory.cache_isolated = false
+
+    assert_equal 0, @memory.read32(0x8000_0080),
+                 "Isolated write should not update RAM data"
+    assert_equal 0x3C1A_0000, @memory.fetch32(0x8000_0080),
+                 "Instruction fetch should see isolated cache contents"
+  end
 end
 
 class RAMSpec < Minitest::Test

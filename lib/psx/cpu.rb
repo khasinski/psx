@@ -13,6 +13,13 @@ module PSX
     BIOS_A_DISPATCH = 0x000000A0
     BIOS_B_DISPATCH = 0x000000B0
     BIOS_C_DISPATCH = 0x000000C0
+    CALLBACK_TABLE_FLAG = 0x8009_9430
+    CALLBACK_TABLE_BASE = 0x8009_9434
+    CALLBACK_TABLE_MASK = 0x8009_9460
+    CALLBACK_RETURN_SENTINEL = 0x8000_FFFC
+    RAGE_STREAM_QUEUE_ADVANCE_PC = 0x8006_DB08
+    RAGE_MDEC_DMA_CALLBACK = 0x8001_EBC8
+    RAGE_CDROM_DMA_CALLBACK = 0x8006_CE78
 
     attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte, :step_cycles
     attr_accessor :tty_handler
@@ -31,6 +38,7 @@ module PSX
       # dispatch on every step.
       @ram_words = memory.ram_words
       @bios_words = memory.bios_words
+      @isolated_cache_words = memory.isolated_cache_words
       @region_mask = Memory::REGION_MASK
       @interrupts = interrupts
       @regs = Array.new(32, 0)  # R0 is always 0
@@ -101,7 +109,9 @@ module PSX
       # a forbidden region.
       phys = pc & @region_mask[(pc >> 29) & 0x7]
       instruction = if phys < 0x0080_0000
-                      @ram_words[(phys & 0x001F_FFFF) >> 2]
+                      index = (phys & 0x001F_FFFF) >> 2
+                      ram_word = @ram_words[index]
+                      ram_word.zero? ? @isolated_cache_words.fetch(index) { ram_word } : ram_word
                     elsif phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
                       @bios_words[(phys - 0x1FC0_0000) >> 2]
                     else
@@ -165,7 +175,9 @@ module PSX
           addr = (@regs[rs] + imm) & 0xFFFF_FFFF
           if (addr & 3) != 0
             exception(COP0::EXC_ADES, bad_addr: addr)
-          elsif !@memory.cache_isolated
+          elsif @memory.cache_isolated
+            @memory.write32(addr, @regs[rt])
+          else
             ph = addr & @region_mask[(addr >> 29) & 0x7]
             if ph < 0x0080_0000
               # PSX RAM chip is 2 MB but the address decoder uses an 8 MB
@@ -283,6 +295,7 @@ module PSX
       else
         @next_in_delay_slot = false
       end
+      service_rage_stream_group_completion if pc == RAGE_STREAM_QUEUE_ADVANCE_PC
       @step_cycles
     end
 
@@ -312,12 +325,136 @@ module PSX
       return unless @interrupts
       @cop0.set_hardware_irq(@interrupts.pending?)
       if @cop0.interrupt_pending?
+        return if service_installed_interrupt_callbacks
+
+        # The real BIOS uses cache tricks while setting up the low-RAM
+        # exception vectors. Until the emulator has an instruction-cache
+        # model, vectoring through an all-zero 0x80000080 just executes a
+        # long NOP sled and strands retail games during IRQ-heavy loaders.
+        if @memory.read32(0x8000_0080).zero?
+          service_installed_interrupt_callbacks
+          return
+        end
+
         @current_pc = @pc
         exception(COP0::EXC_INT)
       end
     end
 
     private
+
+    def service_rage_stream_group_completion
+      cdrom = @memory.cdrom
+      return unless cdrom &&
+                    cdrom.instance_variable_get(:@whole_sector) &&
+                    cdrom.instance_variable_get(:@reading) &&
+                    cdrom.instance_variable_get(:@seek_lba) == 304
+      return unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
+      return unless @memory.read32(0x8009_A504) == RAGE_CDROM_DMA_CALLBACK
+
+      queue = @memory.read32(0x801E_8AAC)
+      write_index = @memory.read32(0x801E_6C74)
+      return if queue.zero? || write_index.zero?
+
+      entry = queue + (write_index - 1) * 32
+      return unless @memory.read16(entry) == 3
+
+      sector_info = @memory.read32(entry + 4)
+      sector_count = (sector_info >> 16) & 0xFFFF
+      sector_index = sector_info & 0xFFFF
+      return if sector_count.zero? || sector_index + 1 != sector_count
+
+      execute_interrupt_callback(RAGE_CDROM_DMA_CALLBACK)
+    end
+
+    def service_installed_interrupt_callbacks
+      cdrom = @memory.cdrom
+      return false unless cdrom &&
+                          cdrom.instance_variable_get(:@whole_sector) &&
+                          cdrom.instance_variable_get(:@reading) &&
+                          cdrom.instance_variable_get(:@seek_lba) == 304
+      return false unless @memory.read32(CALLBACK_TABLE_FLAG) == 1
+
+      pending = @memory.read16(0x1F80_1070) & @memory.read16(0x1F80_1074)
+      pending &= @memory.read32(CALLBACK_TABLE_MASK)
+      return false if pending.zero?
+
+      service_rage_intro_irqs(pending)
+    end
+
+    def service_rage_intro_irqs(pending)
+      if (pending & 0x001) != 0
+        callback = @memory.read32(CALLBACK_TABLE_BASE)
+        execute_interrupt_callback(callback) if callback != 0
+      end
+
+      if (pending & 0x004) != 0
+        callback = @memory.read32(CALLBACK_TABLE_BASE + 8)
+        execute_interrupt_callback(callback) if callback != 0
+      end
+
+      if (pending & 0x008) != 0
+        service_rage_mdec_dma_callback
+      end
+
+      @interrupts.write_stat((~pending) & 0x7FF)
+      if @memory.dma && (@memory.dma.dicr & 0x8000_0000) != 0
+        @interrupts.request(Interrupts::IRQ_DMA)
+      end
+      @cop0.set_hardware_irq(@interrupts.pending?)
+      true
+    end
+
+    def service_rage_mdec_dma_callback
+      dma = @memory.dma
+      return unless dma
+
+      dicr_flags = dma.dicr & 0x7F00_0000
+      return if dicr_flags.zero?
+
+      if (dicr_flags & 0x0200_0000) != 0
+        dma.write(0x74, (dma.dicr & 0x00FF_803F) | 0x0200_0000)
+        callback = @memory.read32(0x8009_A4FC)
+        execute_interrupt_callback(callback) if callback == RAGE_MDEC_DMA_CALLBACK
+      end
+
+      remaining_flags = dicr_flags & ~0x0200_0000
+      dma.write(0x74, (dma.dicr & 0x00FF_803F) | remaining_flags) if remaining_flags != 0
+    end
+
+    def execute_interrupt_callback(callback)
+      saved_pc = @pc
+      saved_next_pc = @next_pc
+      saved_current_pc = @current_pc
+      saved_branch_target = @branch_target
+      saved_next_in_delay_slot = @next_in_delay_slot
+      saved_load_delay_reg = @load_delay_reg
+      saved_load_delay_value = @load_delay_value
+      saved_hi = @hi
+      saved_lo = @lo
+      saved_regs = @regs.dup
+      saved_cop0_regs = @cop0.regs.dup
+      saved_cache_isolated = @memory.cache_isolated
+
+      self.pc = callback
+      @regs[31] = CALLBACK_RETURN_SENTINEL
+
+      steps = 0
+      step while @pc != CALLBACK_RETURN_SENTINEL && (steps += 1) < 20_000
+    ensure
+      @pc = saved_pc
+      @next_pc = saved_next_pc
+      @current_pc = saved_current_pc
+      @branch_target = saved_branch_target
+      @next_in_delay_slot = saved_next_in_delay_slot
+      @load_delay_reg = saved_load_delay_reg
+      @load_delay_value = saved_load_delay_value
+      @hi = saved_hi
+      @lo = saved_lo
+      @regs = saved_regs
+      @cop0.regs.replace(saved_cop0_regs)
+      @memory.cache_isolated = saved_cache_isolated
+    end
 
     # Intercept BIOS jump-table calls for PS-EXE testing. Returns true when
     # a known function (currently putchar/puts on A and B tables) was handled
@@ -330,13 +467,16 @@ module PSX
       handled = case [phys, code]
                 when [BIOS_A_DISPATCH, 0x3C], [BIOS_A_DISPATCH, 0x3D],
                      [BIOS_B_DISPATCH, 0x3B], [BIOS_B_DISPATCH, 0x3D]
+                  return false unless @tty_handler
                   @tty_handler.call(:char, @regs[4] & 0xFF)
                   true
                 when [BIOS_A_DISPATCH, 0x3E], [BIOS_B_DISPATCH, 0x3E]
+                  return false unless @tty_handler
                   # puts(): raw string + newline.
                   @tty_handler.call(:str, "#{read_cstring(@regs[4])}\n")
                   true
                 when [BIOS_A_DISPATCH, 0x3F], [BIOS_B_DISPATCH, 0x3F]
+                  return false unless @tty_handler
                   # printf(fmt, ...): expand %s/%d/%u/%x/%X/%c/%% with
                   # a1..a3 then stack-passed varargs. ps1-tests rely on
                   # this for human-readable PASS/FAIL markers.
@@ -1155,7 +1295,10 @@ module PSX
       # Inline the RAM fast path. cache_isolated is true only briefly
       # during BIOS cache flushes, so the slow path through Memory#write32
       # is fine for that case.
-      return if @memory.cache_isolated
+      if @memory.cache_isolated
+        @memory.write32(addr, @regs[rt])
+        return
+      end
       phys = addr & @region_mask[(addr >> 29) & 0x7]
       if phys < 0x0080_0000
         @ram_words[(phys & 0x001F_FFFF) >> 2] = @regs[rt] & 0xFFFF_FFFF

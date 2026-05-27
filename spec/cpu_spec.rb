@@ -306,6 +306,7 @@ class CPUSpec < Minitest::Test
     # beq opcode 0x04, rs=0 rt=0 imm=1 -> 0x10000001
     @memory.write32(0x8000_0000, 0x10000001)
     @memory.write32(0x8000_0004, 0x24100000)  # addiu $s0,$zero,0
+    @memory.write32(0x8000_0080, 0x0800_0000)  # dummy non-zero IRQ vector
 
     @cpu.pc = 0x8000_0000
 
@@ -330,4 +331,5 @@ class CPUSpec < Minitest::Test
                  "EPC must point at the branch, not the delay slot"
     assert_equal 0x8000_0000, cop0.cause & 0x8000_0000, "CAUSE.BD must be set"
   end
+
 end

@@ -10,18 +10,23 @@
 RubyVM::YJIT.enable if defined?(RubyVM::YJIT.enable)
 
 require_relative "../lib/psx"
+require "set"
 
 bios_path = "SCPH1001.BIN"
+disc_path = nil
 cycles    = 50_000_000
 addr_list = []
 max_log   = 4000
+fast_boot = false
 
 args = ARGV.dup
 while (arg = args.shift)
   case arg
   when "-b", "--bios"   then bios_path = args.shift
+  when "-d", "--disc"   then disc_path = args.shift
   when "-c", "--cycles" then cycles = args.shift.gsub("_", "").to_i
   when "--max"          then max_log = args.shift.to_i
+  when "--fast-boot"    then fast_boot = true
   else
     arg.split(",").each { |a| addr_list << Integer(a, 16) }
   end
@@ -38,8 +43,9 @@ expanded = addr_list.flat_map do |a|
   end
 end
 addr_set = expanded.to_set
+watch_words = addr_list.map { |a| (a & 0x1FFF_FFFF) & ~3 }.to_set
 
-emu = PSX::Emulator.new(bios_path)
+emu = PSX::Emulator.new(bios_path, disc_path: disc_path)
 memory = emu.memory
 cpu = emu.cpu
 
@@ -77,9 +83,43 @@ memory.singleton_class.prepend(mod)
 original_step = cpu.method(:step)
 cpu.define_singleton_method(:step) do
   cycle += 1
+  old_pc = @pc
+  instruction = @memory.fetch32(old_pc)
+  if instruction
+    opcode = (instruction >> 26) & 0x3F
+    if (0x20..0x2E).cover?(opcode) || (0x30..0x3B).cover?(opcode)
+      rs = (instruction >> 21) & 0x1F
+      rt = (instruction >> 16) & 0x1F
+      imm = instruction & 0xFFFF
+      imm |= 0xFFFF_0000 if (imm & 0x8000) != 0
+      addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+      phys = addr & PSX::Memory::REGION_MASK[(addr >> 29) & 0x7]
+      size = case opcode
+             when 0x20, 0x24, 0x28 then 1
+             when 0x21, 0x25, 0x29 then 2
+             else 4
+             end
+      touched = (0...size).any? { |i| watch_words.include?(((phys + i) & 0x1FFF_FFFF) & ~3) }
+      if touched
+        store = [0x28, 0x29, 0x2A, 0x2B, 0x2E, 0x38, 0x39, 0x3A, 0x3B].include?(opcode)
+        op = {
+          0x20 => :cpu_lb,  0x21 => :cpu_lh,  0x22 => :cpu_lwl, 0x23 => :cpu_lw,
+          0x24 => :cpu_lbu, 0x25 => :cpu_lhu, 0x26 => :cpu_lwr,
+          0x28 => :cpu_sb,  0x29 => :cpu_sh,  0x2A => :cpu_swl, 0x2B => :cpu_sw,
+          0x2E => :cpu_swr, 0x30 => :cpu_lwc0, 0x31 => :cpu_lwc1, 0x32 => :cpu_lwc2,
+          0x33 => :cpu_lwc3, 0x38 => :cpu_swc0, 0x39 => :cpu_swc1, 0x3A => :cpu_swc2,
+          0x3B => :cpu_swc3
+        }[opcode] || :cpu_mem
+        value = store ? @regs[rt] : 0
+        log << [cycle, store ? :W : :R, op, phys, value & 0xFFFF_FFFF, old_pc & 0xFFFF_FFFF]
+        log.shift while log.size > max_log
+      end
+    end
+  end
   original_step.call
 end
 
+emu.fast_boot_from_disc if fast_boot
 emu.run(steps: cycles)
 
 log.each do |cyc, kind, op, addr, val, pc|

@@ -194,4 +194,20 @@ class GPUSpec < Minitest::Test
     assert_equal 0, fb[:rgba].getbyte(2), "Blue channel should be 0"
     assert_equal 255, fb[:rgba].getbyte(3), "Alpha channel should be 255"
   end
+
+  def test_framebuffer_reads_24bit_display_pixels
+    @gpu.gp1(0x08_00_00_10) # 24-bit display mode
+    @gpu.vram[0] = 0x2211
+    @gpu.vram[1] = 0x4433
+    @gpu.vram[2] = 0x6655
+
+    fb = @gpu.framebuffer
+
+    assert_equal 0x33, fb[:rgba].getbyte(0), "First pixel red should come from byte 2"
+    assert_equal 0x22, fb[:rgba].getbyte(1), "First pixel green should come from byte 1"
+    assert_equal 0x11, fb[:rgba].getbyte(2), "First pixel blue should come from byte 0"
+    assert_equal 0x66, fb[:rgba].getbyte(4), "Second pixel red should come from byte 5"
+    assert_equal 0x55, fb[:rgba].getbyte(5), "Second pixel green should come from byte 4"
+    assert_equal 0x44, fb[:rgba].getbyte(6), "Second pixel blue should come from byte 3"
+  end
 end

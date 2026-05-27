@@ -39,6 +39,7 @@ module PSX
     # during SeekL, so when ReadN starts streaming the first INT1 lands
     # almost immediately. Subsequent sectors space out at the real cadence.
     CYCLES_FIRST_SECTOR  = 30_000
+    WHOLE_SECTOR_FILTER_PREFIX_BYTES = 44
 
     DEFAULT_STAT_DISC    = SF_MOTOR_ON
     DEFAULT_STAT_NO_DISC = SF_SHELL_OPEN
@@ -68,7 +69,10 @@ module PSX
       @response = []
       @irq_enable = 0
       @irq_flags = 0
-      @pending = []          # [[delay_cycles, int_type, [bytes...]], ...]
+      @pending = []          # [[delay_cycles, sequence, group, int_type, [bytes...]], ...]
+      @pending_seq = 0
+      @pending_group = 0
+      @current_response_group = 0
       @data_buffer = nil     # binary string with current sector's user data
       @data_pos = 0
       @seek_lba = 0
@@ -174,9 +178,19 @@ module PSX
     def tick(cycles)
       # 1. Pending responses (INT3/INT5 from commands).
       if !@pending.empty? && @irq_flags == 0
-        @pending[0][0] -= cycles
-        if @pending[0][0] <= 0
-          _, int_type, data = @pending.shift
+        @pending.each { |entry| entry[0] -= cycles }
+        ready_index = nil
+        @pending.each_with_index do |entry, i|
+          next if entry[0] > 0
+          next if @pending.any? { |earlier| earlier[2] == entry[2] && earlier[1] < entry[1] }
+          if ready_index.nil? || entry[0] < @pending[ready_index][0] ||
+             (entry[0] == @pending[ready_index][0] && entry[1] < @pending[ready_index][1])
+            ready_index = i
+          end
+        end
+
+        if ready_index
+          _, _, _, int_type, data = @pending.delete_at(ready_index)
           @response.clear
           @response.concat(data)
           @irq_flags = int_type & 0x07
@@ -193,6 +207,10 @@ module PSX
       return unless @reading && @disc && @irq_flags == 0
       @sector_cycles -= cycles
       return if @sector_cycles > 0
+      if unread_sector_blocks_stream?
+        @sector_cycles = 1
+        return
+      end
 
       lba = @read_lba
       track = @disc.track_for_lba(lba)
@@ -215,7 +233,7 @@ module PSX
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
-      @sector_cycles += @speed_2x ? CYCLES_PER_SECTOR_2X : CYCLES_PER_SECTOR_1X
+      @sector_cycles += next_sector_cycles
       # INT1 immediately: sector ready.
       @response.clear
       @response.push(@stat)
@@ -256,7 +274,26 @@ module PSX
     end
 
     def queue_response(delay_cycles, int_type, data)
-      @pending << [delay_cycles.zero? ? CYCLES_PER_RESPONSE : delay_cycles, int_type, data.dup]
+      @pending_seq += 1
+      @pending << [
+        delay_cycles.zero? ? CYCLES_PER_RESPONSE : delay_cycles,
+        @pending_seq,
+        @current_response_group,
+        int_type,
+        data.dup
+      ]
+    end
+
+    def unread_sector_blocks_stream?
+      return false unless @data_buffer && @data_pos < @data_buffer.bytesize
+
+      # In whole-sector mode games may read only a small XA/STR prefix to
+      # filter unwanted sectors, or read that prefix plus the user payload and
+      # leave the ECC tail unread. Only a deeper partially consumed payload
+      # means the next INT1 would overwrite data the game is actively draining.
+      return @data_pos > WHOLE_SECTOR_FILTER_PREFIX_BYTES && @data_pos < 2060 if @whole_sector
+
+      true
     end
 
     def execute_command(cmd)
@@ -267,6 +304,9 @@ module PSX
         $stderr.puts format("[cdrom] cmd=%02X params=[%s] stat=%02X",
                             cmd, params.map { |p| "%02X" % p }.join(" "), @stat)
       end
+
+      @pending_group += 1
+      @current_response_group = @pending_group
 
       case cmd
       when 0x01 then cmd_getstat
@@ -408,7 +448,11 @@ module PSX
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
-      @pending << [CYCLES_FIRST_SECTOR, 1, [@stat]]
+      queue_response(CYCLES_FIRST_SECTOR, 1, [@stat])
+    end
+
+    def next_sector_cycles
+      @speed_2x ? CYCLES_PER_SECTOR_2X : CYCLES_PER_SECTOR_1X
     end
 
     def cmd_init
