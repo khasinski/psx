@@ -10,11 +10,9 @@ module PSX
   # arrives within ~81 polling iterations the BIOS treats the slot as empty
   # and moves on.
   #
-  # We model just enough of this to convince the BIOS that a digital pad is
-  # connected in slot 1 (so we get past PadAutoPolling and into the shell)
-  # and that nothing is in slot 2 / memory-card port (so the BIOS doesn't
-  # wait for an empty memcard to respond). The host SDL keyboard feeds the
-  # button state through a callback supplied at construction time.
+  # We model a digital pad and a formatted memory card in slot 1. The host
+  # SDL keyboard feeds the button state through a callback supplied at
+  # construction time.
   class SIO0
     # JOY_STAT (0x1F801044) bits
     STAT_TX_READY_1   = 1 << 0  # TX FIFO has room
@@ -39,9 +37,190 @@ module PSX
     DIGITAL_PAD_IDHI  = 0x41
     PAD_READY_BYTE    = 0x5A
 
+    class MemoryCard
+      FRAME_SIZE = 128
+      FRAME_COUNT = 1024
+      SIZE = FRAME_SIZE * FRAME_COUNT
+
+      attr_reader :data
+
+      def initialize
+        @data = Array.new(SIZE, 0xFF)
+        format!
+        @flag = 0x08
+        reset_transfer
+      end
+
+      def reset_transfer
+        @state = :idle
+        @address = 0
+        @offset = 0
+        @checksum = 0
+        @last_byte = 0
+      end
+
+      def transfer(byte)
+        tx = byte & 0xFF
+        response = 0xFF
+        ack = false
+
+        case @state
+        when :idle
+          if tx == 0x81
+            response = 0xFF
+            ack = true
+            @state = :command
+          end
+        when :command
+          response = @flag
+          case tx
+          when 0x52
+            ack = true
+            @state = :read_card_id1
+          when 0x57
+            ack = true
+            @state = :write_card_id1
+          when 0x53
+            ack = true
+            @state = :get_id_card_id1
+          else
+            @state = :idle
+          end
+        when :read_card_id1
+          response, ack, @state = 0x5A, true, :read_card_id2
+        when :read_card_id2
+          response, ack, @state = 0x5D, true, :read_address_msb
+        when :read_address_msb
+          @address = ((tx << 8) | (@address & 0x00FF)) & 0x03FF
+          response, ack, @state = 0x00, true, :read_address_lsb
+        when :read_address_lsb
+          @address = ((@address & 0xFF00) | tx) & 0x03FF
+          @offset = 0
+          response, ack, @state = @last_byte, true, :read_ack1
+        when :read_ack1
+          response, ack, @state = 0x5C, true, :read_ack2
+        when :read_ack2
+          response, ack, @state = 0x5D, true, :read_confirm_msb
+        when :read_confirm_msb
+          response, ack, @state = (@address >> 8) & 0xFF, true, :read_confirm_lsb
+        when :read_confirm_lsb
+          response, ack, @state = @address & 0xFF, true, :read_data
+        when :read_data
+          response = @data[@address * FRAME_SIZE + @offset]
+          @checksum = @offset.zero? ? (((@address >> 8) & 0xFF) ^ (@address & 0xFF) ^ response) : (@checksum ^ response)
+          @offset += 1
+          ack = true
+          if @offset == FRAME_SIZE
+            @offset = 0
+            @state = :read_checksum
+          end
+        when :read_checksum
+          response, ack, @state = @checksum & 0xFF, true, :read_end
+        when :read_end
+          response, ack, @state = 0x47, false, :idle
+
+        when :write_card_id1
+          response, ack, @state = 0x5A, true, :write_card_id2
+        when :write_card_id2
+          response, ack, @state = 0x5D, true, :write_address_msb
+        when :write_address_msb
+          @address = ((tx << 8) | (@address & 0x00FF)) & 0x03FF
+          response, ack, @state = 0x00, true, :write_address_lsb
+        when :write_address_lsb
+          @address = ((@address & 0xFF00) | tx) & 0x03FF
+          @offset = 0
+          response, ack, @state = @last_byte, true, :write_data
+        when :write_data
+          @checksum = @offset.zero? ? (((@address >> 8) & 0xFF) ^ (@address & 0xFF) ^ tx) : (@checksum ^ tx)
+          @data[@address * FRAME_SIZE + @offset] = tx
+          @flag &= ~0x08
+          @offset += 1
+          response = @last_byte
+          ack = true
+          if @offset == FRAME_SIZE
+            @offset = 0
+            @state = :write_checksum
+          end
+        when :write_checksum
+          response, ack, @state = @last_byte, true, :write_ack1
+        when :write_ack1
+          response, ack, @state = 0x5C, true, :write_ack2
+        when :write_ack2
+          response, ack, @state = 0x5D, true, :write_end
+        when :write_end
+          response, ack, @state = 0x47, false, :idle
+
+        when :get_id_card_id1
+          response, ack, @state = 0x5A, true, :get_id_card_id2
+        when :get_id_card_id2
+          response, ack, @state = 0x5D, true, :get_id_ack1
+        when :get_id_ack1
+          response, ack, @state = 0x5C, true, :get_id_ack2
+        when :get_id_ack2
+          response, ack, @state = 0x5D, true, :get_id1
+        when :get_id1
+          response, ack, @state = 0x04, true, :get_id2
+        when :get_id2
+          response, ack, @state = 0x00, true, :get_id3
+        when :get_id3
+          response, ack, @state = 0x00, true, :get_id4
+        when :get_id4
+          response, ack, @state = 0x80, false, :idle
+        end
+
+        @last_byte = tx
+        [response & 0xFF, ack]
+      end
+
+      private
+
+      def format!
+        @data.fill(0xFF)
+        write_frame(0, formatted_header_frame)
+        (1...16).each do |frame|
+          bytes = Array.new(FRAME_SIZE, 0)
+          bytes[0] = 0xA0
+          bytes[8] = 0xFF
+          bytes[9] = 0xFF
+          bytes[0x7F] = checksum(bytes)
+          write_frame(frame, bytes)
+        end
+        (16...36).each do |frame|
+          bytes = Array.new(FRAME_SIZE, 0)
+          bytes[0, 4] = [0xFF, 0xFF, 0xFF, 0xFF]
+          bytes[8] = 0xFF
+          bytes[9] = 0xFF
+          bytes[0x7F] = checksum(bytes)
+          write_frame(frame, bytes)
+        end
+        (36...63).each { |frame| write_frame(frame, Array.new(FRAME_SIZE, 0)) }
+        write_frame(63, @data[0, FRAME_SIZE])
+      end
+
+      def formatted_header_frame
+        bytes = Array.new(FRAME_SIZE, 0)
+        bytes[0] = "M".ord
+        bytes[1] = "C".ord
+        bytes[0x7F] = checksum(bytes)
+        bytes
+      end
+
+      def write_frame(frame, bytes)
+        base = frame * FRAME_SIZE
+        FRAME_SIZE.times { |i| @data[base + i] = bytes[i] & 0xFF }
+      end
+
+      def checksum(bytes)
+        bytes[0...0x7F].reduce(0) { |acc, b| acc ^ b } & 0xFF
+      end
+    end
+
+    attr_reader :memory_card
+
     def initialize(interrupts: nil, controller_state: -> { 0xFFFF })
       @interrupts = interrupts
       @controller_state = controller_state
+      @memory_card = MemoryCard.new
       reset_all
     end
 
@@ -52,6 +231,7 @@ module PSX
       @rx     = []
       @irq    = false   # JOY_STAT bit 9 (and source of IRQ_CONTROLLER)
       @device_step = 0  # 0 = waiting for select byte
+      @active_device = nil
       @pending_ack_cycles = nil  # countdown before /ACK pulse fires
       @ack_low_cycles = 0
     end
@@ -172,20 +352,20 @@ module PSX
     def transmit(byte)
       return unless (@ctrl & (CTRL_TXEN | CTRL_JOYN_OUTPUT)) == (CTRL_TXEN | CTRL_JOYN_OUTPUT)
 
-      # Only slot 1 has a device; slot 2 stays silent (no /ACK -> BIOS timeout)
+      # Only slot 1 has devices; slot 2 stays silent (no /ACK -> BIOS timeout)
       if (@ctrl & CTRL_SLOT) != 0
         @rx.push(0xFF)
         return
       end
 
-      response = device_step_byte(byte)
+      response, ack = device_step_byte(byte)
       @rx.push(response & 0xFF)
 
       # Schedule the /ACK pulse a few hundred cycles into the future. The
       # BIOS polls I_STAT bit 7 in a tight loop after issuing the TX, but it
       # first clears bit 7 between the TX and the poll -- firing immediately
       # would be wiped out by that clear, leaving the poll to spin forever.
-      if (@ctrl & CTRL_ACK_INT_EN) != 0 && !@ack_suppressed
+      if (@ctrl & CTRL_ACK_INT_EN) != 0 && ack
         @pending_ack_cycles = 500
       end
     end
@@ -196,40 +376,57 @@ module PSX
     #   step 2: TX 0x00  -> 0x5A (ready),     /ACK
     #   step 3: TX 0x00  -> buttons low,      /ACK
     #   step 4: TX 0x00  -> buttons high,     no /ACK (last byte -> BIOS knows end)
-    # Memory-card probe (TX 0x81 in step 0) aborts after the first byte so
-    # the BIOS sees "no memcard" via the no-/ACK timeout.
+    # Memory-card protocol starts with TX 0x81 and is routed to MemoryCard
+    # until that device finishes a command with no ACK.
     def device_step_byte(tx)
-      @ack_suppressed = false
+      if @active_device == :controller
+        response, ack = controller_step_byte(tx)
+        @active_device = nil unless ack
+        return [response, ack]
+      elsif @active_device == :memory_card
+        response, ack = @memory_card.transfer(tx)
+        @active_device = nil unless ack
+        return [response, ack]
+      end
+
+      if tx == 0x81
+        response, ack = @memory_card.transfer(tx)
+        @active_device = :memory_card if ack
+        return [response, ack]
+      end
+
+      response, ack = controller_step_byte(tx)
+      @active_device = :controller if ack
+      [response, ack]
+    end
+
+    def controller_step_byte(tx)
       case @device_step
       when 0
         if tx == 0x01
           @device_step = 1
-          0xFF
+          [0xFF, true]
         else
-          # TX 0x81 (memcard) or any other byte -> deselect, no further /ACK
           @device_step = 0
-          @ack_suppressed = true
-          0xFF
+          [0xFF, false]
         end
       when 1
         @device_step = 2
-        DIGITAL_PAD_IDHI
+        [DIGITAL_PAD_IDHI, true]
       when 2
         @device_step = 3
-        PAD_READY_BYTE
+        [PAD_READY_BYTE, true]
       when 3
         @device_step = 4
-        buttons & 0xFF
+        [buttons & 0xFF, true]
       when 4
         # Last byte of the transaction; no /ACK keeps the BIOS from polling
         # for a sixth byte.
         @device_step = 0
-        @ack_suppressed = true
-        (buttons >> 8) & 0xFF
+        [(buttons >> 8) & 0xFF, false]
       else
         @device_step = 0
-        @ack_suppressed = true
-        0xFF
+        [0xFF, false]
       end
     end
 
@@ -245,6 +442,8 @@ module PSX
         @pending_ack_cycles = nil
         @ack_low_cycles = 0
         @device_step = 0
+        @active_device = nil
+        @memory_card.reset_transfer
         @mode = 0
         @baud = 0
       end
@@ -256,12 +455,16 @@ module PSX
       # /JOYn rising edge -> a fresh transaction begins (BIOS will TX next).
       if (prev & CTRL_JOYN_OUTPUT) == 0 && (@ctrl & CTRL_JOYN_OUTPUT) != 0
         @device_step = 0
+        @active_device = nil
+        @memory_card.reset_transfer
         @rx.clear
       end
 
       # /JOYn falling edge -> deselect, reset protocol state.
       if (prev & CTRL_JOYN_OUTPUT) != 0 && (@ctrl & CTRL_JOYN_OUTPUT) == 0
         @device_step = 0
+        @active_device = nil
+        @memory_card.reset_transfer
       end
     end
 

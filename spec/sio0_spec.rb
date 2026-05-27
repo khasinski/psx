@@ -88,12 +88,41 @@ class SIO0Test < Minitest::Test
                  "no /ACK after the final protocol byte"
   end
 
-  def test_memcard_select_byte_does_not_ack
+  def test_memcard_get_id_sequence
     @irqs.instance_variable_set(:@stat, 0)
     tx(0x81)
     @sio.tick(1000)
-    refute (@irqs.stat & PSX::Interrupts::IRQ_CONTROLLER) != 0,
-           "memcard probe should not /ACK"
+    assert (@irqs.stat & PSX::Interrupts::IRQ_CONTROLLER) != 0,
+           "memcard select byte should /ACK"
+    assert_equal 0xFF, rx
+
+    tx(0x53); flag = rx
+    tx(0x00); id1 = rx
+    tx(0x00); id2 = rx
+    tx(0x00); ack1 = rx
+    tx(0x00); ack2 = rx
+    tx(0x00); b1 = rx
+    tx(0x00); b2 = rx
+    tx(0x00); b3 = rx
+    tx(0x00); b4 = rx
+
+    assert_equal 0x08, flag, "fresh formatted card reports no-write-yet flag"
+    assert_equal [0x5A, 0x5D, 0x5C, 0x5D, 0x04, 0x00, 0x00, 0x80],
+                 [id1, id2, ack1, ack2, b1, b2, b3, b4]
+  end
+
+  def test_memcard_read_formatted_header_frame
+    read = memcard_read_frame(0)
+
+    assert_equal "MC", read.byteslice(0, 2)
+    assert_equal read.bytes[0...0x7F].reduce(0) { |acc, b| acc ^ b }, read.getbyte(0x7F)
+  end
+
+  def test_memcard_write_then_read_frame
+    bytes = Array.new(128) { |i| i & 0xFF }
+    memcard_write_frame(5, bytes)
+
+    assert_equal bytes.pack("C*"), memcard_read_frame(5)
   end
 
   def test_slot2_does_not_respond
@@ -149,5 +178,61 @@ class SIO0Test < Minitest::Test
     select_slot_1
     tx(0x01)
     assert_equal 0xFF, rx, "after reset the protocol begins at step 0"
+  end
+
+  private
+
+  def reselect_slot_1
+    @sio.write16(0x4A, CTRL_TXEN | CTRL_ACK_INT_EN)
+    select_slot_1
+  end
+
+  def memcard_read_frame(frame)
+    reselect_slot_1
+    tx(0x81); rx
+    tx(0x52); rx
+    tx(0x00); rx # 5A
+    tx(0x00); rx # 5D
+    tx((frame >> 8) & 0xFF); rx
+    tx(frame & 0xFF); rx
+    tx(0x00); rx # 5C
+    tx(0x00); rx # 5D
+    tx(0x00); rx # address MSB echo
+    tx(0x00); rx # address LSB echo
+    data = 128.times.map do
+      tx(0x00)
+      rx
+    end
+    tx(0x00)
+    checksum = rx
+    tx(0x00)
+    end_byte = rx
+
+    expected_checksum = ((frame >> 8) & 0xFF) ^ (frame & 0xFF)
+    data.each { |b| expected_checksum ^= b }
+    assert_equal expected_checksum & 0xFF, checksum
+    assert_equal 0x47, end_byte
+
+    data.pack("C*")
+  end
+
+  def memcard_write_frame(frame, bytes)
+    reselect_slot_1
+    tx(0x81); rx
+    tx(0x57); rx
+    tx(0x00); rx # 5A
+    tx(0x00); rx # 5D
+    tx((frame >> 8) & 0xFF); rx
+    tx(frame & 0xFF); rx
+    bytes.each do |byte|
+      tx(byte)
+      rx
+    end
+    tx(bytes.reduce(((frame >> 8) & 0xFF) ^ (frame & 0xFF)) { |acc, b| acc ^ b })
+    rx
+    tx(0x00); rx # 5C
+    tx(0x00); rx # 5D
+    tx(0x00); end_byte = rx
+    assert_equal 0x47, end_byte
   end
 end
