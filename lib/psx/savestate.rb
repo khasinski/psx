@@ -307,7 +307,7 @@ module PSX
     CDROM_SCALAR_IVARS = %i[
       stat index irq_enable irq_flags data_pos seek_lba read_lba
       mode speed_2x xa_enabled xa_filter_file xa_filter_channel
-      reading want_seek whole_sector sector_cycles sectors_since_read
+      muted reading want_seek whole_sector sector_cycles sectors_since_read
       bfrd_active cdda_playing cdda_lba cdda_cycles
       last_sector_lba last_sector_header_valid
     ].freeze

@@ -378,6 +378,97 @@ class CDROMSpec < Minitest::Test
     assert_equal "DATA".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
   end
 
+  def test_mute_suppresses_xa_sink_but_still_decodes_stream
+    xa_payload = xa_adpcm_payload(first_word: 0x0000_0001)
+    data_payload = ("DATA" + "\x00" * 2044).b
+    audio_subheader = [0x12, 0x34, 0x44, 0x00]
+    data_subheader = [0x12, 0x34, 0x08, 0x00]
+    @cdrom.disc = build_disc([xa_payload, data_payload], subheaders: [audio_subheader, data_subheader])
+    decoded = []
+    decode_calls = 0
+    original_decode = @cdrom.method(:decode_xa_adpcm_sector)
+    @cdrom.define_singleton_method(:decode_xa_adpcm_sector) do |whole|
+      decode_calls += 1
+      original_decode.call(whole)
+    end
+    @cdrom.xa_adpcm_sink = ->(bytes) { decoded << bytes }
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0B)   # Cmd Mute
+    drain_response
+    @cdrom.write8(2, 0x40)   # SetMode params: bit 6 = XA enable
+    @cdrom.write8(1, 0x0E)
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+
+    assert drive_until_int(1, max_ticks: 40)
+    assert_equal 1, decode_calls
+    assert_empty decoded
+    assert_equal "DATA".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+  end
+
+  def test_demute_restores_xa_sink
+    xa_payload = xa_adpcm_payload(first_word: 0x0000_0001)
+    data_payload = ("DATA" + "\x00" * 2044).b
+    audio_subheader = [0x12, 0x34, 0x44, 0x00]
+    data_subheader = [0x12, 0x34, 0x08, 0x00]
+    @cdrom.disc = build_disc([xa_payload, data_payload], subheaders: [audio_subheader, data_subheader])
+    decoded = []
+    @cdrom.xa_adpcm_sink = ->(bytes) { decoded << bytes }
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0B)   # Cmd Mute
+    drain_response
+    @cdrom.write8(1, 0x0C)   # Cmd Demute
+    drain_response
+    @cdrom.write8(2, 0x40)   # SetMode params: bit 6 = XA enable
+    @cdrom.write8(1, 0x0E)
+    drain_response
+
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+
+    assert drive_until_int(1, max_ticks: 40)
+    assert_equal 1, decoded.length
+    assert_equal [4096, 4096], decoded.first.unpack("s<*")[0, 2]
+  end
+
+  def test_mute_suppresses_cdda_sink_without_stopping_playback
+    @cdrom.disc = build_audio_disc(sectors: 4)
+    cdda = []
+    @cdrom.cdda_sink = ->(bytes) { cdda << bytes }
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0B)   # Cmd Mute
+    drain_response
+    @cdrom.write8(2, 0x01)   # track 1
+    @cdrom.write8(1, 0x03)   # Cmd Play
+    drain_response
+
+    @cdrom.tick(PSX::CDROM::CYCLES_FIRST_SECTOR)
+    assert_empty cdda
+    assert_equal 1, @cdrom.instance_variable_get(:@cdda_lba)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0C)   # Cmd Demute
+    drain_response
+    @cdrom.tick(PSX::CDROM::CYCLES_PER_SECTOR_1X)
+
+    assert_equal 1, cdda.length
+    assert_equal 2352, cdda.first.bytesize
+  end
+
   def test_xa_filter_suppresses_mismatched_audio_sector_sink
     xa_payload = xa_adpcm_payload(first_word: 0x0000_0001)
     data_payload = ("DATA" + "\x00" * 2044).b
@@ -454,6 +545,24 @@ class CDROMSpec < Minitest::Test
     end
     tmp.close
     PSX::Disc.from_bin(tmp.path)
+  end
+
+  def build_audio_disc(sectors:)
+    track = Struct.new(:number, :lba_start, :lba_length, keyword_init: true) do
+      def audio? = true
+      def data? = false
+      def lba_end = lba_start + lba_length
+    end.new(number: 1, lba_start: 0, lba_length: sectors)
+
+    Object.new.tap do |disc|
+      disc.define_singleton_method(:tracks) { [track] }
+      disc.define_singleton_method(:track_count) { 1 }
+      disc.define_singleton_method(:total_sectors) { sectors }
+      disc.define_singleton_method(:track_for_lba) { |lba| lba >= 0 && lba < sectors ? track : nil }
+      disc.define_singleton_method(:read_audio_sector) do |lba|
+        lba >= 0 && lba < sectors ? ([lba & 0xFF].pack("C") + ("\x00" * 2351)).b : nil
+      end
+    end
   end
 
   def xa_adpcm_whole_sector(coding:, first_word:)

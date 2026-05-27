@@ -87,6 +87,7 @@ module PSX
       @xa_filter_file = 0
       @xa_filter_channel = 0
       @xa_last_samples = [0, 0, 0, 0]
+      @muted = false
       @reading = false
       @sector_cycles = 0
       @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
@@ -274,7 +275,7 @@ module PSX
           break
         end
         update_last_subq(@cdda_lba)
-        @cdda_sink&.call(bytes)
+        @cdda_sink&.call(bytes) unless @muted
         @cdda_lba += 1
         @cdda_cycles += period
       end
@@ -366,7 +367,8 @@ module PSX
         return
       end
 
-      @xa_adpcm_sink&.call(decode_xa_adpcm_sector(whole))
+      decoded = decode_xa_adpcm_sector(whole)
+      @xa_adpcm_sink&.call(decoded) unless @muted
     end
 
     def decode_xa_adpcm_chunks(chunks, stereo:, eight_bit:)
@@ -614,10 +616,12 @@ module PSX
     end
 
     def cmd_mute
+      @muted = true
       queue_response(0, 3, [@stat])
     end
 
     def cmd_demute
+      @muted = false
       queue_response(0, 3, [@stat])
     end
 
