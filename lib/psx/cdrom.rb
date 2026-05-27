@@ -33,6 +33,7 @@ module PSX
 
     ERROR_REASON_INVALID_COMMAND = 0x40
     ERROR_REASON_INVALID_ARGUMENT = 0x10
+    ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS = 0x20
     ERROR_REASON_NOT_READY = 0x80
 
     # Timing constants (in CPU cycles).
@@ -731,11 +732,22 @@ module PSX
     def cmd_test(params)
       sub = params[0]
       case sub
+      when 0x04
+        @stat |= SF_MOTOR_ON
+        queue_response(0, 3, [@stat])
+      when 0x05
+        queue_response(0, 3, [0x00, 0x00])
       when 0x20
         # Get BIOS date/version. SCPH1001-ish values.
         queue_response(0, 3, [0x94, 0x09, 0x19, 0xC0])
+      when 0x60
+        if params.size < 3
+          queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        else
+          queue_response(0, 3, [0x00])
+        end
       else
-        queue_response(0, 3, [@stat])
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_COMMAND])
       end
     end
 

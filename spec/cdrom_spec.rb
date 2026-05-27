@@ -266,6 +266,68 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::ERROR_REASON_INVALID_COMMAND, @cdrom.read8(1)
   end
 
+  def test_test_command_04_turns_motor_on
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x04)
+    @cdrom.write8(1, 0x19) # Test
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_NO_DISC | PSX::CDROM::SF_MOTOR_ON, @cdrom.read8(1)
+  end
+
+  def test_test_command_05_returns_scex_counters_without_stat
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x05)
+    @cdrom.write8(1, 0x19) # Test
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal [0x00, 0x00], 2.times.map { @cdrom.read8(1) }
+  end
+
+  def test_test_command_60_requires_two_address_bytes
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x60)
+    @cdrom.write8(1, 0x19) # Test
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_test_command_60_reads_memory_as_zero
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x60)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x19) # Test
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal 0x00, @cdrom.read8(1)
+  end
+
+  def test_test_command_unknown_returns_invalid_command
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x99)
+    @cdrom.write8(1, 0x19) # Test
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INVALID_COMMAND, @cdrom.read8(1)
+  end
+
   def test_get_tn_errors_when_drive_not_ready
     enable_irqs(0x1F)
     @cdrom.write8(0, 0)
