@@ -417,8 +417,13 @@ module PSX
           [0xFF, false]
         end
       when 1
-        @device_step = 2
-        [DIGITAL_PAD_IDHI, true]
+        if tx == 0x42
+          @device_step = 2
+          [DIGITAL_PAD_IDHI, true]
+        else
+          @device_step = 0
+          [0xFF, false]
+        end
       when 2
         @device_step = 3
         [PAD_READY_BYTE, true]

@@ -64,6 +64,21 @@ class SIO0Test < Minitest::Test
     assert_equal 0xFF & ~(1 << 6), btn_hi
   end
 
+  def test_digital_pad_rejects_unknown_controller_command
+    tx(0x01)
+    assert_equal 0xFF, rx
+    @sio.tick(1000)
+    @sio.write16(0x4A, CTRL_TXEN | CTRL_JOYN_OUTPUT | CTRL_ACK | CTRL_ACK_INT_EN)
+    @sio.write16(0x4A, CTRL_TXEN | CTRL_JOYN_OUTPUT | CTRL_ACK_INT_EN)
+    @irqs.instance_variable_set(:@stat, 0)
+
+    tx(0x43)
+    @sio.tick(1000)
+
+    assert_equal 0xFF, rx
+    assert_equal 0, @irqs.stat & PSX::Interrupts::IRQ_CONTROLLER
+  end
+
   def test_irq_fires_on_each_acked_byte
     @irqs.write_stat(0)  # clear any pending bits via write 0
     @irqs.write_mask(PSX::Interrupts::IRQ_CONTROLLER)
