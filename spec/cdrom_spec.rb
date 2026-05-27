@@ -150,6 +150,32 @@ class CDROMSpec < Minitest::Test
                  "user data should start at offset 12 in whole_sector mode"
   end
 
+  def test_getloc_l_returns_last_delivered_sector_header_and_subheader
+    user_data = ("LOC!" + "\x00" * 2044).b
+    @cdrom.disc = build_one_sector_disc(user_data)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)   # SetLoc LBA 0
+    drain_response
+    @cdrom.write8(1, 0x06)   # ReadN
+    drain_response
+    @cdrom.write8(1, 0x09)   # Pause, delivering the in-flight sector
+    drive_until_int(1, max_ticks: 200)
+    ack_response
+    drive_until_int(3, max_ticks: 20)
+    ack_response
+    drive_until_int(2, max_ticks: 100)
+    ack_response
+
+    @cdrom.write8(1, 0x10)   # GetlocL
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+
+    assert_equal [0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
+  end
+
   # CD-XA streams are often software-filtered by file/channel. Rage Racer
   # reads a 44-byte XA/STR prefix for unwanted sectors and leaves the payload
   # unread; that must not stall the sector stream forever.

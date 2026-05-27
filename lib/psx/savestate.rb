@@ -264,6 +264,7 @@ module PSX
       stat index irq_enable irq_flags data_pos seek_lba read_lba
       reading want_seek whole_sector sector_cycles sectors_since_read
       bfrd_active cdda_playing cdda_lba cdda_cycles
+      last_sector_lba last_sector_header_valid
     ].freeze
 
     def state_snapshot
@@ -273,6 +274,8 @@ module PSX
       h[:response]   = @response.dup
       h[:pending]    = @pending.map(&:dup)
       h[:data_buffer] = @data_buffer&.dup
+      h[:last_sector_header] = @last_sector_header.dup
+      h[:last_sector_subheader] = @last_sector_subheader.dup
       h
     end
 
@@ -282,6 +285,8 @@ module PSX
       @response   = s[:response].dup
       @pending    = s[:pending].map(&:dup)
       @data_buffer = s[:data_buffer]&.dup
+      @last_sector_header = s[:last_sector_header]&.dup || [0, 0, 0, 0]
+      @last_sector_subheader = s[:last_sector_subheader]&.dup || [0, 0, 0, 0]
     end
   end
 

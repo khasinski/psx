@@ -84,6 +84,10 @@ module PSX
       @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
       @bfrd_active = false
       @want_seek = false
+      @last_sector_lba = 0
+      @last_sector_header = [0, 0, 0, 0]
+      @last_sector_subheader = [0, 0, 0, 0]
+      @last_sector_header_valid = false
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
 
       # CDDA (redbook audio) playback state. Independent of @reading so a
@@ -229,7 +233,7 @@ module PSX
       # ECC — instead of the 2048-byte user-data slice. CD-XA streaming
       # (FMV, in-game music) needs this so the game can read the
       # sub-header to filter which channel it wants.
-      @data_buffer = @whole_sector ? @disc.read_whole_sector(lba) : @disc.read_data(lba)
+      @data_buffer = read_sector_payload(lba)
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
@@ -294,6 +298,15 @@ module PSX
       return @data_pos > WHOLE_SECTOR_FILTER_PREFIX_BYTES && @data_pos < 2060 if @whole_sector
 
       true
+    end
+
+    def read_sector_payload(lba)
+      whole = @disc.read_whole_sector(lba)
+      @last_sector_lba = lba
+      @last_sector_header = whole.byteslice(0, 4).bytes
+      @last_sector_subheader = whole.byteslice(4, 4).bytes
+      @last_sector_header_valid = true
+      @whole_sector ? whole : whole.byteslice(12, 2048)
     end
 
     def execute_command(cmd)
@@ -444,7 +457,7 @@ module PSX
       lba = @read_lba
       track = @disc.track_for_lba(lba)
       return if track.nil? || track.audio?
-      @data_buffer = @whole_sector ? @disc.read_whole_sector(lba) : @disc.read_data(lba)
+      @data_buffer = read_sector_payload(lba)
       @data_pos = 0
       @read_lba += 1
       @sectors_since_read += 1
@@ -495,9 +508,12 @@ module PSX
     end
 
     def cmd_getloc_l
-      m, s, f = Disc.lba_to_msf(@read_lba)
       # nocash: GetlocL returns 8 bytes: amm, ass, asect, mode, file, channel, sm, ci
-      queue_response(0, 3, [Disc.to_bcd(m), Disc.to_bcd(s), Disc.to_bcd(f), 0x02, 0, 0, 0, 0])
+      if @last_sector_header_valid
+        queue_response(0, 3, @last_sector_header + @last_sector_subheader)
+      else
+        queue_response(0, 5, [SF_ERROR | @stat, 0x80])
+      end
     end
 
     def cmd_getloc_p
