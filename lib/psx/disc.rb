@@ -146,6 +146,11 @@ module PSX
     def initialize(tracks)
       @tracks = tracks
       @total_sectors = tracks.map(&:lba_end).max
+      @region_code = nil
+    end
+
+    def region_code
+      @region_code ||= detect_region_code
     end
 
     def track_count
@@ -271,6 +276,40 @@ module PSX
 
     def self.from_bcd(byte)
       ((byte >> 4) * 10) + (byte & 0x0F)
+    end
+
+    private
+
+    def detect_region_code
+      region_from_system_area || region_from_boot_serial || :ntsc_u
+    end
+
+    def region_from_system_area
+      raw = read_sector(4)
+      return :ntsc_u if raw.include?("Sony Computer Entertainment Amer  ica")
+      return :ntsc_j if raw.include?("Sony Computer Entertainment Inc.")
+      return :pal if raw.include?("Sony Computer Entertainment Euro pe")
+
+      nil
+    rescue StandardError
+      nil
+    end
+
+    def region_from_boot_serial
+      return nil unless defined?(ISO9660)
+
+      cnf = ISO9660.new(self).read_file("SYSTEM.CNF")
+      boot = cnf[/^BOOT\s*=\s*(.+?)(?:;\d+)?\s*$/i, 1]
+      return nil unless boot
+
+      serial = File.basename(boot.strip.sub(/\Acdrom:[\\\/]*/i, "")).downcase
+      return :pal if serial.start_with?("sces", "sced", "sles", "sled")
+      return :ntsc_j if serial.start_with?("scps", "slps", "slpm", "sczs", "papx")
+      return :ntsc_u if serial.start_with?("scus", "slus")
+
+      nil
+    rescue StandardError
+      nil
     end
   end
 end

@@ -811,10 +811,18 @@ module PSX
         queue_response(CYCLES_PER_RESPONSE * 2, 5, [0x11, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
       else
         # Licensed mode-2 disc response per nocash:
-        # INT3(stat); INT2(stat, 00h, 20h, 00h, "SCEA")
+        # INT3(stat); INT2(stat, 00h, 20h, 00h, "SCE?")
         queue_response(0, 3, [@stat])
         queue_response(CYCLES_PER_RESPONSE * 2, 2,
-                       [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41])
+                       [0x02, 0x00, 0x20, 0x00] + get_id_region_string.bytes)
+      end
+    end
+
+    def get_id_region_string
+      case @disc.respond_to?(:region_code) ? @disc.region_code : :ntsc_u
+      when :ntsc_j then "SCEI"
+      when :pal then "SCEE"
+      else "SCEA"
       end
     end
 

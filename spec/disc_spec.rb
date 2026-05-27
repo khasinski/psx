@@ -130,4 +130,19 @@ class DiscSpec < Minitest::Test
       disc.close
     end
   end
+
+  def test_region_code_detects_pal_license_string
+    Dir.mktmpdir do |dir|
+      payloads = Array.new(5) { ("\x00" * 2048).b }
+      bin = make_bin(dir, payloads)
+      File.open(bin, "r+b") do |f|
+        f.seek(4 * SECTOR_SIZE)
+        f.write("          Licensed  by          Sony Computer Entertainment Euro pe")
+      end
+
+      disc = PSX::Disc.open(bin)
+      assert_equal :pal, disc.region_code
+      disc.close
+    end
+  end
 end

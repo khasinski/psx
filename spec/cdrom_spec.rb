@@ -459,6 +459,21 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::ERROR_REASON_INVALID_ARGUMENT, @cdrom.read8(1)
   end
 
+  def test_get_id_returns_disc_region_string
+    @cdrom.disc = disc_with_region(:pal)
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x1A) # GetID
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    ack_response
+
+    assert drive_until_int(2, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+    assert_equal [0x02, 0x00, 0x20, 0x00] + "SCEE".bytes, bytes
+  end
+
   def test_getparam_returns_mode_and_xa_filter
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 
@@ -755,6 +770,12 @@ class CDROMSpec < Minitest::Test
       disc.define_singleton_method(:read_audio_sector) do |lba|
         lba >= 0 && lba < sectors ? ([lba & 0xFF].pack("C") + ("\x00" * 2351)).b : nil
       end
+    end
+  end
+
+  def disc_with_region(region)
+    Object.new.tap do |disc|
+      disc.define_singleton_method(:region_code) { region }
     end
   end
 
