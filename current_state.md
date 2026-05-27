@@ -7,6 +7,14 @@ Snapshot of where the emulator is and what we just spent time on.
 2026-05-27 sixth update:
 
 - Additional continuation after the sixth update:
+  - Fixed MDEC control writes with reset+DMA enable bits. DuckStation applies
+    the DMA enable bits from the same MDEC1 write after soft reset; Ruby now
+    does the same instead of returning immediately after reset.
+    Commit: `8d0cc8f Apply MDEC DMA enables after reset`.
+  - Added CD-ROM Forward/Backward command handling. Commands `0x04`/`0x05`
+    now validate as zero-parameter commands, return not-ready INT5 unless
+    CDDA playback is active, and ACK while playing, matching DuckStation's
+    command path. Commit: `09e9f61 Handle CDROM scan commands`.
   - Fixed MDEC signed colour output. 24-bit/15-bit colour conversion now
     honors command bit 26: signed output no longer receives the unsigned
     +128 bias. Commit: `c412ed7 Honor signed MDEC colour output`.
@@ -24,6 +32,10 @@ Snapshot of where the emulator is and what we just spent time on.
       `317 runs, 797 assertions, 0 failures`.
     - After CD-ROM GetlocP fallback: full suite passed
       `317 runs, 797 assertions, 0 failures`.
+    - After MDEC reset+DMA enable: full suite passed
+      `318 runs, 798 assertions, 0 failures`.
+    - After CD-ROM Forward/Backward: full suite passed
+      `320 runs, 805 assertions, 0 failures`.
 
 - Added DuckStation-backed SPU DMA request status behavior:
   - `SPUSTAT` bits 7/9 now report a DMA write request when SPUCNT transfer
