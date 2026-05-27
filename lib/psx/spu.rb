@@ -21,6 +21,8 @@ module PSX
     ENDX_LOW          = 0xD9C
     ENDX_HIGH         = 0xD9E
     SPU_IRQ_ADDR      = 0xDA4
+    MAIN_VOL_LEFT     = 0xD80
+    MAIN_VOL_RIGHT    = 0xD82
     CD_AUDIO_VOL_LEFT = 0xDB0
     CD_AUDIO_VOL_RIGHT = 0xDB2
     CYCLES_PER_SAMPLE = 768
@@ -62,6 +64,8 @@ module PSX
       @key_off = 0
       @endx = 0
       @voice_active = 0
+      @main_left_volume = 0
+      @main_right_volume = 0
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
       @cd_audio_fifo = []
@@ -98,6 +102,8 @@ module PSX
       when ENDX_LOW          then @endx & 0xFFFF
       when ENDX_HIGH         then (@endx >> 16) & 0xFFFF
       when SPU_IRQ_ADDR      then @irq_addr
+      when MAIN_VOL_LEFT     then @main_left_volume
+      when MAIN_VOL_RIGHT    then @main_right_volume
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
@@ -163,6 +169,10 @@ module PSX
         drain_fifo if mode == MODE_MANUAL && prev_mode != MODE_MANUAL
       when SPUDTC
         @dtc = v
+      when MAIN_VOL_LEFT
+        @main_left_volume = v
+      when MAIN_VOL_RIGHT
+        @main_right_volume = v
       when CD_AUDIO_VOL_LEFT
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
@@ -341,6 +351,8 @@ module PSX
         right_sum += apply_volume(cd_right, signed16(@cd_audio_right_volume))
       end
 
+      left_sum = apply_volume(clamp16(left_sum), signed16(@main_left_volume))
+      right_sum = apply_volume(clamp16(right_sum), signed16(@main_right_volume))
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
     end
 

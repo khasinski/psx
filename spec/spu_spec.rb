@@ -131,6 +131,8 @@ class SPUSpec < Minitest::Test
   end
 
   def test_tick_outputs_decoded_voice_pcm_to_sink
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x7FFF)
     @spu.write16(0xC00 + 0x00, 0x7FFF) # voice 0 left volume
     @spu.write16(0xC00 + 0x02, 0x4000) # voice 0 right volume
     @spu.write16(0xC00 + 0x04, 0x1000)
@@ -170,6 +172,8 @@ class SPUSpec < Minitest::Test
   def test_cd_audio_mixes_when_spucnt_cd_audio_enable_is_set
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x7FFF)
     @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x4000)
     @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x2000)
     @spu.queue_cd_audio([4000, -4000].pack("s<*"))
@@ -177,7 +181,24 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::SPUCNT, 0x0001)
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
-    assert_equal [2000, -1000], frames.first
+    assert_in_delta 2000, frames.first[0], 1
+    assert_in_delta(-1000, frames.first[1], 1)
+  end
+
+  def test_main_volume_scales_final_spu_output
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x4000)
+    @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x2000)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x7FFF)
+    @spu.queue_cd_audio([4000, -4000].pack("s<*"))
+
+    @spu.write16(PSX::SPU::SPUCNT, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_in_delta 2000, frames.first[0], 1
+    assert_in_delta(-1000, frames.first[1], 1)
   end
 
   def test_cd_audio_queue_is_not_consumed_when_spucnt_cd_audio_is_disabled

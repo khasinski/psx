@@ -211,6 +211,8 @@ module PSX
         cnt: @cnt, stat: @stat, dtc: @dtc,
         key_on: @key_on, key_off: @key_off, endx: @endx,
         voice_active: @voice_active,
+        main_left_volume: @main_left_volume,
+        main_right_volume: @main_right_volume,
         cd_audio_left_volume: @cd_audio_left_volume,
         cd_audio_right_volume: @cd_audio_right_volume,
         cd_audio_fifo: @cd_audio_fifo.dup,
@@ -231,6 +233,8 @@ module PSX
       @key_off = s[:key_off] || 0
       @endx = s[:endx] || 0
       @voice_active = s[:voice_active] || 0
+      @main_left_volume = s[:main_left_volume] || 0
+      @main_right_volume = s[:main_right_volume] || 0
       @cd_audio_left_volume = s[:cd_audio_left_volume] || 0
       @cd_audio_right_volume = s[:cd_audio_right_volume] || 0
       @cd_audio_fifo = s[:cd_audio_fifo]&.dup || []
