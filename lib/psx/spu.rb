@@ -23,6 +23,8 @@ module PSX
     SPU_IRQ_ADDR      = 0xDA4
     MAIN_VOL_LEFT     = 0xD80
     MAIN_VOL_RIGHT    = 0xD82
+    PITCH_MOD_LOW     = 0xD90
+    PITCH_MOD_HIGH    = 0xD92
     CD_AUDIO_VOL_LEFT = 0xDB0
     CD_AUDIO_VOL_RIGHT = 0xDB2
     CYCLES_PER_SAMPLE = 768
@@ -44,6 +46,7 @@ module PSX
       :current_block_flags,
       :sample_index,
       :sample_counter,
+      :last_volume,
       keyword_init: true
     )
 
@@ -66,6 +69,7 @@ module PSX
       @voice_active = 0
       @main_left_volume = 0
       @main_right_volume = 0
+      @pitch_modulation_enable = 0
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
       @cd_audio_fifo = []
@@ -81,7 +85,8 @@ module PSX
           decoded_samples: [],
           current_block_flags: 0,
           sample_index: 0,
-          sample_counter: 0
+          sample_counter: 0,
+          last_volume: 0
         )
       end
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
@@ -104,6 +109,8 @@ module PSX
       when SPU_IRQ_ADDR      then @irq_addr
       when MAIN_VOL_LEFT     then @main_left_volume
       when MAIN_VOL_RIGHT    then @main_right_volume
+      when PITCH_MOD_LOW     then @pitch_modulation_enable & 0xFFFF
+      when PITCH_MOD_HIGH    then (@pitch_modulation_enable >> 16) & 0xFFFF
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
       when SPUCNT            then @cnt
       when SPUDTC            then @dtc
@@ -173,6 +180,10 @@ module PSX
         @main_left_volume = v
       when MAIN_VOL_RIGHT
         @main_right_volume = v
+      when PITCH_MOD_LOW
+        @pitch_modulation_enable = (@pitch_modulation_enable & 0xFFFF_0000) | v
+      when PITCH_MOD_HIGH
+        @pitch_modulation_enable = (@pitch_modulation_enable & 0x0000_FFFF) | (v << 16)
       when CD_AUDIO_VOL_LEFT
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
@@ -324,11 +335,13 @@ module PSX
         next if (@voice_active & (1 << voice_index)).zero?
 
         voice = @voices[voice_index]
-        pitch = [read16(0xC00 + voice_index * 0x10 + 0x04), 0x3FFF].min
+        pitch = modulated_pitch(voice_index, read16(0xC00 + voice_index * 0x10 + 0x04))
+        pitch = [pitch, 0x3FFF].min
         next if pitch.zero?
 
         sample = voice.decoded_samples[voice.sample_index] || 0
         volume = apply_volume(sample, voice.adsr_volume)
+        voice.last_volume = volume
         left_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10)))
         right_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10 + 0x02)))
         tick_voice_adsr(voice_index)
@@ -354,6 +367,17 @@ module PSX
       left_sum = apply_volume(clamp16(left_sum), signed16(@main_left_volume))
       right_sum = apply_volume(clamp16(right_sum), signed16(@main_right_volume))
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
+    end
+
+    def pitch_modulation_enabled?(voice_index)
+      voice_index.positive? && (@pitch_modulation_enable & (1 << voice_index)) != 0
+    end
+
+    def modulated_pitch(voice_index, pitch)
+      return pitch unless pitch_modulation_enabled?(voice_index)
+
+      previous_volume = [[@voices[voice_index - 1].last_volume || 0, -0x8000].max, 0x7FFF].min
+      ((signed16(pitch) * (previous_volume + 0x8000)) >> 15) & 0xFFFF
     end
 
     def decode_voice_block(voice_index)

@@ -201,6 +201,55 @@ class SPUSpec < Minitest::Test
     assert_in_delta(-1000, frames.first[1], 1)
   end
 
+  def test_pitch_modulation_registers_read_back
+    @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0002)
+    @spu.write16(PSX::SPU::PITCH_MOD_HIGH, 0x0040)
+
+    assert_equal 0x0002, @spu.read16(PSX::SPU::PITCH_MOD_LOW)
+    assert_equal 0x0040, @spu.read16(PSX::SPU::PITCH_MOD_HIGH)
+  end
+
+  def test_pitch_modulation_ignores_voice_zero_bit
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    write_adpcm_block(0, flags: 0x00)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    voice = @spu.instance_variable_get(:@voices)[0]
+    assert_equal 0, voice.sample_counter
+    assert_equal 1, voice.sample_index
+  end
+
+  def test_pitch_modulation_uses_previous_voice_last_volume
+    voices = @spu.instance_variable_get(:@voices)
+    voices[0].last_volume = 0x7FFF
+    voices[1].decoded_samples = Array.new(28, 0)
+    @spu.instance_variable_set(:@voice_active, 0x0002)
+    @spu.write16(0xC00 + 0x10 + 0x04, 0x1000)
+    @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0002)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x0FFF, voices[1].sample_counter
+    assert_equal 1, voices[1].sample_index
+  end
+
+  def test_pitch_modulation_can_reduce_voice_step
+    voices = @spu.instance_variable_get(:@voices)
+    voices[0].last_volume = -0x4000
+    voices[1].decoded_samples = Array.new(28, 0)
+    @spu.instance_variable_set(:@voice_active, 0x0002)
+    @spu.write16(0xC00 + 0x10 + 0x04, 0x1000)
+    @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0002)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x0800, voices[1].sample_counter
+    assert_equal 0, voices[1].sample_index
+  end
+
   def test_cd_audio_queue_is_not_consumed_when_spucnt_cd_audio_is_disabled
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
