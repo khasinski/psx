@@ -165,10 +165,10 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x7C00, @gpu.vram[2]
   end
 
-  def test_textured_rectangle_honors_draw_mode_x_flip
+  def test_textured_rectangle_draw_mode_x_flip_bit_does_not_reverse_sampling
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_08_02)
-    @gpu.gp0(0xE1_00_11_10) # direct-color texture page at Y=256, x-flip set
+    @gpu.gp0(0xE1_00_11_10) # direct-color texture page at Y=256, bit 12 set
     @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 8] = 0x001F
     @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 9] = 0x03E0
     @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 10] = 0x7C00
@@ -178,15 +178,15 @@ class GPURegressionSpec < Minitest::Test
     @gpu.gp0(0x0000_00_08)
     @gpu.gp0(0x00_01_00_03)
 
-    assert_equal 0x7C00, @gpu.vram[0], "first pixel should sample the rectangle's right edge"
-    assert_equal 0x03E0, @gpu.vram[1], "middle pixel should sample the middle texel"
-    assert_equal 0x001F, @gpu.vram[2], "last pixel should sample the rectangle's left edge"
+    assert_equal 0x001F, @gpu.vram[0], "DuckStation steps rectangle U forward even when bit 12 is set"
+    assert_equal 0x03E0, @gpu.vram[1]
+    assert_equal 0x7C00, @gpu.vram[2]
   end
 
-  def test_textured_rectangle_honors_draw_mode_y_flip
+  def test_textured_rectangle_draw_mode_y_flip_bit_does_not_reverse_sampling
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_08_02)
-    @gpu.gp0(0xE1_00_21_10) # direct-color texture page at Y=256, y-flip set
+    @gpu.gp0(0xE1_00_21_10) # direct-color texture page at Y=256, bit 13 set
     @gpu.vram[(256 + 8) * PSX::GPU::VRAM_WIDTH] = 0x001F
     @gpu.vram[(256 + 9) * PSX::GPU::VRAM_WIDTH] = 0x03E0
     @gpu.vram[(256 + 10) * PSX::GPU::VRAM_WIDTH] = 0x7C00
@@ -196,9 +196,9 @@ class GPURegressionSpec < Minitest::Test
     @gpu.gp0(0x0000_08_00)
     @gpu.gp0(0x00_03_00_01)
 
-    assert_equal 0x7C00, @gpu.vram[0], "first row should sample the rectangle's bottom edge"
-    assert_equal 0x03E0, @gpu.vram[PSX::GPU::VRAM_WIDTH], "middle row should sample the middle texel"
-    assert_equal 0x001F, @gpu.vram[PSX::GPU::VRAM_WIDTH * 2], "last row should sample the rectangle's top edge"
+    assert_equal 0x001F, @gpu.vram[0], "DuckStation steps rectangle V forward even when bit 13 is set"
+    assert_equal 0x03E0, @gpu.vram[PSX::GPU::VRAM_WIDTH]
+    assert_equal 0x7C00, @gpu.vram[PSX::GPU::VRAM_WIDTH * 2]
   end
 
   def test_rectangle_positions_are_11bit_signed

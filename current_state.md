@@ -6,6 +6,22 @@ Snapshot of where the emulator is and what we just spent time on.
 
 2026-05-28 latest continuation:
 
+- Removed the earlier rectangle texture-flip behavior. That code was based on
+  a Rage-title hypothesis; DuckStation's current software and hardware
+  rectangle paths do not consume draw-mode bits 12/13 when stepping sprite
+  U/V coordinates, and instead sample rectangles forward from the command
+  texcoord. Ruby now matches that behavior.
+- Reworked the GPU regression specs for E1 bits 12/13 to assert
+  DuckStation-backed forward rectangle sampling rather than mirrored sampling.
+- Verification for the rectangle sampling change:
+  - Focused GPU regression spec passed: `14 runs, 41 assertions, 0 failures`.
+  - Focused GPU spec passed: `15 runs, 37 assertions, 0 failures`.
+  - Full suite passed: `348 runs, 883 assertions, 0 failures`.
+  - Rage Europe smoke to 2.8B cycles with Start held from 1.0B reached the
+    title and attract path. `conformance-shots/rage-eu-rect-no-flip-title/ridge-012.png`
+    shows the full Rage Racer title logo and `PRESS START`; `ridge-014.png`
+    shows the in-engine attract scene.
+
 - Fixed 24-bit GPU display scanout byte order. DuckStation's software and
   hardware scanout paths read 24-bit VRAM bytes as R/G/B; Ruby's framebuffer
   extractor was interpreting the same bytes as B/G/R. This left the now-RGB
