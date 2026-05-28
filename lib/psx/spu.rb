@@ -220,7 +220,7 @@ module PSX
         key_off(v << 16)
       when SPU_IRQ_ADDR
         @irq_addr = v
-        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
+        check_late_ram_irqs if irq_enabled?
       when SPU_TRANSFER_ADDR
         @transfer_addr = (v * 8) & (RAM_SIZE - 1)
         @current_addr = @transfer_addr
@@ -250,7 +250,7 @@ module PSX
         unless irq_enabled?
           @stat &= ~(1 << 6)
         else
-          trigger_ram_irq if irq_transfer_match?(@current_addr)
+          check_late_ram_irqs
         end
         drain_fifo if mode == MODE_MANUAL && prev_mode != MODE_MANUAL
         update_dma_request_flags
@@ -388,6 +388,23 @@ module PSX
     def trigger_ram_irq
       @stat |= (1 << 6)
       @interrupts&.request(Interrupts::IRQ_SPU)
+    end
+
+    def check_late_ram_irqs
+      if irq_transfer_match?(@current_addr)
+        trigger_ram_irq
+        return
+      end
+
+      @voices.each do |voice|
+        next if voice.decoded_samples.empty?
+
+        ram_address = (voice.current_address * 8) & (RAM_SIZE - 1)
+        if irq_transfer_match?(ram_address) || irq_transfer_match?(ram_address + 8)
+          trigger_ram_irq
+          return
+        end
+      end
     end
 
     def key_on(mask)

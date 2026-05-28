@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's late SPU RAM IRQ checks for decoded voices:
+  - Enabling IRQ9 or writing the IRQ address now scans the current transfer
+    pointer plus active voices with decoded ADPCM samples.
+  - Active voice checks compare both the current ADPCM block byte address and
+    the next block address, matching DuckStation's `CheckForLateRAMIRQs`.
+- Verification:
+  - Focused SPU spec passed: `53 runs, 134 assertions, 0 failures`.
+  - Full suite passed: `388 runs, 1025 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed coverage for SPU capture-buffer RAM IRQs:
   - Capture-buffer writes now have an explicit regression proving they trigger
     SPU IRQ9 when `irq_address * 8` matches the capture buffer write address,
