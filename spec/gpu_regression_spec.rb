@@ -111,6 +111,21 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x8001, @gpu.vram[0], "texture bit 15 should be copied into the framebuffer"
   end
 
+  def test_reserved_texture_mode_samples_direct_color
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_01_01)
+    @gpu.gp0(0xE1_00_01_90) # reserved texture mode at Y=256; DuckStation aliases direct color
+
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x001F
+
+    @gpu.gp0(0x65_7F_7F_7F) # raw textured variable rectangle
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_01_00_01)
+
+    assert_equal 0x001F, @gpu.vram[0]
+  end
+
   def test_textured_polygon_tpage_updates_following_rectangle_texture_page
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_40_40)

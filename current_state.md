@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's reserved direct texture mode:
+  - GPU texture mode `3` now aliases direct 15/16-bit texture sampling instead
+    of returning transparent texels, matching DuckStation's
+    `Reserved_Direct16Bit` handling.
+  - Added a raw textured rectangle regression for the reserved mode.
+- Verification:
+  - Focused GPU regression spec passed: `17 runs, 44 assertions, 0 failures`.
+  - Full suite passed: `405 runs, 1079 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's pending-key repeat-address write behavior:
   - A voice repeat-address write between KEY_ON and the next SPU sample now
     keeps the voice in its first-block loop-start window, instead of treating

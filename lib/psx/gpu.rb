@@ -1275,13 +1275,11 @@ module PSX
         clut_addr = clut_y * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)
         @vram[clut_addr] || 0
 
-      when 2  # 15-bit direct
+      when 2, 3  # 15-bit direct; mode 3 is reserved but aliases direct color
         texel_x = tex_page_x + u
         texel_y = tex_page_y + v
         @vram[(texel_y % VRAM_HEIGHT) * VRAM_WIDTH + (texel_x % VRAM_WIDTH)] || 0
 
-      else
-        0
       end
     end
 
