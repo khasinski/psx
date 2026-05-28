@@ -31,10 +31,29 @@ later entries have fixed.
   - SCPH1001 region detection as `:ntsc_u`.
   - Retail BIOS fast-boot eligibility for matching and mismatched disc
     regions.
-- Verification:
+  - Verification:
   - Focused BIOS spec passed: `8 runs, 14 assertions, 0 failures`.
   - Focused emulator spec passed: `7 runs, 9 assertions, 0 failures`.
   - Full suite passed: `460 runs, 1265 assertions, 0 failures`.
+
+2026-05-28 Rage Grand Prix repro status:
+
+- Re-ran a dense title-state input script from `tmp/rage-eu-2p4b.state` on
+  the current tree after restoring fast boot:
+  - Start at 2.45B absolute cycles, then repeated Cross taps every 200M
+    cycles from 2.8B through 4.2B, plus Start at 4.4B.
+  - Captures were written to `tmp/rage-grandprix-current-dense/`.
+  - This script is not a valid repro for the user's manual Grand Prix path:
+    it cycles through attract/GP splash screens and ends at
+    `ridge-048.png` showing `MISTRAL GP`, not the race-start path or the
+    reported stuck `NOW LOADING` screen.
+- Current reliable evidence:
+  - Fresh fast-boot FMV is coherent in the headless harness.
+  - Saved post-loading race-start state still reaches gameplay/pause.
+  - The exact manual new-Grand-Prix loading hang is still not reproduced by
+    the automated input scripts. A save state from the SDL/manual path at the
+    bad loading screen would be the strongest next artifact to inspect CD-ROM,
+    MDEC, GPU, and PC state around the real failure.
 
 2026-05-28 CD-ROM 2x CDDA sample stride:
 
