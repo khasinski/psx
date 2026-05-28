@@ -10,6 +10,15 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU ADSR register side effects:
+  - Writing ADSR low/high (`VxADSR1/2`) while a voice is active now rebuilds
+    the live ADSR envelope instead of only updating the register shadow.
+  - Writing the ADSR current-volume register now updates the live voice
+    volume used by subsequent samples.
+- Verification:
+  - Focused SPU spec passed: `34 runs, 72 assertions, 0 failures`.
+  - Full suite passed: `369 runs, 963 assertions, 0 failures`.
+
 - Added DuckStation-style GPU block DMA completion timing:
   - GPU block DMA now transfers data immediately but keeps CHCR busy until a
     RAM access delay of `words + ceil(words / 16)` cycles elapses, matching

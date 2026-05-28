@@ -175,6 +175,28 @@ class SPUSpec < Minitest::Test
     assert_equal 0, @spu.read16(0xC00 + 0x0C)
   end
 
+  def test_active_adsr_low_write_updates_attack_envelope
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    @spu.write16(0xC00 + 0x08, 0x7F00)
+    write_adpcm_block(0, flags: 0x00, first_data_byte: 0x11)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    @spu.write16(0xC00 + 0x08, 0x0000)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x3800, @spu.read16(0xC00 + 0x0C)
+  end
+
+  def test_adsr_current_volume_write_updates_live_voice_volume
+    @spu.write16(0xC00 + 0x04, 0x0001)
+    write_adpcm_block(0, flags: 0x00, first_data_byte: 0x11)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    @spu.write16(0xC00 + 0x0C, 0x4000)
+
+    assert_equal 0x4000, @spu.instance_variable_get(:@voices)[0].adsr_volume
+  end
+
   def test_cd_audio_mixes_when_spucnt_cd_audio_enable_is_set
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }

@@ -219,6 +219,8 @@ module PSX
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
         @cd_audio_right_volume = v
+      else
+        handle_voice_register_write(offset, v)
       end
     end
 
@@ -351,6 +353,21 @@ module PSX
         adsr_offset = 0xC00 + voice * 0x10 + 0x0C
         @regs.setbyte(adsr_offset - 0xC00, 0)
         @regs.setbyte(adsr_offset - 0xC00 + 1, 0)
+      end
+    end
+
+    def handle_voice_register_write(offset, value)
+      voice_offset = offset - 0xC00
+      return unless voice_offset >= 0 && voice_offset < 24 * 0x10
+
+      voice_index = voice_offset / 0x10
+      reg = voice_offset & 0x0F
+      voice = @voices[voice_index]
+      case reg
+      when 0x08, 0x0A
+        update_adsr_envelope(voice_index) unless voice.adsr_phase == :off
+      when 0x0C
+        voice.adsr_volume = signed16(value)
       end
     end
 
