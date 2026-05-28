@@ -1091,9 +1091,9 @@ module PSX
             tr = (texel & 0x001F)
             tg = (texel & 0x03E0) >> 5
             tb = (texel & 0x7C00) >> 10
-            fr5 = ((tr * br) >> 7); fr5 = 0x1F if fr5 > 0x1F
-            fg5 = ((tg * bg_c) >> 7); fg5 = 0x1F if fg5 > 0x1F
-            fb5 = ((tb * bb) >> 7); fb5 = 0x1F if fb5 > 0x1F
+            fr5 = modulated_texel_channel(tr, br, px, py)
+            fg5 = modulated_texel_channel(tg, bg_c, px, py)
+            fb5 = modulated_texel_channel(tb, bb, px, py)
           end
 
           # Texel STP bit (bit 15) gates semi-transparency on a per-pixel
@@ -1312,6 +1312,18 @@ module PSX
       dither_channel_to_5bit((texel_5bit * color_8bit) >> 4, x, y)
     end
 
+    def modulated_texel_channel(texel_5bit, color_8bit, x, y)
+      value = (texel_5bit * color_8bit) >> 4
+      if (@status & STAT_DITHER) != 0
+        dither_channel_to_5bit(value, x, y)
+      else
+        # DuckStation's no-dither path still indexes the dither LUT at
+        # matrix coordinate [2][3], whose bias is +1.
+        rounded = (value + 1) >> 3
+        rounded > 0x1F ? 0x1F : rounded
+      end
+    end
+
     def interp_color(c0, c1, t)
       {
         r: (c0[:r] + (c1[:r] - c0[:r]) * t).to_i.clamp(0, 255),
@@ -1493,15 +1505,9 @@ module PSX
             tr = (texel & 0x001F)
             tg = (texel & 0x03E0) >> 5
             tb = (texel & 0x7C00) >> 10
-            if (@status & STAT_DITHER) != 0
-              fr5 = dither_modulated_texel_channel(tr, br, x, y)
-              fg5 = dither_modulated_texel_channel(tg, bg_c, x, y)
-              fb5 = dither_modulated_texel_channel(tb, bb, x, y)
-            else
-              fr5 = ((tr * br) >> 7); fr5 = 0x1F if fr5 > 0x1F
-              fg5 = ((tg * bg_c) >> 7); fg5 = 0x1F if fg5 > 0x1F
-              fb5 = ((tb * bb) >> 7); fb5 = 0x1F if fb5 > 0x1F
-            end
+            fr5 = modulated_texel_channel(tr, br, x, y)
+            fg5 = modulated_texel_channel(tg, bg_c, x, y)
+            fb5 = modulated_texel_channel(tb, bb, x, y)
           end
 
           if stp_mode >= 0 && (texel & 0x8000) != 0

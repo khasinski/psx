@@ -169,6 +169,20 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x0000, @gpu.vram[0], "negative dither should keep the same modulated texel at zero"
   end
 
+  def test_modulated_textured_rectangle_uses_duckstation_no_dither_rounding
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_01_01)
+    @gpu.gp0(0xE1_00_01_10) # direct-color texture page at Y=256, dither disabled
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x001F
+
+    @gpu.gp0(0x64_00_00_04) # modulated textured variable rectangle, red=4
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_01_00_01)
+
+    assert_equal 0x0001, @gpu.vram[0], "DuckStation applies fixed no-dither rounding after texture modulation"
+  end
+
   def test_textured_draw_preserves_texel_mask_bit
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_10_10)

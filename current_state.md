@@ -8,6 +8,23 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 GPU texture modulation follow-up:
+
+- Matched DuckStation's no-dither textured modulation rounding:
+  - DuckStation multiplies a 5-bit texel channel by the 8-bit primitive color,
+    shifts to an intermediate value, then still runs it through the dither LUT.
+    When draw-mode dithering is disabled it uses fixed LUT coordinates `[2][3]`,
+    whose matrix bias is `+1`.
+  - The Ruby GPU previously used direct truncation (`texel * color >> 7`) for
+    non-dithered modulated textured rectangles/triangles. Very dark modulated
+    texels could therefore drop to zero where DuckStation rounds them up.
+  - Added a focused regression where a direct-color red texel modulated by
+    primitive red `4` must draw red `1`, not transparent black.
+- Verification:
+  - Focused GPU regression spec passed: `29 runs, 74 assertions, 0 failures`.
+  - Full suite passed: `431 runs, 1164 assertions, 0 failures`.
+  - Filtered GPU ps1-tests baseline passed: `TOTAL 3  OK 3  FAIL 0`.
+
 2026-05-28 handoff note for the next session:
 
 - The current committed tree includes the latest GPU/MDEC/SPU/CD-ROM fixes
