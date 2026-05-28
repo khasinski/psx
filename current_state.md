@@ -22,6 +22,10 @@ later entries have fixed.
   - Focused GPU regression spec passed: `27 runs, 70 assertions, 0 failures`.
   - Full suite passed: `416 runs, 1107 assertions, 0 failures`.
   - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+  - Rage Europe title-state smoke from `tmp/rage-eu-2p4b.state` completed to
+    3.0B absolute cycles with Start scripted from 2.45B to 2.5B; screenshot
+    `tmp/rage-current-gameplay-check/ridge-012.png` shows the in-engine tunnel
+    scene with coherent wall/road textures.
 
 - Matched DuckStation's odd-sized CPU-to-VRAM upload bounds:
   - GP0 A0 transfers now track remaining pixels separately from remaining
