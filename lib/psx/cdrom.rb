@@ -386,6 +386,7 @@ module PSX
 
     def unread_sector_blocks_stream?
       return false unless @data_buffer && @data_pos < @data_buffer.bytesize
+      return false unless @bfrd_active
 
       # In whole-sector mode games may read only a small XA/STR prefix to
       # filter unwanted sectors, or read that prefix plus the user payload and

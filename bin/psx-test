@@ -60,6 +60,7 @@ emu.run(steps: boot_cycles)
 
 captured = String.new
 auto_disc_swap = disc_path && File.basename(File.dirname(exe_path)) == "disc-swap"
+timing_test = File.basename(File.dirname(exe_path)) == "timing"
 auto_disc_opened = false
 auto_disc_closed = false
 handle_auto_disc_swap = lambda do
@@ -102,7 +103,8 @@ while remaining > 0 && !done
   done = true if captured.include?("Done.") ||
                  captured.include?("Test passed") ||
                  captured.include?("Test failed") ||
-                 (auto_disc_swap && captured.include?("> Disc detected"))
+                 (auto_disc_swap && captured.include?("> Disc detected")) ||
+                 (timing_test && captured.scan(/double-speed timing:/).length >= 5)
 end
 
 print captured

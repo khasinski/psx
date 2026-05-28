@@ -861,6 +861,29 @@ class CDROMSpec < Minitest::Test
     assert_equal "KEEP".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(12, 4)
   end
 
+  def test_unread_fifo_does_not_block_sector_irqs_while_bfrd_is_closed
+    @cdrom.disc = build_disc([
+      ("ONE!" + "\x00" * 2044).b,
+      ("TWO!" + "\x00" * 2044).b,
+    ])
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0); @cdrom.write8(2, 2); @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+
+    assert drive_until_int(1, max_ticks: 20)
+    assert_equal "ONE!".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+    ack_response
+
+    assert drive_until_int(1, max_ticks: 40),
+           "closed BFRD should allow timing-style tests to receive the next sector IRQ"
+    assert_equal "TWO!".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+  end
+
   def test_xa_enabled_realtime_audio_sectors_are_not_delivered_to_data_fifo
     audio_payload = ("\x00" * 2048).b
     data_payload = ("DATA" + "\x00" * 2044).b

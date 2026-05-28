@@ -68,6 +68,21 @@ Snapshot of where the emulator is and what we just spent time on.
   - `PSX_TEST_FILTER=cdrom/disc-swap PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue PSX_MAX_CYCLES=120000000 PSX_WALL_TIMEOUT=45 bin/_ps1tests-baseline`
     passed: `TOTAL 1  OK 1  FAIL 0`.
   - Full suite passed: `356 runs, 933 assertions, 0 failures`.
+- Fixed the `cdrom/timing` stall. The timing test waits for sector IRQs but
+  never opens BFRD or drains the data FIFO; Ruby was blocking the stream on an
+  unread normal-mode data buffer anyway. Streaming now only blocks on unread
+  sector data after BFRD has been opened, so IRQ-only timing loops keep
+  receiving sector interrupts.
+- Added a CD-ROM regression spec for closed-BFRD unread FIFO behavior.
+- `bin/psx-test` now stops `cdrom/timing` after the fifth double-speed timing
+  line, since the test has no explicit terminal marker and then loops.
+- Verification for `cdrom/timing`:
+  - Focused CD-ROM spec passed: `59 runs, 207 assertions, 0 failures`.
+  - `PSX_TEST_FILTER=cdrom/timing PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue PSX_MAX_CYCLES=500000000 PSX_WALL_TIMEOUT=180 bin/_ps1tests-baseline`
+    passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full CD-ROM baseline with the synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `357 runs, 937 assertions, 0 failures`.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
