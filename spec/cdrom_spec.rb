@@ -1245,6 +1245,53 @@ class CDROMSpec < Minitest::Test
     assert_equal [PSX::CDROM::DEFAULT_STAT_DISC, 0xA0, 0x00, 0x12, 0x34], bytes
   end
 
+  def test_setmode_speed_change_delays_active_read
+    @cdrom.disc = build_disc(Array.new(3) { |i| ("S%03d" % i) + ("\x00" * 2044) })
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+    assert drive_until_int(1, max_ticks: 20)
+    ack_response
+
+    @cdrom.write8(2, 0x80) # Switch to 2x while read stream is active.
+    @cdrom.write8(1, 0x0E)
+    drain_response
+
+    @cdrom.tick(PSX::CDROM::CYCLES_PER_SECTOR_1X)
+    assert_equal 0, @cdrom.instance_variable_get(:@irq_flags),
+                 "speed change should delay the next sector beyond the normal 1x interval"
+  end
+
+  def test_setmode_without_speed_change_does_not_delay_active_read
+    @cdrom.disc = build_disc(Array.new(3) { |i| ("S%03d" % i) + ("\x00" * 2044) })
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+    assert drive_until_int(1, max_ticks: 20)
+    ack_response
+
+    @cdrom.write8(2, 0x20) # Whole-sector only; speed bit remains 1x.
+    @cdrom.write8(1, 0x0E)
+    drain_response
+
+    @cdrom.tick(PSX::CDROM::CYCLES_PER_SECTOR_1X)
+    assert_equal 1, @cdrom.instance_variable_get(:@irq_flags)
+  end
+
   # CD-XA streams are often software-filtered by file/channel. Rage Racer
   # reads a 44-byte XA/STR prefix for unwanted sectors and leaves the payload
   # unread; that must not stall the sector stream forever.

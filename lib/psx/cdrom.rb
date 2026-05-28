@@ -41,6 +41,8 @@ module PSX
     CYCLES_PER_SECTOR_2X = CYCLES_PER_SECTOR_1X / 2
     CYCLES_PER_RESPONSE  = 20_000
     CYCLES_MOTOR_ON_RESPONSE = 400_000
+    CYCLES_SPEED_CHANGE_SINGLE_TO_DOUBLE = 20_321_280
+    CYCLES_SPEED_CHANGE_DOUBLE_TO_SINGLE = 23_708_160
     # First sector after a seek arrives quickly — the drive pre-buffers
     # during SeekL, so when ReadN starts streaming the first INT1 lands
     # almost immediately. Subsequent sectors space out at the real cadence.
@@ -895,10 +897,16 @@ module PSX
         return
       end
 
+      old_speed_2x = @speed_2x
       @mode = params[0] & 0xFF
       @speed_2x = (@mode & 0x80) != 0
       @whole_sector = (@mode & 0x20) != 0
       @xa_enabled = (@mode & 0x40) != 0
+      if @speed_2x != old_speed_2x
+        delay = @speed_2x ? CYCLES_SPEED_CHANGE_SINGLE_TO_DOUBLE : CYCLES_SPEED_CHANGE_DOUBLE_TO_SINGLE
+        @sector_cycles += delay if @reading
+        @cdda_cycles += delay if @cdda_playing
+      end
       queue_response(0, 3, [@stat])
     end
 

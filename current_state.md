@@ -8,6 +8,26 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM SetMode speed-change delay:
+
+- Matched DuckStation's active-read/play speed-change timing:
+  - When `SetMode` changes bit 7 while a data read or CDDA stream is active,
+    Ruby now delays the active sector timer by DuckStation's speed-change
+    window: 0.6s for 1x->2x and 0.7s for 2x->1x.
+  - Changing non-speed mode bits still updates mode immediately without
+    delaying the active sector timer.
+- Added focused CD-ROM regressions for:
+  - Switching to 2x during an active read not delivering the next sector at
+    the normal 1x interval.
+  - Changing only non-speed mode bits during an active read preserving normal
+    1x sector timing.
+- Verification:
+  - Focused CD-ROM spec passed: `81 runs, 297 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `454 runs, 1254 assertions, 0 failures`.
+
 2026-05-28 CD-ROM pending command cancellation:
 
 - Matched DuckStation's pending-command heuristic for lower-parameter command
