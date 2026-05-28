@@ -27,6 +27,30 @@ later entries have fixed.
   - Re-check the recent MDEC-out DMA pause and GPU DMA busy/timing changes,
     because both have direct plausibility for striped FMV or stalled streaming.
 
+2026-05-28 follow-up repro attempt:
+
+- Fresh current-commit Rage Europe fast-boot FMV smoke did not reproduce the
+  striped playback in the headless harness:
+  - Command used the Europe cue from `~/Downloads/Rage Racer (Europe)/...`,
+    fast-booted, ran to 900M cycles, and captured every 50M cycles into
+    `tmp/rage-current-fmv-repro/`.
+  - `ridge-016.png` at 800M and `ridge-018.png` at 900M show coherent 24-bit
+    FMV frames without visible striping.
+- Start-skip input also works in this harness:
+  - Fresh fast-boot with `start:300000000:1100000000` reached the Rage Racer
+    title by `tmp/rage-start-skip-current/ridge-008.png`.
+- The saved post-fix Grand Prix path also still reaches gameplay:
+  - Loading `tmp/rage-grandprix-seek-audio-4b.state`, pressing Cross on the
+    race-start menu, then pressing Start reached the pause menu at
+    `tmp/rage-racestart-current-from-state/ridge-020.png`.
+  - Loading `tmp/rage-eu-2p4b.state` and running a full scripted title/Grand
+    Prix path through 4.0B absolute cycles reached the gameplay pause menu at
+    `tmp/rage-grandprix-current-resmoke/ridge-032.png`.
+- This does not disprove the user-visible regressions; it means the current
+  headless scripts are not reproducing them. Next pass should either capture
+  the exact SDL/manual sequence as a save state near the bad frame/loading
+  stall, or add targeted instrumentation around the interactive run.
+
 2026-05-28 latest continuation:
 
 - Added full active-region coverage for the ps1-tests 24-bit MDEC frame path:
