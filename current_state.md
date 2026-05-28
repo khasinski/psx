@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's semi-transparent line blending:
+  - GP0 line and polyline commands now honor the semi-transparency opcode bit
+    and blend non-textured line pixels through the active E1 blend mode.
+  - Added a regression for the default half-add blend over an existing VRAM
+    background pixel.
+- Verification:
+  - Focused GPU regression spec passed: `24 runs, 59 assertions, 0 failures`.
+  - Full suite passed: `412 runs, 1094 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's modulated textured triangle dither:
   - Textured polygons with modulation now apply the draw-mode dither matrix
     after texture/color multiplication and before the final 5-bit channel

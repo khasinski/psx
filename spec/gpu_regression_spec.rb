@@ -139,6 +139,18 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x0001, @gpu.vram[3], "DuckStation dithers line primitives when E1 bit 9 is set"
   end
 
+  def test_semi_transparent_line_blends_with_background
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_00_00)
+    @gpu.vram[0] = 0x001F # red background
+
+    @gpu.gp0(0x42_00_FF_00) # semi-transparent flat green line
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x00_00_00_00)
+
+    assert_equal 0x01EF, @gpu.vram[0]
+  end
+
   def test_modulated_textured_triangle_applies_draw_mode_dither
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_20_08)

@@ -541,6 +541,7 @@ module PSX
     def gp0_line
       cmd = @current_cmd
       gouraud = (cmd & 0x10) != 0
+      semi_transparent = (cmd & 0x02) != 0
 
       c0 = @cmd_buffer[0]
       color0 = { r: c0 & 0xFF, g: (c0 >> 8) & 0xFF, b: (c0 >> 16) & 0xFF }
@@ -564,13 +565,14 @@ module PSX
       draw_line(
         x0 + @draw_offset_x, y0 + @draw_offset_y,
         x1 + @draw_offset_x, y1 + @draw_offset_y,
-        color0, color1, gouraud
+        color0, color1, gouraud, semi_transparent
       )
     end
 
     def gp0_polyline
       cmd = @current_cmd
       gouraud = (cmd & 0x10) != 0
+      semi_transparent = (cmd & 0x02) != 0
       return if @cmd_buffer.length < 3
 
       color0 = line_color(@cmd_buffer[0])
@@ -585,7 +587,7 @@ module PSX
           pos1 = line_point(@cmd_buffer[idx + 1])
           draw_line(pos0[:x] + @draw_offset_x, pos0[:y] + @draw_offset_y,
                     pos1[:x] + @draw_offset_x, pos1[:y] + @draw_offset_y,
-                    color0, color1, true)
+                    color0, color1, true, semi_transparent)
           color0 = color1
           pos0 = pos1
           idx += 2
@@ -593,7 +595,7 @@ module PSX
           pos1 = line_point(@cmd_buffer[idx])
           draw_line(pos0[:x] + @draw_offset_x, pos0[:y] + @draw_offset_y,
                     pos1[:x] + @draw_offset_x, pos1[:y] + @draw_offset_y,
-                    color0, color0, false)
+                    color0, color0, false, semi_transparent)
           pos0 = pos1
           idx += 1
         end
@@ -972,7 +974,7 @@ module PSX
     end
 
     # Software rendering
-    def draw_pixel(x, y, r, g, b, dither: false)
+    def draw_pixel(x, y, r, g, b, dither: false, semi: false)
       return if x < @draw_area_left || x > @draw_area_right
       return if y < @draw_area_top || y > @draw_area_bottom
       return if x < 0 || x >= VRAM_WIDTH || y < 0 || y >= VRAM_HEIGHT
@@ -983,14 +985,19 @@ module PSX
         return  # Masked pixel
       end
 
-      pixel =
-        if dither
-          dither_channel_to_5bit(r, x, y) |
-            (dither_channel_to_5bit(g, x, y) << 5) |
-            (dither_channel_to_5bit(b, x, y) << 10)
-        else
-          rgb_to_vram(r, g, b)
-        end
+      if dither
+        r5 = dither_channel_to_5bit(r, x, y)
+        g5 = dither_channel_to_5bit(g, x, y)
+        b5 = dither_channel_to_5bit(b, x, y)
+      else
+        r5 = (r >> 3) & 0x1F
+        g5 = (g >> 3) & 0x1F
+        b5 = (b >> 3) & 0x1F
+      end
+
+      r5, g5, b5 = stp_blend5(@vram[idx], r5, g5, b5, @semi_transparency) if semi
+
+      pixel = r5 | (g5 << 5) | (b5 << 10)
       pixel |= 0x8000 if @set_mask_bit
 
       @vram[idx] = pixel
@@ -1087,7 +1094,7 @@ module PSX
       end
     end
 
-    def draw_line(x0, y0, x1, y1, c0, c1, gouraud)
+    def draw_line(x0, y0, x1, y1, c0, c1, gouraud, semi = false)
       # Bresenham's line algorithm with optional color interpolation
       dx = (x1 - x0).abs
       dy = -(y1 - y0).abs
@@ -1110,7 +1117,7 @@ module PSX
           r, g, b = c0[:r], c0[:g], c0[:b]
         end
 
-        draw_pixel(x0, y0, r, g, b, dither: dither)
+        draw_pixel(x0, y0, r, g, b, dither: dither, semi: semi)
 
         break if x0 == x1 && y0 == y1
 
