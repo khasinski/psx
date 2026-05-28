@@ -10,6 +10,15 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU volume-sweep ticking:
+  - Main and per-voice volume registers in sweep mode now keep an envelope
+    and advance their current-volume levels once per produced SPU sample.
+  - Sweep state is included in save states.
+- Verification:
+  - Focused SPU spec passed: `39 runs, 80 assertions, 0 failures`.
+  - Full suite passed: `374 runs, 971 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU fixed-volume/current-volume behavior:
   - Main and per-voice volume writes now reset a separate current-volume
     level instead of using the raw register bits directly during mixing.
@@ -18,7 +27,6 @@ later entries have fixed.
     `0x8000`, and `0x7FFF` becomes `0xFFFE`.
   - Current main-volume reads (`0xDB8/0xDBA`) and current per-voice volume
     reads (`0xE00..0xE5E`) now expose those live levels.
-  - Dynamic sweep ticking is still a remaining SPU conformance gap.
 - Verification:
   - Focused SPU spec passed: `37 runs, 78 assertions, 0 failures`.
   - Full suite passed: `372 runs, 969 assertions, 0 failures`.

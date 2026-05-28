@@ -62,6 +62,10 @@ module PSX
       :ignore_loop_address,
       :left_volume,
       :right_volume,
+      :left_volume_envelope,
+      :right_volume_envelope,
+      :left_volume_sweep_active,
+      :right_volume_sweep_active,
       keyword_init: true
     )
 
@@ -86,6 +90,10 @@ module PSX
       @main_right_volume = 0
       @main_left_current_volume = 0
       @main_right_current_volume = 0
+      @main_left_volume_envelope = reset_volume_envelope(0, 0x7F, false, false, false)
+      @main_right_volume_envelope = reset_volume_envelope(0, 0x7F, false, false, false)
+      @main_left_volume_sweep_active = false
+      @main_right_volume_sweep_active = false
       @pitch_modulation_enable = 0
       @noise_mode_enable = 0
       @noise_count = 0
@@ -111,7 +119,11 @@ module PSX
           is_first_block: false,
           ignore_loop_address: false,
           left_volume: 0,
-          right_volume: 0
+          right_volume: 0,
+          left_volume_envelope: reset_volume_envelope(0, 0x7F, false, false, false),
+          right_volume_envelope: reset_volume_envelope(0, 0x7F, false, false, false),
+          left_volume_sweep_active: false,
+          right_volume_sweep_active: false
         )
       end
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
@@ -219,10 +231,12 @@ module PSX
         @dtc = v
       when MAIN_VOL_LEFT
         @main_left_volume = v
-        @main_left_current_volume = reset_volume_level(v, @main_left_current_volume)
+        @main_left_current_volume, @main_left_volume_envelope, @main_left_volume_sweep_active =
+          reset_volume_sweep(v, @main_left_current_volume)
       when MAIN_VOL_RIGHT
         @main_right_volume = v
-        @main_right_current_volume = reset_volume_level(v, @main_right_current_volume)
+        @main_right_current_volume, @main_right_volume_envelope, @main_right_volume_sweep_active =
+          reset_volume_sweep(v, @main_right_current_volume)
       when PITCH_MOD_LOW
         @pitch_modulation_enable = (@pitch_modulation_enable & 0xFFFF_0000) | v
       when PITCH_MOD_HIGH
@@ -387,9 +401,11 @@ module PSX
       voice = @voices[voice_index]
       case reg
       when 0x00
-        voice.left_volume = reset_volume_level(value, voice.left_volume)
+        voice.left_volume, voice.left_volume_envelope, voice.left_volume_sweep_active =
+          reset_volume_sweep(value, voice.left_volume)
       when 0x02
-        voice.right_volume = reset_volume_level(value, voice.right_volume)
+        voice.right_volume, voice.right_volume_envelope, voice.right_volume_sweep_active =
+          reset_volume_sweep(value, voice.right_volume)
       when 0x08, 0x0A
         update_adsr_envelope(voice_index) unless voice.adsr_phase == :off
       when 0x0C
@@ -442,6 +458,7 @@ module PSX
         voice.last_volume = volume
         left_sum += apply_volume(volume, voice.left_volume)
         right_sum += apply_volume(volume, voice.right_volume)
+        tick_voice_volume_sweeps(voice)
         tick_voice_adsr(voice_index)
 
         voice.sample_counter += pitch
@@ -465,6 +482,7 @@ module PSX
       left_sum = apply_volume(clamp16(left_sum), @main_left_current_volume)
       right_sum = apply_volume(clamp16(right_sum), @main_right_current_volume)
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
+      tick_main_volume_sweeps
     end
 
     def pitch_modulation_enabled?(voice_index)
@@ -656,12 +674,90 @@ module PSX
       (sample * volume) >> 15
     end
 
-    def reset_volume_level(register, current_level)
-      return current_level if (register & 0x8000) != 0
+    def reset_volume_sweep(register, current_level)
+      if (register & 0x8000).zero?
+        return [
+          fixed_volume_level(register),
+          reset_volume_envelope(0, 0x7F, false, false, false),
+          false,
+        ]
+      end
 
+      envelope = reset_volume_envelope(
+        register & 0x7F,
+        0x7F,
+        (register & (1 << 13)) != 0,
+        (register & (1 << 14)) != 0,
+        (register & (1 << 12)) != 0
+      )
+      [current_level, envelope, envelope[:counter_increment].positive?]
+    end
+
+    def fixed_volume_level(register)
       value = register & 0x7FFF
       value -= 0x8000 if (value & 0x4000) != 0
       value * 2
+    end
+
+    def tick_main_volume_sweeps
+      if @main_left_volume_sweep_active
+        @main_left_current_volume, @main_left_volume_sweep_active =
+          tick_volume_sweep(@main_left_current_volume, @main_left_volume_envelope)
+      end
+      return unless @main_right_volume_sweep_active
+
+      @main_right_current_volume, @main_right_volume_sweep_active =
+        tick_volume_sweep(@main_right_current_volume, @main_right_volume_envelope)
+    end
+
+    def tick_voice_volume_sweeps(voice)
+      if voice.left_volume_sweep_active
+        voice.left_volume, voice.left_volume_sweep_active =
+          tick_volume_sweep(voice.left_volume, voice.left_volume_envelope)
+      end
+      return unless voice.right_volume_sweep_active
+
+      voice.right_volume, voice.right_volume_sweep_active =
+        tick_volume_sweep(voice.right_volume, voice.right_volume_envelope)
+    end
+
+    def tick_volume_sweep(current_level, envelope)
+      increment = envelope[:counter_increment]
+      step = envelope[:step]
+
+      if envelope[:exponential]
+        if envelope[:decreasing]
+          step = (step * current_level) >> 15
+        elsif current_level >= 0x6000
+          rate = envelope[:rate]
+          if rate < 40
+            step >>= 2
+          elsif rate >= 44
+            increment >>= 2
+          else
+            step >>= 1
+            increment >>= 1
+          end
+        end
+      end
+
+      envelope[:counter] += increment
+      return [current_level, true] if (envelope[:counter] & 0x8000).zero?
+
+      envelope[:counter] = 0
+      new_level = current_level + step
+      if envelope[:decreasing]
+        if envelope[:phase_invert]
+          new_level = [[new_level, -32_768].max, 0].min
+        else
+          new_level = [new_level, 0].max
+        end
+        [new_level, new_level == 0]
+      else
+        new_level = [[new_level, -32_768].max, 32_767].min
+        active = new_level != (step.negative? ? -32_768 : 32_767)
+        [new_level, active]
+      end
     end
 
     def read_current_voice_volume(offset)

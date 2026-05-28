@@ -266,6 +266,27 @@ class SPUSpec < Minitest::Test
     assert_equal 0xFFFE, @spu.read16(PSX::SPU::CURRENT_VOICE_VOL_BASE + 2)
   end
 
+  def test_main_volume_sweep_ticks_current_volume
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x0000)
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x8000)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x3800, @spu.read16(PSX::SPU::CURRENT_MAIN_VOL_LEFT)
+  end
+
+  def test_voice_volume_sweep_ticks_current_volume
+    @spu.write16(0xC00, 0x0000)
+    @spu.write16(0xC00, 0x8000)
+    @spu.write16(0xC00 + 0x04, 0x0001)
+    write_adpcm_block(0, flags: 0x00)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x3800, @spu.read16(PSX::SPU::CURRENT_VOICE_VOL_BASE)
+  end
+
   def test_pitch_modulation_registers_read_back
     @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0002)
     @spu.write16(PSX::SPU::PITCH_MOD_HIGH, 0x0040)

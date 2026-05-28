@@ -219,6 +219,10 @@ module PSX
         main_right_volume: @main_right_volume,
         main_left_current_volume: @main_left_current_volume || 0,
         main_right_current_volume: @main_right_current_volume || 0,
+        main_left_volume_envelope: (@main_left_volume_envelope || reset_volume_envelope(0, 0x7F, false, false, false)).dup,
+        main_right_volume_envelope: (@main_right_volume_envelope || reset_volume_envelope(0, 0x7F, false, false, false)).dup,
+        main_left_volume_sweep_active: @main_left_volume_sweep_active || false,
+        main_right_volume_sweep_active: @main_right_volume_sweep_active || false,
         pitch_modulation_enable: @pitch_modulation_enable || 0,
         noise_mode_enable: @noise_mode_enable || 0,
         noise_count: @noise_count || 0,
@@ -248,6 +252,10 @@ module PSX
       @main_right_volume = s[:main_right_volume] || 0
       @main_left_current_volume = s[:main_left_current_volume] || 0
       @main_right_current_volume = s[:main_right_current_volume] || 0
+      @main_left_volume_envelope = (s[:main_left_volume_envelope] || reset_volume_envelope(0, 0x7F, false, false, false)).dup
+      @main_right_volume_envelope = (s[:main_right_volume_envelope] || reset_volume_envelope(0, 0x7F, false, false, false)).dup
+      @main_left_volume_sweep_active = s[:main_left_volume_sweep_active] || false
+      @main_right_volume_sweep_active = s[:main_right_volume_sweep_active] || false
       @pitch_modulation_enable = s[:pitch_modulation_enable] || 0
       @noise_mode_enable = s[:noise_mode_enable] || 0
       @noise_count = s[:noise_count] || 0
@@ -275,7 +283,11 @@ module PSX
             is_first_block: voice[:is_first_block] || false,
             ignore_loop_address: voice[:ignore_loop_address] || false,
             left_volume: voice[:left_volume] || 0,
-            right_volume: voice[:right_volume] || 0
+            right_volume: voice[:right_volume] || 0,
+            left_volume_envelope: (voice[:left_volume_envelope] || reset_volume_envelope(0, 0x7F, false, false, false)).dup,
+            right_volume_envelope: (voice[:right_volume_envelope] || reset_volume_envelope(0, 0x7F, false, false, false)).dup,
+            left_volume_sweep_active: voice[:left_volume_sweep_active] || false,
+            right_volume_sweep_active: voice[:right_volume_sweep_active] || false
           )
         end
       end
