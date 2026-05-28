@@ -300,8 +300,15 @@ class SPUSpec < Minitest::Test
 
   def test_tick_writes_spu_capture_buffers
     voices = @spu.instance_variable_get(:@voices)
-    voices[1].last_volume = 1111
-    voices[3].last_volume = -2222
+    voices[1].adsr_volume = 0x7FFF
+    voices[1].adsr_phase = :sustain
+    voices[1].decoded_samples = Array.new(28, 1112)
+    voices[3].adsr_volume = 0x7FFF
+    voices[3].adsr_phase = :sustain
+    voices[3].decoded_samples = Array.new(28, -2222)
+    @spu.instance_variable_set(:@voice_active, (1 << 1) | (1 << 3))
+    @spu.write16(0xC00 + 0x10 + 0x04, 0x0001)
+    @spu.write16(0xC00 + 0x30 + 0x04, 0x0001)
     @spu.queue_cd_audio([1234, -2345].pack("s<*"))
     @spu.write16(PSX::SPU::SPUCNT, 0x0001)
 
@@ -332,6 +339,16 @@ class SPUSpec < Minitest::Test
 
     assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
     assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
+  def test_inactive_voice_last_volume_clears_before_capture
+    voices = @spu.instance_variable_get(:@voices)
+    voices[1].last_volume = 1234
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0, @spu.send(:read_ram_s16, 0x800)
+    assert_equal 0, voices[1].last_volume
   end
 
   def test_external_volume_registers_read_back
@@ -649,9 +666,12 @@ class SPUSpec < Minitest::Test
 
   def test_pitch_modulation_uses_previous_voice_last_volume
     voices = @spu.instance_variable_get(:@voices)
-    voices[0].last_volume = 0x7FFF
+    voices[0].adsr_volume = 0x7FFF
+    voices[0].adsr_phase = :sustain
+    voices[0].decoded_samples = Array.new(28, 0x7FFF)
     voices[1].decoded_samples = Array.new(28, 0)
-    @spu.instance_variable_set(:@voice_active, 0x0002)
+    @spu.instance_variable_set(:@voice_active, 0x0003)
+    @spu.write16(0xC00 + 0x04, 0x0001)
     @spu.write16(0xC00 + 0x10 + 0x04, 0x1000)
     @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0002)
 
@@ -663,9 +683,12 @@ class SPUSpec < Minitest::Test
 
   def test_pitch_modulation_can_reduce_voice_step
     voices = @spu.instance_variable_get(:@voices)
-    voices[0].last_volume = -0x4000
+    voices[0].adsr_volume = 0x7FFF
+    voices[0].adsr_phase = :sustain
+    voices[0].decoded_samples = Array.new(28, -0x4000)
     voices[1].decoded_samples = Array.new(28, 0)
-    @spu.instance_variable_set(:@voice_active, 0x0002)
+    @spu.instance_variable_set(:@voice_active, 0x0003)
+    @spu.write16(0xC00 + 0x04, 0x0001)
     @spu.write16(0xC00 + 0x10 + 0x04, 0x1000)
     @spu.write16(PSX::SPU::PITCH_MOD_LOW, 0x0002)
 
@@ -743,6 +766,21 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
 
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
+  def test_irq9_enabled_samples_inactive_voice_addresses
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    voices = @spu.instance_variable_get(:@voices)
+    voices[0].current_address = 0x0200
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    write_adpcm_block(0x0200, flags: 0x00)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)
+
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
     assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
     assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0

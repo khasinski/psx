@@ -389,6 +389,10 @@ module PSX
       (@cnt & (1 << 6)) != 0 && (@stat & (1 << 6)).zero?
     end
 
+    def irq9_control_enabled?
+      (@cnt & (1 << 6)) != 0
+    end
+
     def irq_transfer_match?(addr)
       ((@irq_addr * 8) & (RAM_SIZE - 1)) == (addr & (RAM_SIZE - 1))
     end
@@ -521,9 +525,14 @@ module PSX
       cd_capture_right = 0
 
       24.times do |voice_index|
-        next if (@voice_active & (1 << voice_index)).zero?
-
         voice = @voices[voice_index]
+        voice_active = (@voice_active & (1 << voice_index)) != 0
+        unless voice_active || irq9_control_enabled?
+          voice.last_volume = 0
+          next
+        end
+
+        decode_voice_block(voice_index) if voice.decoded_samples.empty?
         pitch = modulated_pitch(voice_index, read16(0xC00 + voice_index * 0x10 + 0x04))
         pitch = [pitch, 0x3FFF].min
         next if pitch.zero?
@@ -533,14 +542,16 @@ module PSX
         voice.last_volume = volume
         left = apply_volume(volume, voice.left_volume)
         right = apply_volume(volume, voice.right_volume)
-        left_sum += left
-        right_sum += right
-        if reverb_enabled?(voice_index)
+        if voice_active
+          left_sum += left
+          right_sum += right
+        end
+        if voice_active && reverb_enabled?(voice_index)
           reverb_in_left += left
           reverb_in_right += right
         end
         tick_voice_volume_sweeps(voice)
-        tick_voice_adsr(voice_index)
+        tick_voice_adsr(voice_index) if voice_active
 
         voice.sample_counter += pitch
         while voice.sample_counter >= 0x1000
@@ -620,7 +631,11 @@ module PSX
         @voice_active &= ~mask if (voice.current_block_flags & 0x02).zero? && !noise_enabled?(voice_index)
       end
 
-      decode_voice_block(voice_index) if (@voice_active & mask) != 0
+      if (@voice_active & mask) != 0
+        decode_voice_block(voice_index)
+      else
+        voice.decoded_samples = []
+      end
     end
 
     def noise_enabled?(voice_index)

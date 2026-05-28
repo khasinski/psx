@@ -10,6 +10,21 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's IRQ9-driven sampling for inactive SPU voices:
+  - Inactive voices now clear stale `last_volume` during normal samples, so
+    capture buffers no longer preserve old voice 1/3 levels after a voice is
+    off.
+  - When SPUCNT IRQ9 is enabled, inactive voices still decode/advance ADPCM
+    blocks so RAM IRQs can fire from their current sample addresses, matching
+    DuckStation's `SampleVoice` path.
+  - Pitch-modulation coverage now uses an active previous voice, matching the
+    fact that inactive previous voices clear `last_volume` before later voices
+    are sampled.
+- Verification:
+  - Focused SPU spec passed: `59 runs, 149 assertions, 0 failures`.
+  - Full suite passed: `394 runs, 1040 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Extended scalar SPU reverb work-buffer coverage:
   - Added focused regressions proving SPUCNT reverb master enable controls
     whether the reverb comb/all-pass stage writes mix destinations back into
