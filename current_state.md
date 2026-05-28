@@ -107,6 +107,14 @@ Snapshot of where the emulator is and what we just spent time on.
     `PSX_TEST_DISC` is set now passes: `TOTAL 18  OK 18  FAIL 0`.
   - Full CD-ROM baseline with the synthetic disc remains separately covered:
     `TOTAL 3  OK 3  FAIL 0`.
+- Current Rage Europe smoke on the latest tree:
+  - Command:
+    `PSX_DISC="$HOME/Downloads/Rage Racer (Europe)/Rage Racer (Europe)/Rage Racer (Europe).cue" PSX_CYCLES=2800000000 PSX_CHUNK=200000000 PSX_START_AT_CYCLES=1000000000 PSX_OUT=conformance-shots/rage-eu-current-baseline mise exec -- ruby --yjit bin/_ridge-boot --fast-boot`
+  - Completed to 2.8B cycles without CPU errors.
+  - `conformance-shots/rage-eu-current-baseline/ridge-012.png` shows the full
+    Rage Racer title logo and `PRESS START`.
+  - `conformance-shots/rage-eu-current-baseline/ridge-014.png` reaches the
+    in-engine attract scene.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
