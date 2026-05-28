@@ -8,6 +8,29 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM DMA BFRD gating follow-up:
+
+- Matched DuckStation's CD-ROM DMA readiness more closely:
+  - DuckStation DMA reads only pull from a sector buffer when BFRD is set and
+    the current read buffer has unread bytes. Ruby's DMA retry path had been
+    checking only that a sector buffer existed; if channel 3 was ticked while
+    BFRD was closed, it could fill RAM with zero words and finish the DMA
+    before the game opened the data port.
+  - Added `CDROM#dma_data_ready?` for the DMA controller and made channel 3
+    wait for that instead of `data_fifo_has_data?`.
+  - CD-ROM byte/DMA reads now clear BFRD once the sector buffer is fully
+    consumed, matching DuckStation's `CheckForSectorBufferReadComplete`.
+- Added focused regressions for:
+  - Channel 3 staying BUSY and leaving RAM untouched while a sector is
+    buffered but BFRD is closed.
+  - BFRD/DRQ clearing after DMA consumes the full sector buffer.
+- Verification:
+  - Focused DMA spec passed: `22 runs, 71 assertions, 0 failures`.
+  - Focused CD-ROM spec passed: `62 runs, 223 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `435 runs, 1183 assertions, 0 failures`.
+
 2026-05-28 GPU flat primitive dither follow-up:
 
 - Corrected the previous texture-modulation no-dither note:

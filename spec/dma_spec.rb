@@ -261,6 +261,54 @@ class DMASpec < Minitest::Test
     assert_equal 0x4444_4444, ram.read32(0x100C)
   end
 
+  def test_cdrom_dma_waits_until_bfrd_opens_buffer
+    memory = dma_memory
+    @dma.memory = memory
+
+    fake_cdrom = Class.new do
+      def initialize
+        @ready = false
+        @words = [0x1111_2222, 0x3333_4444]
+      end
+
+      def open_bfrd!
+        @ready = true
+      end
+
+      def data_fifo_has_data?
+        true
+      end
+
+      def dma_data_ready?
+        @ready
+      end
+
+      def dma_read_word
+        raise "DMA read before BFRD" unless @ready
+        @words.shift || 0
+      end
+    end.new
+
+    @dma.cdrom = fake_cdrom
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::CDROM * 4 + 3)))
+    @dma.write(0x30, 0x0000_1000)
+    @dma.write(0x34, (1 << 16) | 2)
+    @dma.write(0x38, PSX::DMA::CTRL_START_BUSY | (PSX::DMA::SYNC_REQUEST << 9))
+
+    @dma.tick(memory)
+
+    assert @dma.channels[PSX::DMA::CDROM].active?, "CD-ROM DMA should wait while BFRD is closed"
+    assert_equal 0, memory.read32(0x1000)
+    assert_equal 0, memory.read32(0x1004)
+
+    fake_cdrom.open_bfrd!
+    @dma.tick_cycles(1)
+
+    refute @dma.channels[PSX::DMA::CDROM].active?
+    assert_equal 0x1111_2222, memory.read32(0x1000)
+    assert_equal 0x3333_4444, memory.read32(0x1004)
+  end
+
   def test_gpu_request_block_dma_completes_after_immediate_transfer
     memory = dma_memory
     gpu = Class.new do

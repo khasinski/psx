@@ -82,6 +82,21 @@ class CDROMSpec < Minitest::Test
                  @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY
   end
 
+  def test_bfrd_clears_after_dma_consumes_sector_buffer
+    @cdrom.disc = build_one_sector_disc(("\xAA" * 2048).b)
+    deliver_first_sector
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+    assert @cdrom.dma_data_ready?
+
+    512.times { @cdrom.dma_read_word }
+
+    refute @cdrom.dma_data_ready?
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY,
+                 "DuckStation clears BFRD/DRQ when DMA consumes the buffer"
+  end
+
   def test_clearing_bfrd_resets_data_fifo_read_position
     @cdrom.disc = build_one_sector_disc(("\x01\x02\x03\x04" + ("\x00" * 2044)).b)
     deliver_first_sector

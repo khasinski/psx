@@ -183,6 +183,7 @@ module PSX
         # Data FIFO — single byte read.
         b = (@bfrd_active && @data_buffer && @data_pos < @data_buffer.bytesize) ? @data_buffer.getbyte(@data_pos) : 0
         @data_pos += 1 if @bfrd_active && @data_buffer && @data_pos < @data_buffer.bytesize
+        @bfrd_active = false if @data_buffer && @data_pos >= @data_buffer.bytesize
         b
       when 3
         case @index
@@ -203,11 +204,16 @@ module PSX
       b2 = (@data_pos + 2 < sz) ? buf.getbyte(@data_pos + 2) : 0
       b3 = (@data_pos + 3 < sz) ? buf.getbyte(@data_pos + 3) : 0
       @data_pos += 4
+      @bfrd_active = false if @data_pos >= sz
       b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
     end
 
     def data_fifo_has_data?
       @data_buffer && @data_pos < @data_buffer.bytesize
+    end
+
+    def dma_data_ready?
+      @bfrd_active && data_fifo_has_data?
     end
 
     def write8(reg, value)

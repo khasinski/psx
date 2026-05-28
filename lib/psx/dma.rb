@@ -245,7 +245,7 @@ module PSX
       # Retry any CDROM DMA that was waiting for data — the BIOS sets channel 3
       # BUSY before the drive's DRQ goes high, and transfer_cdrom defers when
       # the data FIFO is empty.
-      if @memory && @cdrom&.data_fifo_has_data? && channel_enabled?(CDROM) &&
+      if @memory && cdrom_dma_ready? && channel_enabled?(CDROM) &&
          @channels[CDROM].active?(needs_trigger: false)
         transfer_cdrom(@memory)
       end
@@ -394,7 +394,7 @@ module PSX
     # `tick_cycles` retry once the CDROM tick fires its INT1.
     def transfer_cdrom(memory)
       channel = @channels[CDROM]
-      return false unless @cdrom&.data_fifo_has_data?
+      return false unless cdrom_dma_ready?
 
       size = channel.block_size
       size = 0x10000 if size == 0
@@ -406,7 +406,7 @@ module PSX
       step = channel.step
       transferred = 0
 
-      while transferred < total && @cdrom.data_fifo_has_data?
+      while transferred < total && cdrom_dma_ready?
         word = @cdrom.dma_read_word
         memory.write32(addr & 0x1F_FFFC, word)
         addr = (addr + step) & 0xFFFF_FFFF
@@ -428,6 +428,13 @@ module PSX
       channel.finish!
       set_irq_flag(CDROM)
       true
+    end
+
+    def cdrom_dma_ready?
+      return false unless @cdrom
+      return @cdrom.dma_data_ready? if @cdrom.respond_to?(:dma_data_ready?)
+
+      @cdrom.data_fifo_has_data?
     end
 
     def transfer_spu(memory)

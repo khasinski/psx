@@ -13,7 +13,7 @@ round-trip the full machine state. SPU audio is still early but now mixes
 basic ADPCM voices plus CDDA/CD-XA through the SPU path. There is no PGXP,
 and many retail games still hit content-specific blockers (FMV codec init,
 timing-sensitive CD paths), so don't expect to play full games yet.
-Think of it as an executable spec for the PS1. 433/433 unit tests,
+Think of it as an executable spec for the PS1. 435/435 unit tests,
 18/21 of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
 cases that have a `psx.log` reference.
 
@@ -214,7 +214,7 @@ What works:
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 433/433 unit tests pass.
+- 435/435 unit tests pass.
 - JaCzekanski/ps1-tests baseline passes for the checked non-CD-ROM
   cases (`TOTAL 18  OK 18  FAIL 0`). CD-ROM ps1-tests are run
   separately with a disc image via `PSX_TEST_DISC` and currently pass
