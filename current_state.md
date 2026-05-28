@@ -10,6 +10,17 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU capture-buffer writes:
+  - Each generated SPU sample now writes raw CD left/right samples and voice
+    1/3 last-volume levels to the four 0x400-byte capture buffers in SPU RAM.
+  - Capture position advances by one halfword per sample and updates SPUSTAT
+    bit 11 when it enters the second half of the buffer.
+  - Capture position is preserved in save states.
+- Verification:
+  - Focused SPU spec passed: `48 runs, 124 assertions, 0 failures`.
+  - Full suite passed: `383 runs, 1015 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Tightened the SPU reverb work-address cadence against DuckStation:
   - The simple reverb delay-line return now tracks a 64-step resample phase.
   - The reverb current address advances only on odd resample phases, matching

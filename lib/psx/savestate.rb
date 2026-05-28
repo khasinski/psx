@@ -214,6 +214,7 @@ module PSX
         irq_addr: @irq_addr,
         cnt: @cnt, stat: @stat, dtc: @dtc,
         key_on: @key_on, key_off: @key_off, endx: @endx,
+        capture_buffer_position: @capture_buffer_position || 0,
         voice_active: @voice_active,
         main_left_volume: @main_left_volume,
         main_right_volume: @main_right_volume,
@@ -257,6 +258,7 @@ module PSX
       @key_on = s[:key_on] || 0
       @key_off = s[:key_off] || 0
       @endx = s[:endx] || 0
+      @capture_buffer_position = s[:capture_buffer_position] || 0
       @voice_active = s[:voice_active] || 0
       @main_left_volume = s[:main_left_volume] || 0
       @main_right_volume = s[:main_right_volume] || 0

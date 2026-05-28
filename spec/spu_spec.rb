@@ -123,10 +123,10 @@ class SPUSpec < Minitest::Test
 
   def test_voice_tick_loops_to_repeat_address_when_loop_repeat_is_set
     @spu.write16(0xC00 + 0x04, 0x1000)
-    @spu.write16(0xC00 + 0x06, 0)
-    @spu.write16(0xC00 + 0x0E, 0x0004)
-    write_adpcm_block(0, flags: 0x03)
-    write_adpcm_block(4, flags: 0x00, first_data_byte: 0x01)
+    @spu.write16(0xC00 + 0x06, 0x0200)
+    @spu.write16(0xC00 + 0x0E, 0x0204)
+    write_adpcm_block(0x0200, flags: 0x03)
+    write_adpcm_block(0x0204, flags: 0x00, first_data_byte: 0x01)
 
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 28)
@@ -134,7 +134,7 @@ class SPUSpec < Minitest::Test
     voice = @spu.instance_variable_get(:@voices)[0]
     assert_equal 0x0001, @spu.read16(PSX::SPU::ENDX_LOW)
     assert_equal 0x0001, @spu.instance_variable_get(:@voice_active) & 0x0001
-    assert_equal 0x0004, voice.current_address
+    assert_equal 0x0204, voice.current_address
     assert_equal 4096, voice.decoded_samples[0]
   end
 
@@ -249,6 +249,31 @@ class SPUSpec < Minitest::Test
 
     assert_in_delta 2000, frames.first[0], 1
     assert_in_delta(-1000, frames.first[1], 1)
+  end
+
+  def test_tick_writes_spu_capture_buffers
+    voices = @spu.instance_variable_get(:@voices)
+    voices[1].last_volume = 1111
+    voices[3].last_volume = -2222
+    @spu.queue_cd_audio([1234, -2345].pack("s<*"))
+    @spu.write16(PSX::SPU::SPUCNT, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 1234, @spu.send(:read_ram_s16, 0x000)
+    assert_equal(-2345, @spu.send(:read_ram_s16, 0x400))
+    assert_equal 1111, @spu.send(:read_ram_s16, 0x800)
+    assert_equal(-2222, @spu.send(:read_ram_s16, 0xC00))
+    assert_equal 2, @spu.instance_variable_get(:@capture_buffer_position)
+  end
+
+  def test_capture_buffer_position_updates_spustat_second_half_bit
+    @spu.instance_variable_set(:@capture_buffer_position, 0x1FE)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x200, @spu.instance_variable_get(:@capture_buffer_position)
+    assert_equal 1 << 11, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 11)
   end
 
   def test_external_volume_registers_read_back
@@ -431,6 +456,7 @@ class SPUSpec < Minitest::Test
     @spu.instance_variable_set(:@reverb_resample_position, 0x12)
     @spu.instance_variable_set(:@last_reverb_input, [111, 222])
     @spu.instance_variable_set(:@last_reverb_output, [333, 444])
+    @spu.instance_variable_set(:@capture_buffer_position, 0x222)
     @spu.instance_variable_set(:@noise_count, 0x1234_5678)
     @spu.instance_variable_set(:@noise_level, 0x0000_4000)
 
@@ -451,6 +477,7 @@ class SPUSpec < Minitest::Test
     assert_equal 0x12, restored.instance_variable_get(:@reverb_resample_position)
     assert_equal [111, 222], restored.instance_variable_get(:@last_reverb_input)
     assert_equal [333, 444], restored.instance_variable_get(:@last_reverb_output)
+    assert_equal 0x222, restored.instance_variable_get(:@capture_buffer_position)
     assert_equal 0x1234_5678, restored.instance_variable_get(:@noise_count)
     assert_equal 0x0000_4000, restored.instance_variable_get(:@noise_level)
   end

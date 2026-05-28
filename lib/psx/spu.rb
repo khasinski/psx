@@ -41,6 +41,7 @@ module PSX
     CURRENT_VOICE_VOL_BASE = 0xE00
     REVERB_REG_BASE   = 0xDC0
     REVERB_REG_END    = 0xE00
+    CAPTURE_BUFFER_SIZE_PER_CHANNEL = 0x400
     CYCLES_PER_SAMPLE = 768
 
     # SPUCNT bits 4-5 = transfer mode
@@ -92,6 +93,7 @@ module PSX
       @key_on = 0
       @key_off = 0
       @endx = 0
+      @capture_buffer_position = 0
       @voice_active = 0
       @main_left_volume = 0
       @main_right_volume = 0
@@ -490,6 +492,8 @@ module PSX
       @key_on = 0
       @key_off = 0
       update_noise
+      cd_capture_left = 0
+      cd_capture_right = 0
 
       24.times do |voice_index|
         next if (@voice_active & (1 << voice_index)).zero?
@@ -527,6 +531,8 @@ module PSX
       if (@cnt & 0x0001) != 0
         cd_left = @cd_audio_fifo.shift || 0
         cd_right = @cd_audio_fifo.shift || 0
+        cd_capture_left = cd_left
+        cd_capture_right = cd_right
         cd_left_volume = apply_volume(cd_left, signed16(@cd_audio_left_volume))
         cd_right_volume = apply_volume(cd_right, signed16(@cd_audio_right_volume))
         left_sum += cd_left_volume
@@ -545,6 +551,7 @@ module PSX
       right_sum = apply_volume(clamp16(right_sum), @main_right_current_volume)
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
       tick_main_volume_sweeps
+      write_capture_buffers(cd_capture_left, cd_capture_right)
     end
 
     def pitch_modulation_enabled?(voice_index)
@@ -636,6 +643,25 @@ module PSX
       v = value & 0xFFFF
       @ram.setbyte(address & (RAM_SIZE - 1), v & 0xFF)
       @ram.setbyte((address + 1) & (RAM_SIZE - 1), (v >> 8) & 0xFF)
+    end
+
+    def write_capture_buffers(cd_left, cd_right)
+      write_capture_buffer(0, cd_left)
+      write_capture_buffer(1, cd_right)
+      write_capture_buffer(2, clamp16(@voices[1].last_volume || 0))
+      write_capture_buffer(3, clamp16(@voices[3].last_volume || 0))
+      @capture_buffer_position = (@capture_buffer_position + 2) % CAPTURE_BUFFER_SIZE_PER_CHANNEL
+      if @capture_buffer_position >= (CAPTURE_BUFFER_SIZE_PER_CHANNEL / 2)
+        @stat |= (1 << 11)
+      else
+        @stat &= ~(1 << 11)
+      end
+    end
+
+    def write_capture_buffer(index, value)
+      address = (index * CAPTURE_BUFFER_SIZE_PER_CHANNEL) | @capture_buffer_position
+      trigger_ram_irq if irq_enabled? && irq_transfer_match?(address)
+      write_ram_s16(address, value)
     end
 
     def update_noise
