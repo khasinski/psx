@@ -38,6 +38,17 @@ class EmulatorSpec < Minitest::Test
     assert_equal [0x00, 0x41, 0xFF, 0xF7], bytes_at(emu, 0x8010_0000, 4)
   end
 
+  def test_run_fast_refreshes_direct_pad_buffer_order
+    emu = PSX::Emulator.new(BIOS)
+    emu.memory.write32(0x8000_74C8, 0x8010_0000)
+    emu.memory.write32(0x8000_74D8, 0x28)
+    emu.controller_state_proc = -> { 0xFFF7 }
+
+    emu.run(steps: 1)
+
+    assert_equal [0x00, 0x41, 0xFF, 0xF7], bytes_at(emu, 0x8010_0000, 4)
+  end
+
   def test_ignores_uninitialized_bios_pad_buffers
     emu = PSX::Emulator.new(BIOS)
     emu.controller_state_proc = -> { 0xFFF7 }

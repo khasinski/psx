@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added runnable regression coverage for the latest Rage title/input and GPU
+  texture investigations:
+  - `spec/emulator_spec.rb` now proves the normal `run(steps:)` fast path
+    refreshes the BIOS direct pad buffer in the high/low byte order that Rage
+    reads for Start.
+  - `spec/gpu_regression_spec.rb` now locks DuckStation's texture-window
+    ordering for textured rectangles: the window remaps U before 8-bit byte
+    or 4-bit nibble texture lookup.
+- Verification:
+  - Focused emulator spec passed: `4 runs, 5 assertions, 0 failures`.
+  - Focused GPU regression spec passed: `16 runs, 43 assertions, 0 failures`.
+  - Full suite passed: `360 runs, 940 assertions, 0 failures`.
+
 - Fixed CD-ROM SeekL completion for data tracks. DuckStation completes a
   logical seek by processing the target sector header, which makes GetlocL
   valid after SeekL even before streaming reads begin. Ruby now reads the

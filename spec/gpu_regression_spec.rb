@@ -241,6 +241,44 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x001F, @gpu.vram[0], "8-bit CLUT lookup should wrap within the palette row"
   end
 
+  def test_textured_rectangle_applies_texture_window_before_8bit_lookup
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_01_01)
+    @gpu.gp0(0xE1_00_00_90) # 8-bit texture page at Y=256
+    @gpu.gp0(0xE2_00_04_01) # mask_x=1, offset_x=1 => U 0 maps to U 8
+
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x0001
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 4] = 0x0002
+    @gpu.vram[1] = 0x001F
+    @gpu.vram[2] = 0x03E0
+
+    @gpu.gp0(0x65_7F_7F_7F) # raw textured variable rectangle
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_01_00_01)
+
+    assert_equal 0x03E0, @gpu.vram[0], "texture window must remap U before selecting the 8-bit texel byte"
+  end
+
+  def test_textured_rectangle_applies_texture_window_before_4bit_lookup
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_01_01)
+    @gpu.gp0(0xE1_00_00_10) # 4-bit texture page at Y=256
+    @gpu.gp0(0xE2_00_04_01) # mask_x=1, offset_x=1 => U 0 maps to U 8
+
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x0001
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH + 2] = 0x0002
+    @gpu.vram[1] = 0x001F
+    @gpu.vram[2] = 0x03E0
+
+    @gpu.gp0(0x65_7F_7F_7F) # raw textured variable rectangle
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_01_00_01)
+
+    assert_equal 0x03E0, @gpu.vram[0], "texture window must remap U before selecting the 4-bit texel nibble"
+  end
+
   def test_gp1_info_reads_internal_gpu_registers
     @gpu.gp0(0xE2_00_8C_43)
     @gpu.gp0(0xE3_00_10_20)

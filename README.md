@@ -211,7 +211,7 @@ What works:
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 357/357 unit tests pass.
+- 360/360 unit tests pass.
 - JaCzekanski/ps1-tests baseline passes for the checked non-CD-ROM
   cases (`TOTAL 18  OK 18  FAIL 0`). CD-ROM ps1-tests are run
   separately with a disc image via `PSX_TEST_DISC` and currently pass
