@@ -22,6 +22,14 @@ later entries have fixed.
   - Focused emulator spec passed: `4 runs, 5 assertions, 0 failures`.
   - Focused GPU regression spec passed: `16 runs, 43 assertions, 0 failures`.
   - Full suite passed: `360 runs, 940 assertions, 0 failures`.
+- Re-ran the Rage Europe title-state resume smoke after that spec commit:
+  - Command:
+    `PSX_LOAD_STATE=tmp/rage-eu-2p4b.state PSX_BASE_CYCLES=2400000000 PSX_CYCLES=300000000 PSX_CHUNK=25000000 PSX_SCREENSHOT_EVERY_CHUNKS=1 PSX_INPUT_SCRIPT=start:2450000000:2500000000 PSX_OUT=conformance-shots/rage-eu-title-resume-latest ... bin/_ridge-boot`
+  - Completed to 2.7B absolute cycles without CPU errors.
+  - `ridge-004.png` shows the title Start transition to `BRISE GP` /
+    `"OVER PASS CITY"`.
+  - `ridge-008.png` and `ridge-012.png` show the in-engine attract/race
+    scene.
 
 - Fixed CD-ROM SeekL completion for data tracks. DuckStation completes a
   logical seek by processing the target sector header, which makes GetlocL
