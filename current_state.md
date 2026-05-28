@@ -53,6 +53,11 @@ Snapshot of where the emulator is and what we just spent time on.
     - Rage Europe live buffer probe at 1.1B cycles with Start held from 1.0B:
       `pad_ptr=801E403C bytes=00 41 FF F7 mask=0008`, with the old wrong
       `0x0800` bit no longer set.
+    - Long Rage Europe Start smoke to 2.8B cycles with Start held from 1.0B
+      reached 15-bit 320x240 mode after leaving the FMV path. Screenshots
+      under `conformance-shots/rage-eu-start-after-pad-normalize/` show the
+      title screen with the full Rage Racer logo at `ridge-012.png`, then an
+      in-engine attract/race scene at `ridge-014.png`.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.
