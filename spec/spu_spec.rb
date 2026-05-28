@@ -739,6 +739,23 @@ class SPUSpec < Minitest::Test
     assert_operator voice.last_volume, :>, 0
   end
 
+  def test_noise_generator_advances_after_voice_sampling
+    voices = @spu.instance_variable_get(:@voices)
+    voice = voices[0]
+    voice.adsr_volume = 0x7FFF
+    voice.adsr_phase = :sustain
+    voice.decoded_samples = Array.new(28, 0)
+    @spu.instance_variable_set(:@voice_active, 0x0001)
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x0001)
+    @spu.instance_variable_set(:@noise_level, 0x4000)
+    @spu.instance_variable_set(:@noise_count, (0x8000 << 16) - 0x10000)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x3FFF, voice.last_volume
+    assert_equal 0x8001, @spu.instance_variable_get(:@noise_level)
+  end
+
   def test_noise_enabled_voice_ignores_loop_end_mute_flag
     @spu.write16(0xC00 + 0x04, 0x1000)
     @spu.write16(0xC00 + 0x06, 0x0200)

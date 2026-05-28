@@ -586,7 +586,6 @@ module PSX
       right_sum = 0
       reverb_in_left = 0
       reverb_in_right = 0
-      update_noise
       cd_capture_left = 0
       cd_capture_right = 0
 
@@ -635,6 +634,8 @@ module PSX
         reverb_in_left = 0
         reverb_in_right = 0
       end
+
+      update_noise
 
       if (@cnt & 0x0001) != 0
         cd_left = @cd_audio_fifo.shift || 0

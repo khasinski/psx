@@ -10,6 +10,22 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's SPU noise-generator sample ordering:
+  - DuckStation samples voices using the current noise level, then advances
+    the noise generator once for the next audio frame. The Ruby SPU had been
+    advancing noise before voice sampling, making noise voices and any
+    following pitch-modulated voice see the next frame's noise one sample too
+    early.
+  - `tick_sample` now updates noise after voice mixing/mute handling and
+    before CD-audio mixing, matching DuckStation's ordering.
+  - Added a focused regression that parks the noise counter at the rollover
+    boundary and verifies a noise voice uses the old level for the current
+    sample while the generator advances for the next one.
+- Verification:
+  - Focused SPU spec passed: `70 runs, 193 assertions, 0 failures`.
+  - Filtered SPU ps1-tests baseline passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full suite passed: `427 runs, 1155 assertions, 0 failures`.
+
 - Tightened MDEC-out DMA so it pauses when decoded output runs dry mid-block:
   - Channel 1 now mirrors the existing CD-ROM partial-DMA behavior: it copies
     only the words currently available from the MDEC output FIFO, advances the
