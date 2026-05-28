@@ -13,7 +13,7 @@ round-trip the full machine state. SPU audio is still early but now mixes
 basic ADPCM voices plus CDDA/CD-XA through the SPU path. There is no PGXP,
 and many retail games still hit content-specific blockers (FMV codec init,
 timing-sensitive CD paths), so don't expect to play full games yet.
-Think of it as an executable spec for the PS1. 378/378 unit tests,
+Think of it as an executable spec for the PS1. 380/380 unit tests,
 18/21 of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
 cases that have a `psx.log` reference.
 
@@ -197,9 +197,9 @@ What works:
 - SIO0 digital pad (slot 1)
 - SPU: register window read-back, RAM DMA/FIFO transfers, IRQ9 RAM checks,
   ADPCM block decode, basic voice stepping/ADSR, basic pitch modulation,
-  fixed/current volume registers, basic volume sweep, noise voices, reverb
-  register surface, CDDA/CD-XA queue mixing, and stereo PCM output. Reverb
-  mixing and full ADSR conformance are still open.
+  fixed/current volume registers, basic volume sweep, noise voices, basic
+  reverb send/return wiring, CDDA/CD-XA queue mixing, and stereo PCM output.
+  Full reverb algorithm and full ADSR conformance are still open.
 - MDEC: register surface (Phase 1), quant + IDCT tables and DMA 0/1
   ingress / egress (Phase 2), real RLC + dequant + IDCT + YCbCr → RGB
   decoder (Phase 3). DMA1 completion IRQ wired. CD-XA sectors decode
@@ -212,7 +212,7 @@ What works:
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 378/378 unit tests pass.
+- 380/380 unit tests pass.
 - JaCzekanski/ps1-tests baseline passes for the checked non-CD-ROM
   cases (`TOTAL 18  OK 18  FAIL 0`). CD-ROM ps1-tests are run
   separately with a disc image via `PSX_TEST_DISC` and currently pass
@@ -223,8 +223,9 @@ What works:
 
 What doesn't:
 
-- SPU audio is incomplete: no reverb mixing or conformance-grade ADSR yet;
-  noise and pitch modulation are basic.
+- SPU audio is incomplete: reverb is only a simple delay-line return, not the
+  full hardware algorithm; ADSR is not conformance-grade yet, and noise/pitch
+  modulation are basic.
 - DMA timing isn't cycle-accurate. GPU block DMA now keeps CHCR busy for a
   DuckStation-style RAM access delay and manual chopping adds a capped CPU
   window delay, but `dma/chopping` is still not bit-perfect against real

@@ -10,6 +10,23 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added a bounded DuckStation-backed SPU reverb mixer hook:
+  - The SPU mixer now accumulates reverb sends from voices whose
+    `REVERB_ON` bit is set and from CD audio when SPUCNT bit 2 is set.
+  - A simple SPU-RAM delay-line return is mixed before main volume. It uses
+    the configured reverb base/current address and raw signed reverb output
+    volumes (`0xD84/0xD86`).
+  - SPUCNT bit 7 controls whether new send samples are written into the
+    delay line. The full DuckStation/Mednafen reverb algorithm is still a
+    remaining gap; this commit adds the send/return wiring and persistent
+    state needed to replace the simple internals later.
+  - Save states now preserve reverb current address plus last input/output
+    levels.
+- Verification:
+  - Focused SPU spec passed: `45 runs, 112 assertions, 0 failures`.
+  - Full suite passed: `380 runs, 1003 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU key latch clearing:
   - KON/KOFF registers still start/release voices immediately in Ruby, but
     their readable latch values now clear on the next generated SPU sample,

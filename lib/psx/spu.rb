@@ -109,6 +109,9 @@ module PSX
       @reverb_left_volume = 0
       @reverb_right_volume = 0
       @reverb_base = 0
+      @reverb_current_address = 0
+      @last_reverb_input = [0, 0]
+      @last_reverb_output = [0, 0]
       @reverb_registers = Array.new(32, 0)
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
@@ -276,6 +279,7 @@ module PSX
         @reverb_right_volume = v
       when REVERB_BASE
         @reverb_base = v
+        @reverb_current_address = reverb_base_address
       when CD_AUDIO_VOL_LEFT
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
@@ -480,6 +484,8 @@ module PSX
     def tick_sample
       left_sum = 0
       right_sum = 0
+      reverb_in_left = 0
+      reverb_in_right = 0
       @key_on = 0
       @key_off = 0
       update_noise
@@ -495,8 +501,14 @@ module PSX
         sample = noise_enabled?(voice_index) ? signed16(@noise_level & 0xFFFF) : (voice.decoded_samples[voice.sample_index] || 0)
         volume = apply_volume(sample, voice.adsr_volume)
         voice.last_volume = volume
-        left_sum += apply_volume(volume, voice.left_volume)
-        right_sum += apply_volume(volume, voice.right_volume)
+        left = apply_volume(volume, voice.left_volume)
+        right = apply_volume(volume, voice.right_volume)
+        left_sum += left
+        right_sum += right
+        if reverb_enabled?(voice_index)
+          reverb_in_left += left
+          reverb_in_right += right
+        end
         tick_voice_volume_sweeps(voice)
         tick_voice_adsr(voice_index)
 
@@ -514,9 +526,19 @@ module PSX
       if (@cnt & 0x0001) != 0
         cd_left = @cd_audio_fifo.shift || 0
         cd_right = @cd_audio_fifo.shift || 0
-        left_sum += apply_volume(cd_left, signed16(@cd_audio_left_volume))
-        right_sum += apply_volume(cd_right, signed16(@cd_audio_right_volume))
+        cd_left_volume = apply_volume(cd_left, signed16(@cd_audio_left_volume))
+        cd_right_volume = apply_volume(cd_right, signed16(@cd_audio_right_volume))
+        left_sum += cd_left_volume
+        right_sum += cd_right_volume
+        if cd_audio_reverb_enabled?
+          reverb_in_left += cd_left_volume
+          reverb_in_right += cd_right_volume
+        end
       end
+
+      reverb_left, reverb_right = process_reverb(clamp16(reverb_in_left), clamp16(reverb_in_right))
+      left_sum += reverb_left
+      right_sum += reverb_right
 
       left_sum = apply_volume(clamp16(left_sum), @main_left_current_volume)
       right_sum = apply_volume(clamp16(right_sum), @main_right_current_volume)
@@ -563,6 +585,53 @@ module PSX
 
     def noise_enabled?(voice_index)
       (@noise_mode_enable & (1 << voice_index)) != 0
+    end
+
+    def reverb_enabled?(voice_index)
+      (@reverb_on_enable & (1 << voice_index)) != 0
+    end
+
+    def reverb_master_enabled?
+      (@cnt & (1 << 7)) != 0
+    end
+
+    def cd_audio_reverb_enabled?
+      (@cnt & (1 << 2)) != 0
+    end
+
+    def reverb_base_address
+      (@reverb_base << 2) & (RAM_SIZE - 1)
+    end
+
+    def process_reverb(left_in, right_in)
+      @last_reverb_input = [left_in, right_in]
+      addr = @reverb_current_address & (RAM_SIZE - 1)
+      delayed_left = read_ram_s16(addr)
+      delayed_right = read_ram_s16(addr + 2)
+
+      if reverb_master_enabled?
+        write_ram_s16(addr, left_in)
+        write_ram_s16(addr + 2, right_in)
+      end
+
+      @reverb_current_address = (addr + 4) & (RAM_SIZE - 1)
+      @reverb_current_address = reverb_base_address if @reverb_current_address.zero?
+      @last_reverb_output = [
+        apply_volume(delayed_left, signed16(@reverb_left_volume)),
+        apply_volume(delayed_right, signed16(@reverb_right_volume)),
+      ]
+    end
+
+    def read_ram_s16(address)
+      lo = @ram.getbyte(address & (RAM_SIZE - 1))
+      hi = @ram.getbyte((address + 1) & (RAM_SIZE - 1))
+      signed16(lo | (hi << 8))
+    end
+
+    def write_ram_s16(address, value)
+      v = value & 0xFFFF
+      @ram.setbyte(address & (RAM_SIZE - 1), v & 0xFF)
+      @ram.setbyte((address + 1) & (RAM_SIZE - 1), (v >> 8) & 0xFF)
     end
 
     def update_noise

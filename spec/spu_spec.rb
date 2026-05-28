@@ -363,6 +363,46 @@ class SPUSpec < Minitest::Test
     assert_equal 0x5555, @spu.read16(PSX::SPU::REVERB_REG_END - 2)
   end
 
+  def test_reverb_output_tap_mixes_from_spu_ram
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x3FFF)
+    @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x3FFF)
+    @spu.write16(PSX::SPU::REVERB_VOL_LEFT, 0x3FFF)
+    @spu.write16(PSX::SPU::REVERB_VOL_RIGHT, 0x2000)
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0080)
+    @spu.dma_write_word((4000 << 16) | 4000)
+
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_in_delta 2000, @spu.instance_variable_get(:@last_reverb_output)[0], 1
+    assert_in_delta 1000, @spu.instance_variable_get(:@last_reverb_output)[1], 1
+    assert_in_delta 2000, frames.first[0], 2
+    assert_in_delta 1000, frames.first[1], 2
+  end
+
+  def test_reverb_enabled_voice_sends_to_reverb_input
+    voices = @spu.instance_variable_get(:@voices)
+    voice = voices[0]
+    voice.adsr_volume = 0x7FFF
+    voice.adsr_phase = :sustain
+    voice.decoded_samples = Array.new(28, 4000)
+    @spu.instance_variable_set(:@voice_active, 0x0001)
+    @spu.write16(0xC00 + 0x00, 0x3FFF)
+    @spu.write16(0xC00 + 0x02, 0x2000)
+    @spu.write16(0xC00 + 0x04, 0x0001)
+    @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    left, right = @spu.instance_variable_get(:@last_reverb_input)
+    assert_operator left, :>, 3900
+    assert_operator right, :>, 1900
+  end
+
   def test_state_snapshot_preserves_noise_and_reverb_voice_masks
     @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x1357)
     @spu.write16(PSX::SPU::NOISE_MODE_HIGH, 0x0024)
@@ -374,6 +414,9 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::REVERB_REG_BASE + 4, 0x4444)
     @spu.write16(PSX::SPU::EXTERNAL_VOL_LEFT, 0x5555)
     @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x6666)
+    @spu.instance_variable_set(:@reverb_current_address, 0x7778)
+    @spu.instance_variable_set(:@last_reverb_input, [111, 222])
+    @spu.instance_variable_set(:@last_reverb_output, [333, 444])
     @spu.instance_variable_set(:@noise_count, 0x1234_5678)
     @spu.instance_variable_set(:@noise_level, 0x0000_4000)
 
@@ -390,6 +433,9 @@ class SPUSpec < Minitest::Test
     assert_equal 0x4444, restored.read16(PSX::SPU::REVERB_REG_BASE + 4)
     assert_equal 0x5555, restored.read16(PSX::SPU::EXTERNAL_VOL_LEFT)
     assert_equal 0x6666, restored.read16(PSX::SPU::EXTERNAL_VOL_RIGHT)
+    assert_equal 0x7778, restored.instance_variable_get(:@reverb_current_address)
+    assert_equal [111, 222], restored.instance_variable_get(:@last_reverb_input)
+    assert_equal [333, 444], restored.instance_variable_get(:@last_reverb_output)
     assert_equal 0x1234_5678, restored.instance_variable_get(:@noise_count)
     assert_equal 0x0000_4000, restored.instance_variable_get(:@noise_level)
   end
