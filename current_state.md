@@ -8,6 +8,26 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM Stop ACK/response cleanup:
+
+- Matched DuckStation's `Stop` command ordering:
+  - `Stop` now sends its ACK status before clearing the motor/active bits, so
+    the immediate INT3 reflects the pre-stop motor-on status.
+  - `Stop` cancels stale non-ACK async/second responses before queuing its
+    own delayed INT2, preventing old completions such as a prior `Pause` INT2
+    from surviving into the stop window.
+- Added focused CD-ROM regressions for:
+  - `Stop` ACK reporting motor-on status, followed by a delayed INT2 with the
+    motor bit cleared.
+  - `Stop` removing an aged pending `Pause` second response and leaving only
+    its own ACK/INT2 queued.
+- Verification:
+  - Focused CD-ROM spec passed: `72 runs, 269 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `445 runs, 1226 assertions, 0 failures`.
+
 2026-05-28 CD-ROM Pause second-response cancellation:
 
 - Matched DuckStation's `Pause` command second-response lifecycle:

@@ -724,10 +724,11 @@ module PSX
     end
 
     def cmd_stop
+      clear_async_and_second_responses
+      queue_response(0, 3, [@stat])
       @reading = false
       @cdda_playing = false
       @stat &= ~(SF_READING | SF_MOTOR_ON | SF_PLAYING_CDDA)
-      queue_response(0, 3, [@stat])
       queue_response(CYCLES_PER_RESPONSE * 2, 2, [@stat])
     end
 

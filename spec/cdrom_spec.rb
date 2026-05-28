@@ -661,6 +661,51 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::DEFAULT_STAT_NO_DISC | PSX::CDROM::SF_MOTOR_ON, @cdrom.read8(1)
   end
 
+  def test_stop_ack_reports_status_before_motor_is_cleared
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x08) # Stop
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    ack_response
+
+    assert drive_until_int(2, max_ticks: 20)
+    assert_equal 0, @cdrom.read8(1) & PSX::CDROM::SF_MOTOR_ON
+  end
+
+  def test_stop_cancels_pending_pause_second_response
+    @cdrom.disc = build_one_sector_disc("PVD!"[0, 4].b + ("\x00" * 2044).b)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+    @cdrom.write8(1, 0x09)
+    assert drive_until_int(1, max_ticks: 200)
+    ack_response
+    assert drive_until_int(3, max_ticks: 20)
+    ack_response
+
+    old_pause = @cdrom.instance_variable_get(:@pending).find { |entry| entry[3] == 2 }
+    refute_nil old_pause
+    old_pause[0] = 1
+
+    @cdrom.write8(1, 0x08) # Stop clears old async/second response.
+
+    pending = @cdrom.instance_variable_get(:@pending)
+    refute_includes pending, old_pause
+    assert_equal 2, pending.count { |entry| entry[3] == 2 || entry[3] == 3 },
+                 "Stop should leave only its ACK and its own INT2 pending"
+  end
+
   def test_eject_disc_raises_shell_open_error_interrupt
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
     enable_irqs(0x1F)
