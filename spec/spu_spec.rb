@@ -275,6 +275,24 @@ class SPUSpec < Minitest::Test
     assert_equal 0x3800, @spu.read16(PSX::SPU::CURRENT_MAIN_VOL_LEFT)
   end
 
+  def test_current_main_volume_writes_update_live_volume
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x7FFF)
+    @spu.queue_cd_audio([4000, 4000].pack("s<*"))
+
+    @spu.write16(PSX::SPU::CURRENT_MAIN_VOL_LEFT, 0x4000)
+    @spu.write16(PSX::SPU::CURRENT_MAIN_VOL_RIGHT, 0xC000)
+    @spu.write16(PSX::SPU::SPUCNT, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0x4000, @spu.read16(PSX::SPU::CURRENT_MAIN_VOL_LEFT)
+    assert_equal 0xC000, @spu.read16(PSX::SPU::CURRENT_MAIN_VOL_RIGHT)
+    assert_in_delta 2000, frames.first[0], 1
+    assert_in_delta(-2000, frames.first[1], 1)
+  end
+
   def test_voice_volume_sweep_ticks_current_volume
     @spu.write16(0xC00, 0x0000)
     @spu.write16(0xC00, 0x8000)

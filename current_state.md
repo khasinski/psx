@@ -10,6 +10,14 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU current main-volume writes:
+  - Writes to current main-volume registers (`0xDB8/0xDBA`) now update the
+    live main output levels used by the mixer.
+- Verification:
+  - Focused SPU spec passed: `41 runs, 93 assertions, 0 failures`.
+  - Full suite passed: `376 runs, 984 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU reverb register surface:
   - Reverb output volumes (`0xD84/0xD86`), reverb base (`0xDA2`), and the
     32-word reverb parameter block (`0xDC0..0xDFE`) are now stateful and

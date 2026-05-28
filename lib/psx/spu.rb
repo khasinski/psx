@@ -274,6 +274,10 @@ module PSX
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
         @cd_audio_right_volume = v
+      when CURRENT_MAIN_VOL_LEFT
+        @main_left_current_volume = signed16(v)
+      when CURRENT_MAIN_VOL_RIGHT
+        @main_right_current_volume = signed16(v)
       else
         return if write_reverb_register(offset, v)
 
