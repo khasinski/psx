@@ -694,6 +694,8 @@ module PSX
 
       @cdda_playing = true
       @cdda_cycles = CYCLES_FIRST_SECTOR
+      clear_async_and_second_responses
+      clear_sector_buffer
       @stat |= SF_MOTOR_ON | SF_PLAYING_CDDA
       @stat &= ~SF_READING
       queue_response(0, 3, [@stat])

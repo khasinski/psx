@@ -701,6 +701,52 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_PLAYING_CDDA, @cdrom.read8(1)
   end
 
+  def test_play_clears_open_sector_buffer
+    @cdrom.disc = build_data_then_audio_disc
+    deliver_first_sector
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+    assert @cdrom.dma_data_ready?, "first read leaves an open sector buffer"
+
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 1)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 1, first audio sector.
+    drain_response
+    @cdrom.write8(1, 0x03) # Play clears buffers when playback begins.
+    drain_response
+
+    refute @cdrom.data_fifo_has_data?
+    refute @cdrom.dma_data_ready?
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY
+  end
+
+  def test_play_cancels_pending_pause_second_response
+    @cdrom.disc = build_data_then_audio_disc
+    deliver_first_sector
+
+    @cdrom.write8(1, 0x09) # Pause queues a delayed INT2.
+    drain_response
+
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 1)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 1, first audio sector.
+    drain_response
+
+    pending_pause = @cdrom.instance_variable_get(:@pending).find { |entry| entry[3] == 2 }
+    refute_nil pending_pause
+    pending_pause[0] = 1
+
+    @cdrom.write8(1, 0x03) # Play clears old async/second response.
+    drain_response
+
+    @cdrom.tick(1)
+    assert_equal 0, @cdrom.instance_variable_get(:@irq_flags),
+                 "old Pause INT2 should not survive into CDDA playback"
+  end
+
   def test_read_t_requires_one_session_parameter
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
     enable_irqs(0x1F)

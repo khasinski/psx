@@ -8,6 +8,25 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM Play buffer/async clearing:
+
+- Matched DuckStation `BeginPlaying` cleanup:
+  - `Play` now clears the active sector buffer, read position, and BFRD
+    request bit when CDDA playback begins.
+  - Starting playback also cancels pending non-ACK async/second responses, so
+    stale delayed responses such as an old `Pause` INT2 cannot fire inside
+    the CDDA playback window.
+- Added focused CD-ROM regressions for:
+  - `Play` clearing an open BFRD sector buffer after `SetLoc` to an audio
+    sector.
+  - `Play` cancelling an aged pending `Pause` second response.
+- Verification:
+  - Focused CD-ROM spec passed: `69 runs, 253 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `442 runs, 1210 assertions, 0 failures`.
+
 2026-05-28 CD-ROM seek buffer/async clearing:
 
 - Matched DuckStation `BeginSeeking` cleanup:
