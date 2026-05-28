@@ -482,8 +482,8 @@ module PSX
       state = @controller_state_proc.call & 0xFFFF
       @memory.write8(addr, 0x00)
       @memory.write8(addr + 1, SIO0::DIGITAL_PAD_IDHI)
-      @memory.write8(addr + 2, (state >> 8) & 0xFF)
-      @memory.write8(addr + 3, state & 0xFF)
+      @memory.write8(addr + 2, state & 0xFF)
+      @memory.write8(addr + 3, (state >> 8) & 0xFF)
     rescue StandardError
       # Treat host input failures as no pad state change.
     end

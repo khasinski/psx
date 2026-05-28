@@ -10,6 +10,23 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Fixed Rage Racer's direct-pad Start bit for intro/title input:
+  - The BIOS direct pad buffer now keeps the controller's serial low/high
+    button byte order (`00 41 F7 FF` for Start) instead of normalizing it to
+    high/low order.
+  - Rage's pad updater decodes direct bytes as `~(byte2 << 8 | byte3)`, and
+    its intro skip path checks the Start edge at bit `0x0800`; the old
+    high/low shim decoded Start as `0x0008`.
+  - A title-state smoke from `tmp/rage-eu-2p4b.state` still reaches the Rage
+    selectable menu with the serial-order buffer, and an intro probe hit the
+    skip branch at `0x8001EA08`/`0x80042CCC` after a released-to-pressed
+    Start transition.
+- Verification:
+  - Focused emulator spec passed: `5 runs, 7 assertions, 0 failures`.
+  - Focused SIO0 spec passed: `21 runs, 55 assertions, 0 failures`.
+  - Full suite passed: `413 runs, 1096 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's semi-transparent line blending:
   - GP0 line and polyline commands now honor the semi-transparency opcode bit
     and blend non-textured line pixels through the active E1 blend mode.
