@@ -46,6 +46,12 @@ module PSX
     CMD_COPY_CPU_VRAM = 0xA0
     CMD_COPY_VRAM_CPU = 0xC0
     CMD_ENV_BASE      = 0xE0  # 0xE0-0xEF environment commands
+    DITHER_MATRIX = [
+      [-4, 0, -3, 1],
+      [2, -2, 3, -1],
+      [-3, 1, -4, 0],
+      [3, -1, 2, -2]
+    ].freeze
 
     attr_reader :vram
 
@@ -1189,7 +1195,13 @@ module PSX
             r = (lr + dr * t).to_i; r = 0 if r < 0; r = 255 if r > 255
             g = (lg + dg * t).to_i; g = 0 if g < 0; g = 255 if g > 255
             b = (lb + db * t).to_i; b = 0 if b < 0; b = 255 if b > 255
-            fr = (r >> 3) & 0x1F; fg = (g >> 3) & 0x1F; fb = (b >> 3) & 0x1F
+            if (@status & STAT_DITHER) != 0
+              fr = dither_channel_to_5bit(r, x, y)
+              fg = dither_channel_to_5bit(g, x, y)
+              fb = dither_channel_to_5bit(b, x, y)
+            else
+              fr = (r >> 3) & 0x1F; fg = (g >> 3) & 0x1F; fb = (b >> 3) & 0x1F
+            end
             if stp_mode >= 0
               fr, fg, fb = stp_blend5(bg, fr, fg, fb, stp_mode)
             end
@@ -1254,6 +1266,14 @@ module PSX
         b = bb + (fb >> 2); b = 0x1F if b > 0x1F
         [r, g, b]
       end
+    end
+
+    def dither_channel_to_5bit(value, x, y)
+      dithered = (value + DITHER_MATRIX[y & 3][x & 3]) >> 3
+      return 0 if dithered.negative?
+      return 0x1F if dithered > 0x1F
+
+      dithered
     end
 
     def interp_color(c0, c1, t)

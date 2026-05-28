@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation's GPU dither matrix for Gouraud triangles:
+  - Non-textured shaded triangles now apply the 4x4 draw-mode dither matrix
+    before reducing 8-bit RGB channels to 5-bit VRAM values when E1 bit 9 is
+    enabled.
+  - Added a regression that checks both a positive and negative matrix entry.
+- Verification:
+  - Focused GPU regression spec passed: `20 runs, 51 assertions, 0 failures`.
+  - Full suite passed: `408 runs, 1086 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's VRAM-to-VRAM copy edge behavior:
   - VRAM copies now skip true no-op self-copies unless the draw mask bit must
     be set, matching DuckStation's copy command guard.

@@ -96,6 +96,22 @@ class GPURegressionSpec < Minitest::Test
     assert ((right >> 5) & 0x001F) > (right & 0x001F), "right side should pick up the green vertex tint"
   end
 
+  def test_gouraud_triangle_applies_draw_mode_dither
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_08_08)
+    @gpu.gp0(0xE1_00_02_00) # dither enabled
+
+    @gpu.gp0(0x30_00_00_07) # shaded opaque triangle, all vertices red=7
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x00_00_00_07)
+    @gpu.gp0(0x00_00_00_08)
+    @gpu.gp0(0x00_00_00_07)
+    @gpu.gp0(0x00_08_00_00)
+
+    assert_equal 0x0001, @gpu.vram[3], "DuckStation's dither matrix raises red=7 at x=3,y=0"
+    assert_equal 0x0000, @gpu.vram[0], "negative dither at x=0,y=0 keeps red=7 below 5-bit red 1"
+  end
+
   def test_textured_draw_preserves_texel_mask_bit
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_10_10)
