@@ -224,9 +224,10 @@ What doesn't:
 
 - SPU audio is incomplete: no reverb or conformance-grade ADSR yet; noise
   and pitch modulation are basic.
-- DMA timing isn't cycle-accurate — `dma/chopping` runs but reports
-  `29 CPU cycles` for every block size where real hardware sees
-  thousands; structural test passes, not bit-perfect timing.
+- DMA timing isn't cycle-accurate. GPU block DMA now keeps CHCR busy for a
+  DuckStation-style RAM access delay and manual chopping adds a capped CPU
+  window delay, but `dma/chopping` is still not bit-perfect against real
+  hardware.
 - GPU, CD-ROM, and MDEC timing are still approximate in places even where
   structural conformance tests pass.
 

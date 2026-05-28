@@ -57,6 +57,7 @@ module PSX
         enabled = (@channel_ctrl & CTRL_START_BUSY) != 0
         return false unless enabled
         return false if @suspended
+        return false if @busy_cycles.positive?
 
         if needs_trigger
           (@channel_ctrl & CTRL_START_TRIGGER) != 0
@@ -335,8 +336,7 @@ module PSX
         end
       end
 
-      channel.finish!
-      set_irq_flag(GPU)
+      schedule_completion(GPU, gpu_dma_completion_cycles(channel, total))
     end
 
     # Cap on linked-list chain walks so a self-referential chain (the case
@@ -541,9 +541,31 @@ module PSX
     # polling CHCR.BUSY see a non-zero wait. Called by transfers that want to
     # model device-side latency. Resolved by `tick_cycles`.
     def schedule_completion(channel_num, cycles)
+      if cycles <= 0
+        @channels[channel_num].finish!
+        set_irq_flag(channel_num)
+        return
+      end
+
       @channels[channel_num].busy_cycles = cycles
       @pending_completions ||= []
       @pending_completions << channel_num unless @pending_completions.include?(channel_num)
+    end
+
+    def dma_ram_cycles(word_count)
+      word_count + ((word_count + 15) / 16)
+    end
+
+    def gpu_dma_completion_cycles(channel, word_count)
+      cycles = dma_ram_cycles(word_count)
+      return cycles unless channel.sync_mode == SYNC_MANUAL && (channel.channel_ctrl & CTRL_CHOPPING) != 0
+
+      dma_window = (channel.channel_ctrl >> 16) & 0x7
+      cpu_window = (channel.channel_ctrl >> 20) & 0x7
+      blocks = word_count >> dma_window
+      chop_delay = [(1 << cpu_window) * blocks, 500].min
+      cycles += chop_delay if word_count > 4 && chop_delay > 1
+      cycles
     end
 
   end

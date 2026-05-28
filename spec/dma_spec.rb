@@ -261,6 +261,60 @@ class DMASpec < Minitest::Test
     assert_equal 0x4444_4444, ram.read32(0x100C)
   end
 
+  def test_gpu_block_dma_keeps_busy_until_ram_cycles_elapsed
+    memory = dma_memory
+    gpu = Class.new do
+      attr_reader :words
+      def initialize = @words = []
+      def gp0(word) = @words << word
+    end.new
+
+    16.times { |i| memory.write32(0x1000 + i * 4, 0xAA00_0000 | i) }
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::GPU * 4 + 3)))
+    @dma.write(0x20, 0x0000_1000)
+    @dma.write(0x24, (1 << 16) | 16)
+    @dma.write(0x28, PSX::DMA::CTRL_START_BUSY | PSX::DMA::CTRL_DIRECTION | (PSX::DMA::SYNC_REQUEST << 9))
+
+    @dma.tick(memory, gpu: gpu)
+
+    assert_equal 16, gpu.words.length
+    assert_equal PSX::DMA::CTRL_START_BUSY, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
+
+    @dma.tick_cycles(16)
+    assert_equal PSX::DMA::CTRL_START_BUSY, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
+
+    @dma.tick_cycles(1)
+    assert_equal 0, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
+  end
+
+  def test_manual_gpu_chopping_adds_capped_cpu_window_delay
+    memory = dma_memory
+    gpu = Class.new do
+      def gp0(_); end
+    end.new
+
+    32.times { |i| memory.write32(0x1000 + i * 4, 0xBB00_0000 | i) }
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::GPU * 4 + 3)))
+    @dma.write(0x20, 0x0000_1000)
+    @dma.write(0x24, 32)
+    @dma.write(0x28,
+               PSX::DMA::CTRL_START_BUSY |
+               PSX::DMA::CTRL_START_TRIGGER |
+               PSX::DMA::CTRL_DIRECTION |
+               PSX::DMA::CTRL_CHOPPING |
+               (2 << 16) | # DMA window = 4 words; 8 blocks for 32 words
+               (3 << 20))  # CPU window = 8 cycles
+
+    @dma.tick(memory, gpu: gpu)
+
+    assert_equal 98, @dma.channels[PSX::DMA::GPU].busy_cycles
+    @dma.tick_cycles(97)
+    assert_equal PSX::DMA::CTRL_START_BUSY, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
+
+    @dma.tick_cycles(1)
+    assert_equal 0, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
+  end
+
   def test_mdec_out_dma_waits_until_output_is_available
     ram = PSX::RAM.new
     bios_data = "\x00" * 512 * 1024
@@ -310,5 +364,21 @@ class DMASpec < Minitest::Test
     refute @dma.channels[PSX::DMA::MDEC_OUT].active?
     assert_equal 0x1111_2222, ram.read32(0x2000)
     assert_equal 0x3333_4444, ram.read32(0x2004)
+  end
+
+  private
+
+  def dma_memory
+    ram = PSX::RAM.new
+    bios_data = "\x00" * 512 * 1024
+    bios = PSX::BIOS.allocate
+    bios.instance_variable_set(:@data, bios_data)
+    PSX::Memory.new(
+      bios: bios,
+      ram: ram,
+      interrupts: @interrupts,
+      dma: @dma,
+      timers: PSX::Timers.new(interrupts: @interrupts)
+    )
   end
 end

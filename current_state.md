@@ -10,6 +10,22 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-style GPU block DMA completion timing:
+  - GPU block DMA now transfers data immediately but keeps CHCR busy until a
+    RAM access delay of `words + ceil(words / 16)` cycles elapses, matching
+    DuckStation's `Bus::GetDMARAMTickCount` shape.
+  - Manual sync-mode 0 chopping adds DuckStation's capped CPU-window delay
+    (`min(cpu_window * blocks, 500)`) before CHCR busy clears.
+  - Pending DMA completions suppress channel re-entry while the busy bit is
+    waiting to clear.
+  - Raw `dma/chopping` output now reports around `2176` CPU cycles for the
+    8192-byte GPU block DMA instead of the old immediate `29`-cycle class;
+    this is closer but still not hardware bit-perfect.
+- Verification:
+  - Focused DMA spec passed: `18 runs, 51 assertions, 0 failures`.
+  - Focused ps1-tests `dma/chopping` passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full suite passed: `367 runs, 961 assertions, 0 failures`.
+
 - Added DuckStation-backed SPU register coverage for the per-voice noise and
   reverb masks:
   - Ruby now exposes `NOISE_MODE_LOW/HIGH` (`0x1F801D94/96`) and
