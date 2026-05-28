@@ -10,6 +10,21 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Locked full active-image coverage for the ps1-tests 15-bit MDEC frame path:
+  - `spec/mdec_spec.rb` now decodes `.tests/mdec/frame/sunset.mdec`, applies
+    the same 15-bit stripe/block swizzle as the test helper, and compares the
+    full 320x240 active image against `.tests/mdec/frame/vram-15bit.png`
+    within the existing per-channel tolerance.
+  - The spec skips if ImageMagick's `magick` is absent, but runs in the current
+    dev environment. This turns the old five-pixel spot check into a full
+    regression for the known-good 15-bit frame layout before continuing the
+    separate 24-bit VRAM-layout investigation.
+- Verification:
+  - Focused MDEC spec passed: `16 runs, 46 assertions, 0 failures`.
+  - Focused MDEC executable spec passed: `2 runs, 10 assertions, 0 failures`.
+  - Filtered MDEC ps1-tests baseline passed: `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `428 runs, 1160 assertions, 0 failures`.
+
 - Matched DuckStation's SPU CD-audio frame consumption/capture ordering:
   - DuckStation fetches the next CD audio frame every SPU sample before
     checking `SPUCNT.cd_audio_enable`; the enable bit only controls whether

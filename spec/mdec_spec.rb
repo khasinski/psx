@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require "open3"
 
 class MDECSpec < Minitest::Test
   def setup
@@ -181,6 +182,29 @@ class MDECSpec < Minitest::Test
     end
   end
 
+  def test_ps1tests_frame_15bit_active_image_matches_reference
+    skip "ImageMagick not available" unless system("which magick >/dev/null 2>&1")
+
+    decoded = decode_mdec_frame_fixture(depth: 3)
+    vram = swizzled_15bit_frame_vram(decoded)
+    reference = png_rgb_bytes(File.expand_path("../.tests/mdec/frame/vram-15bit.png", __dir__))
+
+    mismatches = []
+    240.times do |y|
+      320.times do |x|
+        expected = reference[(y * 1024 + x) * 3, 3]
+        actual = rgb555_to_rgb888(vram[y * 1024 + x])
+        next if rgb_close?(expected, actual)
+
+        mismatches << [x, y, expected, actual]
+        break if mismatches.length >= 10
+      end
+      break if mismatches.length >= 10
+    end
+
+    assert_empty mismatches
+  end
+
   private
 
   def load_flat_identity_tables
@@ -264,5 +288,16 @@ class MDECSpec < Minitest::Test
     expected.zip(actual).each do |exp, act|
       assert_in_delta exp, act, 8, message
     end
+  end
+
+  def rgb_close?(expected, actual)
+    expected.zip(actual).all? { |exp, act| (exp - act).abs <= 8 }
+  end
+
+  def png_rgb_bytes(path)
+    data, status = Open3.capture2("magick", path, "-depth", "8", "RGB:-")
+    raise "magick failed for #{path}" unless status.success?
+
+    data.bytes
   end
 end
