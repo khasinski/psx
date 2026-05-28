@@ -8,6 +8,25 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 handoff note for the next session:
+
+- The current committed tree includes the latest GPU/MDEC/SPU/CD-ROM fixes
+  listed below, but user smoke testing reports two important regressions:
+  - FMV playback is striped again.
+  - Rage Racer Europe gets stuck on the loading screen after the monologue
+    intro when starting a new Grand Prix.
+- Treat the earlier smoke notes saying FMV was coherent and Grand Prix reached
+  race/pause as superseded by this handoff note. They were true for the
+  captured run, but the current behavior still needs fresh reproduction and
+  diagnosis.
+- The most likely next-session starting points are:
+  - Reproduce the FMV striping on the current commit and compare against the
+    last coherent screenshots/checkpoints.
+  - Reproduce the Grand Prix post-monologue stall and inspect CD-ROM/MDEC/GPU
+    state around the transition from movie playback to loading.
+  - Re-check the recent MDEC-out DMA pause and GPU DMA busy/timing changes,
+    because both have direct plausibility for striped FMV or stalled streaming.
+
 2026-05-28 latest continuation:
 
 - Added full active-region coverage for the ps1-tests 24-bit MDEC frame path:
