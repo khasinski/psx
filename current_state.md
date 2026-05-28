@@ -10,6 +10,15 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's zero-pitch SPU voice sampling order:
+  - Voices now compute `last_volume` and tick ADSR before applying the pitch
+    step, so pitch `0` does not leave stale voice volume behind.
+  - Sample position still does not advance when pitch is zero.
+- Verification:
+  - Focused SPU spec passed: `60 runs, 152 assertions, 0 failures`.
+  - Full suite passed: `395 runs, 1043 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's IRQ9-driven sampling for inactive SPU voices:
   - Inactive voices now clear stale `last_volume` during normal samples, so
     capture buffers no longer preserve old voice 1/3 levels after a voice is

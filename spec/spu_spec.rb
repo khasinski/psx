@@ -351,6 +351,22 @@ class SPUSpec < Minitest::Test
     assert_equal 0, voices[1].last_volume
   end
 
+  def test_zero_pitch_voice_still_updates_last_volume
+    voices = @spu.instance_variable_get(:@voices)
+    voice = voices[0]
+    voice.adsr_volume = 0
+    voice.adsr_phase = :sustain
+    voice.decoded_samples = Array.new(28, 4000)
+    voice.last_volume = 1234
+    @spu.instance_variable_set(:@voice_active, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0, voice.last_volume
+    assert_equal 0, voice.sample_counter
+    assert_equal 0, voice.sample_index
+  end
+
   def test_external_volume_registers_read_back
     @spu.write16(PSX::SPU::EXTERNAL_VOL_LEFT, 0x1357)
     @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x2468)

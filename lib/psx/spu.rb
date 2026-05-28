@@ -535,7 +535,6 @@ module PSX
         decode_voice_block(voice_index) if voice.decoded_samples.empty?
         pitch = modulated_pitch(voice_index, read16(0xC00 + voice_index * 0x10 + 0x04))
         pitch = [pitch, 0x3FFF].min
-        next if pitch.zero?
 
         sample = noise_enabled?(voice_index) ? signed16(@noise_level & 0xFFFF) : (voice.decoded_samples[voice.sample_index] || 0)
         volume = apply_volume(sample, voice.adsr_volume)
