@@ -25,6 +25,7 @@ later entries have fixed.
   - Focused DMA spec passed: `18 runs, 51 assertions, 0 failures`.
   - Focused ps1-tests `dma/chopping` passed: `TOTAL 1  OK 1  FAIL 0`.
   - Full suite passed: `367 runs, 961 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
 
 - Added DuckStation-backed SPU register coverage for the per-voice noise and
   reverb masks:
