@@ -85,6 +85,20 @@ Snapshot of where the emulator is and what we just spent time on.
   - Rage Europe smoke to 1.6B cycles remained stable in the 24-bit FMV path;
     `conformance-shots/rage-eu-mdec-rgb-order/ridge-008.png` shows a visible
     decoded frame.
+- Fixed MDEC RLE block termination. DuckStation ends a block once the RLE run
+  advances to coefficient 63 or beyond; the Ruby decoder only ended on
+  explicit `0xFE00` or index overflow, so streams using values like `0xF800`
+  as the final coefficient over-consumed the next block header. The
+  ps1-tests `mdec/step-by-step-log` case exposed this as a 1536-byte decode
+  where 2048 bytes were expected.
+- Added a focused MDEC spec for coefficient-63 termination.
+- Verification for the RLE termination fix:
+  - Focused MDEC spec passed: `12 runs, 22 assertions, 0 failures`.
+  - ps1-tests `mdec/4bit`, `mdec/8bit`, and `mdec/step-by-step-log` all
+    matched their `psx.log` marker expectations.
+  - Direct decode of `step-by-step-log/symbols.mdec` now produces
+    `512` output words / `2048` bytes.
+  - Full suite passed: `347 runs, 868 assertions, 0 failures`.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.

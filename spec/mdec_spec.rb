@@ -75,6 +75,14 @@ class MDECSpec < Minitest::Test
     assert_equal expected, @mdec.instance_variable_get(:@idct_table)
   end
 
+  def test_rle_run_to_last_coefficient_terminates_block
+    @mdec.instance_variable_set(:@idct_table, Array.new(64, 0))
+
+    _block, pos = @mdec.send(:decode_block, [0x0000, 0xF800, 0x0123], 0, Array.new(64, 1))
+
+    assert_equal 2, pos, "run reaching coefficient 63 should end the block without consuming next header"
+  end
+
   def test_state_snapshot_preserves_pending_output_count
     load_flat_identity_tables
 

@@ -338,19 +338,20 @@ module PSX
         val -= 0x400 if val >= 0x200    # sign-extend 10-bit
 
         idx += run + 1
-        break if idx >= 64
-
-        coef = if q_scale.zero?
-                 val * 2
-               else
-                 (val * qtable[idx] * q_scale + 4) / 8
-               end
-        coef = if q_scale.zero?
-                 clamp_signed_11(coef)
-               else
-                 clamp_signed_11(coef | 1)
-               end
-        coeffs[ZIGZAG[idx]] = coef
+        if idx < 64
+          coef = if q_scale.zero?
+                   val * 2
+                 else
+                   (val * qtable[idx] * q_scale + 4) / 8
+                 end
+          coef = if q_scale.zero?
+                   clamp_signed_11(coef)
+                 else
+                   clamp_signed_11(coef | 1)
+                 end
+          coeffs[ZIGZAG[idx]] = coef
+        end
+        break if idx >= 63
       end
       # End-of-stream without an explicit EOB = implicit EOB; emit the
       # partial block we built up. (Some encoders, including the one
