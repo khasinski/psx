@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU repeat-address side effects:
+  - Writing a voice ADPCM repeat address (`VxADSR repeat`, offset `0x0E`)
+    now updates the live voice state, not just the register shadow.
+  - Voices now track first-block state and the explicit-repeat-address
+    `ignore_loop_address` latch. A loop-start ADPCM block still sets the
+    repeat address during the key-on first-block window, but later explicit
+    repeat writes are preserved instead of being overwritten by subsequent
+    loop-start flags.
+- Verification:
+  - Focused SPU spec passed: `36 runs, 74 assertions, 0 failures`.
+  - Full suite passed: `371 runs, 965 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU ADSR register side effects:
   - Writing ADSR low/high (`VxADSR1/2`) while a voice is active now rebuilds
     the live ADSR envelope instead of only updating the register shadow.

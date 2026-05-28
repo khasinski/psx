@@ -55,6 +55,8 @@ module PSX
       :sample_index,
       :sample_counter,
       :last_volume,
+      :is_first_block,
+      :ignore_loop_address,
       keyword_init: true
     )
 
@@ -98,7 +100,9 @@ module PSX
           current_block_flags: 0,
           sample_index: 0,
           sample_counter: 0,
-          last_volume: 0
+          last_volume: 0,
+          is_first_block: false,
+          ignore_loop_address: false
         )
       end
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
@@ -330,6 +334,8 @@ module PSX
         @voices[voice].last_samples = [0, 0]
         @voices[voice].sample_index = 0
         @voices[voice].sample_counter = 0
+        @voices[voice].is_first_block = true
+        @voices[voice].ignore_loop_address = false
         update_adsr_envelope(voice)
         decode_voice_block(voice)
       end
@@ -368,6 +374,10 @@ module PSX
         update_adsr_envelope(voice_index) unless voice.adsr_phase == :off
       when 0x0C
         voice.adsr_volume = signed16(value)
+      when 0x0E
+        voice.repeat_address = value & ~1
+        ignore_loop_address = voice.adsr_phase == :off || !voice.is_first_block
+        voice.ignore_loop_address ||= ignore_loop_address
       end
     end
 
@@ -455,7 +465,7 @@ module PSX
       voice.decoded_samples = samples
       voice.last_samples = last
       voice.current_block_flags = block[:flags]
-      voice.repeat_address = voice.current_address if (block[:flags] & 0x04) != 0
+      voice.repeat_address = voice.current_address if (block[:flags] & 0x04) != 0 && !voice.ignore_loop_address
     end
 
     def advance_voice_block(voice_index)
@@ -463,6 +473,7 @@ module PSX
       voice = @voices[voice_index]
       voice.sample_index -= 28
       voice.current_address = (voice.current_address + 2) & 0xFFFF
+      voice.is_first_block = false
 
       if (voice.current_block_flags & 0x01) != 0
         @endx |= mask

@@ -267,7 +267,9 @@ module PSX
             current_block_flags: voice[:current_block_flags] || 0,
             sample_index: voice[:sample_index] || 0,
             sample_counter: voice[:sample_counter] || 0,
-            last_volume: voice[:last_volume] || 0
+            last_volume: voice[:last_volume] || 0,
+            is_first_block: voice[:is_first_block] || false,
+            ignore_loop_address: voice[:ignore_loop_address] || false
           )
         end
       end

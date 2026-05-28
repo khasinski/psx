@@ -13,7 +13,7 @@ round-trip the full machine state. SPU audio is still early but now mixes
 basic ADPCM voices plus CDDA/CD-XA through the SPU path. There is no PGXP,
 and many retail games still hit content-specific blockers (FMV codec init,
 timing-sensitive CD paths), so don't expect to play full games yet.
-Think of it as an executable spec for the PS1. 369/369 unit tests,
+Think of it as an executable spec for the PS1. 371/371 unit tests,
 18/21 of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
 cases that have a `psx.log` reference.
 
