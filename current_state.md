@@ -10,6 +10,15 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Extended SPU transfer IRQ coverage to DMA reads:
+  - Added the read-side companion regression for DuckStation's after-halfword
+    RAM IRQ check when DMA reads advance the SPU transfer pointer onto the
+    next 8-byte IRQ-address boundary.
+- Verification:
+  - Focused SPU spec passed: `68 runs, 177 assertions, 0 failures`.
+  - Full suite passed: `403 runs, 1068 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's SPU transfer RAM IRQ timing:
   - Manual and DMA SPU RAM transfers now check the RAM IRQ address after each
     halfword advances the transfer pointer, instead of before individual byte
