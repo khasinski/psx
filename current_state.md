@@ -21,9 +21,20 @@ Snapshot of where the emulator is and what we just spent time on.
   - Focused CD-ROM spec passed: `52 runs, 170 assertions, 0 failures`.
   - Full suite passed: `350 runs, 900 assertions, 0 failures`.
   - ps1-tests `cdrom/getloc` with a synthetic disc now gets past the
-    data-track SeekL/GetlocL mismatch. It exposes a separate remaining pregap
-    edge: `SetLoc 00:00:30` maps to negative LBA `-120` and real hardware
-    accepts it, while Ruby currently treats it as out of range.
+    data-track SeekL/GetlocL mismatch. It exposed a separate pregap edge:
+    `SetLoc 00:00:30` maps to negative LBA `-120`, and real hardware accepts
+    it.
+- Added minimal implicit track-one pregap handling. A seek to logical LBAs in
+  `-150...0` now succeeds against data track 1 and fabricates a mode-2
+  header/subheader for GetlocL; this covers the ps1-tests `SetLoc 00:00:30`
+  case, which reports header `[00:00:29]`.
+- Verification for pregap seek:
+  - Focused CD-ROM spec passed: `53 runs, 176 assertions, 0 failures`.
+  - Focused disc spec passed: `8 runs, 128 assertions, 0 failures`.
+  - Full suite passed: `351 runs, 906 assertions, 0 failures`.
+  - A live `cdrom/getloc` probe with the synthetic disc timed out before
+    emitting comparable test output, so this path is covered by regression
+    specs but not yet by a full ps1-tests pass.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware

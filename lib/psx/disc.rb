@@ -163,6 +163,11 @@ module PSX
       @tracks.find { |t| lba >= t.lba_start && lba < t.lba_end }
     end
 
+    def pregap_lba?(lba)
+      lba >= -PREGAP_FRAMES && lba < 0 &&
+        @tracks.any? { |t| t.number == 1 && t.data? && t.lba_start.zero? }
+    end
+
     # Read the raw 2352-byte sector at absolute LBA. Returns a binary
     # String. Raises if LBA is out of range or on an audio track (audio
     # data isn't usable as program data).
@@ -214,6 +219,13 @@ module PSX
     # that stream CD-XA (FMV, in-game music) toggle this mode and read
     # the sub-header first to filter which channel they want.
     def read_whole_sector(lba)
+      if pregap_lba?(lba)
+        m, s, f = Disc.lba_to_msf(lba - 1)
+        header = [Disc.to_bcd(m), Disc.to_bcd(s), Disc.to_bcd(f), 0x02].pack("C*")
+        subheader = [0x00, 0x00, 0x08, 0x00].pack("C*") * 2
+        return (header + subheader + ("\x00" * 2048).b + ("\x00" * 280).b).b
+      end
+
       raw = read_sector(lba)
       case raw.bytesize
       when 2048

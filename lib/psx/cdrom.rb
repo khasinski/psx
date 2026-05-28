@@ -385,6 +385,7 @@ module PSX
 
     def data_track_for_lba(lba)
       track = @disc&.track_for_lba(lba)
+      return @disc.tracks.find { |t| t.number == 1 && t.data? } if track.nil? && @disc&.pregap_lba?(lba)
       return nil if track.nil? || track.audio?
 
       track

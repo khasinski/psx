@@ -284,6 +284,32 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x00, 0x02, 0x01, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
   end
 
+  def test_seek_l_accepts_implicit_track_one_pregap
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x30)
+    @cdrom.write8(1, 0x02) # SetLoc LBA -120, inside the implicit track-one pregap
+    drain_response
+
+    @cdrom.write8(1, 0x15) # SeekL
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEKING, @cdrom.read8(1)
+    ack_response
+    assert drive_until_int(2, max_ticks: 40)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.write8(1, 0x10) # GetlocL
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+
+    assert_equal [0x00, 0x00, 0x29, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
+  end
+
   def test_seek_l_out_of_range_finishes_with_seek_error
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 
