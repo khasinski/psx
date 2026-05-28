@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added executable-level regression coverage for the MDEC frame path:
+  - `spec/mdec_executable_spec.rb` now boots the ps1-tests
+    `.tests/mdec/frame/frame-15bit.exe` and `frame-24bit.exe` binaries through
+    the emulator, waits for their `Done` marker, and verifies that all 20
+    software-read stripes were attempted/completed.
+  - This locks the exact failure mode fixed by the delayed MDEC output-empty
+    status bit: the 15-bit frame helper previously completed 19 stripes and
+    then stalled inside the 20th `mdec_readDecoded(...)`.
+  - The spec skips when the BIOS or ps1-tests frame binaries are absent.
+- Verification:
+  - Focused MDEC executable specs passed: `2 runs, 10 assertions, 0 failures`.
+  - Full suite passed: `425 runs, 1145 assertions, 0 failures`.
+
 - Fixed the ps1-tests MDEC frame helper hang on the final software read:
   - The actual `.tests/mdec/frame/frame-15bit.exe` executable completed 19
     stripes and then stuck inside the 20th `mdec_readDecoded(...)` call. Its
