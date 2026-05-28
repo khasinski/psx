@@ -163,6 +163,10 @@ class MDECSpec < Minitest::Test
     assert_equal [173, 105, 128], output_bytes[0, 3]
   end
 
+  def test_ycbcr_conversion_sign_extends_9bit_channel_sums_before_clamping
+    assert_equal [255, 136, 255], @mdec.send(:ycbcr_to_rgb, -128, -128, -128)
+  end
+
   def test_15bit_colour_output_rounds_8bit_channels_to_5bit
     assert_equal 0x4631, @mdec.send(:rgb888_to_rgb555, 132, 132, 132)
   end

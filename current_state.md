@@ -10,6 +10,26 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's integer MDEC YCbCr conversion path:
+  - DuckStation applies integer BT.601 coefficients, rounds with `+0x80`,
+    sign-extends each 9-bit channel sum, then clamps/biases to the requested
+    signed or unsigned byte range. The Ruby MDEC path still used floating
+    point conversion and clamped before the 9-bit wrap behavior.
+  - `ycbcr_to_rgb` now uses DuckStation's current integer formulas, including
+    the masked green-channel terms and 9-bit sign extension before `output_byte`.
+  - Added a focused regression for an overflow case where the old float path
+    produced `[0, 135, 0]` but DuckStation/current hardware semantics produce
+    `[255, 136, 255]`.
+  - Re-probed the ps1-tests 24-bit frame VRAM dump: the raw halfword mismatch
+    improved from `30595` active halfwords over tolerance to `27715`, but it
+    is not fully closed yet. Keep treating 24-bit VRAM-layout/image parity as
+    follow-up work.
+- Verification:
+  - Focused MDEC spec passed: `17 runs, 47 assertions, 0 failures`.
+  - Focused MDEC executable spec passed: `2 runs, 10 assertions, 0 failures`.
+  - Filtered MDEC ps1-tests baseline passed: `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `429 runs, 1161 assertions, 0 failures`.
+
 - Locked full active-image coverage for the ps1-tests 15-bit MDEC frame path:
   - `spec/mdec_spec.rb` now decodes `.tests/mdec/frame/sunset.mdec`, applies
     the same 15-bit stripe/block swizzle as the test helper, and compares the

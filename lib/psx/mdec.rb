@@ -466,10 +466,10 @@ module PSX
     # decoder outputs. Unsigned output adds the hardware +128 bias; signed
     # output leaves the signed byte value in two's-complement form.
     def ycbcr_to_rgb(y, cb, cr)
-      r = y + 1.402 * cr
-      g = y - 0.3441 * cb - 0.7139 * cr
-      b = y + 1.7720 * cb
-      [output_byte(r.round), output_byte(g.round), output_byte(b.round)]
+      r = sign_extend_9(y + (((359 * cr) + 0x80) >> 8))
+      g = sign_extend_9(y + ((((-88 * cb) & ~0x1F) + ((-183 * cr) & ~0x07) + 0x80) >> 8))
+      b = sign_extend_9(y + (((454 * cb) + 0x80) >> 8))
+      [output_byte(r), output_byte(g), output_byte(b)]
     end
 
     def output_byte(v)
