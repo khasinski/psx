@@ -10,6 +10,14 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Extended SPU late RAM IRQ coverage:
+  - Added the companion regression for writing `SPU_IRQ_ADDR` while IRQ9 is
+    already enabled and an active decoded voice overlaps the requested IRQ
+    address.
+- Verification:
+  - Focused SPU spec passed: `54 runs, 136 assertions, 0 failures`.
+  - Full suite passed: `389 runs, 1027 assertions, 0 failures`.
+
 - Matched DuckStation's late SPU RAM IRQ checks for decoded voices:
   - Enabling IRQ9 or writing the IRQ address now scans the current transfer
     pointer plus active voices with decoded ADPCM samples.

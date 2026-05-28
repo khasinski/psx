@@ -676,6 +676,19 @@ class SPUSpec < Minitest::Test
     assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
   end
 
+  def test_irq_address_write_checks_active_voice_sample_addresses
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(0xC00 + 0x06, 0x0200)
+    write_adpcm_block(0x0200, flags: 0x00)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
   def test_disabling_irq9_clears_spustat_irq_flag
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0100)
     @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
