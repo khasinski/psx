@@ -132,6 +132,18 @@ Snapshot of where the emulator is and what we just spent time on.
     still show the flow entering attract/race scenes rather than a captured
     menu transition, so the exact title Start/menu behavior remains a
     follow-up target.
+- Follow-up resume probe with dense captures:
+  - Command:
+    `PSX_LOAD_STATE=tmp/rage-eu-2p4b.state PSX_BASE_CYCLES=2400000000 PSX_CYCLES=300000000 PSX_CHUNK=25000000 PSX_SCREENSHOT_EVERY_CHUNKS=1 PSX_INPUT_SCRIPT=start:2450000000:2500000000 ... bin/_ridge-boot`
+  - `conformance-shots/rage-eu-title-resume-edge/ridge-001.png` starts on the
+    title screen.
+  - `ridge-004.png` shows the Start transition to `BRISE GP` /
+    `"OVER PASS CITY"`.
+  - `ridge-006.png` overlays that event text on the in-engine tunnel scene,
+    and `ridge-008.png` continues into the attract/race scene.
+  - This proves the current tree accepts a title-screen Start edge in Rage
+    Europe; the earlier full-run hold window missed the edge and only proved
+    eventual attract mode.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
