@@ -10,6 +10,22 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's SPU CD-audio frame consumption/capture ordering:
+  - DuckStation fetches the next CD audio frame every SPU sample before
+    checking `SPUCNT.cd_audio_enable`; the enable bit only controls whether
+    that frame is mixed into output/reverb.
+  - The Ruby SPU previously left queued CD/XA samples untouched while CD audio
+    mixing was disabled, which could desynchronise stream consumption and made
+    capture buffers write zeros instead of the raw CD frame.
+  - `tick_sample` now always advances one queued CD frame and writes it to
+    capture buffers. When the mix-enable bit is clear, output remains silent.
+  - Updated the focused CD-audio disabled regression to assert silent output,
+    consumed queue entries, and raw capture-buffer writes.
+- Verification:
+  - Focused SPU spec passed: `70 runs, 196 assertions, 0 failures`.
+  - Filtered SPU ps1-tests baseline passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full suite passed: `427 runs, 1158 assertions, 0 failures`.
+
 - Matched DuckStation's SPU noise-generator sample ordering:
   - DuckStation samples voices using the current noise level, then advances
     the noise generator once for the next audio frame. The Ruby SPU had been

@@ -637,11 +637,11 @@ module PSX
 
       update_noise
 
+      cd_left = @cd_audio_fifo.shift || 0
+      cd_right = @cd_audio_fifo.shift || 0
+      cd_capture_left = cd_left
+      cd_capture_right = cd_right
       if (@cnt & 0x0001) != 0
-        cd_left = @cd_audio_fifo.shift || 0
-        cd_right = @cd_audio_fifo.shift || 0
-        cd_capture_left = cd_left
-        cd_capture_right = cd_right
         cd_left_volume = apply_volume(cd_left, signed16(@cd_audio_left_volume))
         cd_right_volume = apply_volume(cd_right, signed16(@cd_audio_right_volume))
         left_sum += cd_left_volume

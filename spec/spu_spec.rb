@@ -822,7 +822,7 @@ class SPUSpec < Minitest::Test
     assert_equal 0, voices[1].sample_index
   end
 
-  def test_cd_audio_queue_is_not_consumed_when_spucnt_cd_audio_is_disabled
+  def test_cd_audio_queue_advances_when_spucnt_cd_audio_is_disabled
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
     @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x7FFF)
@@ -832,7 +832,9 @@ class SPUSpec < Minitest::Test
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
     assert_equal [0, 0], frames.first
-    assert_equal [1234, 5678], @spu.instance_variable_get(:@cd_audio_fifo)
+    assert_empty @spu.instance_variable_get(:@cd_audio_fifo)
+    assert_equal 1234, @spu.send(:read_ram_s16, 0x000)
+    assert_equal 5678, @spu.send(:read_ram_s16, 0x400)
   end
 
   def test_clearing_spucnt_enable_forces_active_voices_off
