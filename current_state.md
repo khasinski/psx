@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Extended scalar SPU reverb work-buffer coverage:
+  - Added focused regressions proving SPUCNT reverb master enable controls
+    whether the reverb comb/all-pass stage writes mix destinations back into
+    SPU RAM.
+  - The disabled case still computes upsample output but leaves work RAM
+    unchanged, matching DuckStation's `reverb_master_enable` write gates.
+- Verification:
+  - Focused SPU spec passed: `57 runs, 145 assertions, 0 failures`.
+  - Full suite passed: `392 runs, 1036 assertions, 0 failures`.
+
 - Replaced the simple SPU reverb delay tap with a scalar DuckStation-backed
   work-buffer path:
   - Reverb input is now written through the 64-step downsample history buffer

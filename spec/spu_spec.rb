@@ -483,6 +483,36 @@ class SPUSpec < Minitest::Test
     assert_equal 3000, upsample[0][0x20]
   end
 
+  def test_reverb_master_enable_writes_mix_destinations
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x06, 0x4000) # ACC_COEF_A
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x18, 0x0001) # ACC_SRC_A left
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x34, 0x0004) # MIX_DEST_A left
+    acc_addr = @spu.send(:reverb_memory_address, 0x0001 << 2)
+    mix_addr = @spu.send(:reverb_memory_address, 0x0004 << 2)
+    @spu.send(:write_ram_s16, acc_addr, 2000)
+
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 2)
+
+    assert_equal 1000, @spu.send(:read_ram_s16, mix_addr)
+  end
+
+  def test_reverb_master_disable_leaves_mix_destinations_unchanged
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x06, 0x4000) # ACC_COEF_A
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x18, 0x0001) # ACC_SRC_A left
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x34, 0x0004) # MIX_DEST_A left
+    acc_addr = @spu.send(:reverb_memory_address, 0x0001 << 2)
+    mix_addr = @spu.send(:reverb_memory_address, 0x0004 << 2)
+    @spu.send(:write_ram_s16, acc_addr, 2000)
+    @spu.send(:write_ram_s16, mix_addr, -1234)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 2)
+
+    assert_equal(-1234, @spu.send(:read_ram_s16, mix_addr))
+  end
+
   def test_reverb_enabled_voice_sends_to_reverb_input
     voices = @spu.instance_variable_get(:@voices)
     voice = voices[0]
