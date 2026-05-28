@@ -10,6 +10,17 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Follow-up audit after the Rage Grand Prix fix:
+  - Re-ran the separately documented CD-ROM ps1-tests baseline with
+    `PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue`; it still passes
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Checked the old `next_sector_cycles == 1` suggested move. That note is
+    historical: current `next_sector_cycles` returns the normal 1x/2x sector
+    cadence. The remaining `@sector_cycles = 1` path is only a retry delay
+    while an already-open BFRD FIFO is partially unread, not the old whole-
+    sector fast-stream cadence shortcut.
+  - Fixed the stale README status line from `419/419` to `421/421` unit tests.
+
 - Fixed the Rage Racer Grand Prix loading-screen stall after the monologue:
   - The first bad status transition was a `SeekP` (`0x16`) to LBA `59692`,
     which is track 2 audio on the Europe disc. The emulator treated all seeks
