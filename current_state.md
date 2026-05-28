@@ -8,6 +8,27 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM Init reset delay:
+
+- Matched DuckStation's minimum `Init`/soft-reset completion delay:
+  - `Init` now queues its delayed INT2 after `4,000,000` cycles instead of the
+    old generic short command delay.
+  - Existing behavior that preserves the IRQ enable mask across `Init` is
+    retained, so BIOS callbacks still receive the completion interrupt.
+- Added/updated focused CD-ROM regressions for:
+  - `Init` preserving IRQ enable while waiting for the delayed INT2.
+  - `Init` not delivering its second response until the DuckStation reset
+    delay has elapsed.
+  - Last valid `GetlocL` header preservation after `Init` with the longer
+    completion window.
+- Verification:
+  - Focused CD-ROM spec passed: `82 runs, 300 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed using a larger
+    wall cap for the now-slower timing test:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `455 runs, 1257 assertions, 0 failures`.
+
 2026-05-28 CD-ROM SetMode speed-change delay:
 
 - Matched DuckStation's active-read/play speed-change timing:

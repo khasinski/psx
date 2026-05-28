@@ -19,11 +19,27 @@ class CDROMSpec < Minitest::Test
     @cdrom.write8(0, 0)        # index = 0
     @cdrom.write8(1, 0x0A)     # Cmd Init
 
-    drive_until_int(2)
+    drain_response
+    assert drive_until_int(2, max_ticks: 250)
     assert @interrupts.stat & PSX::Interrupts::IRQ_CDROM != 0,
            "IRQ_CDROM should be raised by Init's INT2 (was @irq_enable preserved?)"
     # The actual enable bits — should NOT be 0 after Init.
     assert_equal 0x1F, @cdrom.instance_variable_get(:@irq_enable)
+  end
+
+  def test_init_second_response_uses_duckstation_reset_delay
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0A) # Init
+    drain_response
+
+    @cdrom.tick(PSX::CDROM::CYCLES_INIT_RESPONSE - PSX::CDROM::CYCLES_PER_RESPONSE - 1)
+    assert_equal 0, @cdrom.instance_variable_get(:@irq_flags)
+
+    @cdrom.tick(1)
+    assert_equal 2, @cdrom.instance_variable_get(:@irq_flags)
   end
 
   # OpenBIOS's initiateDMA writes CDROM_REG3 = 0 then = 0x80 to gate the
@@ -550,7 +566,7 @@ class CDROMSpec < Minitest::Test
     deliver_first_sector
     @cdrom.write8(1, 0x0A) # Init
     drain_response
-    assert drive_until_int(2, max_ticks: 40)
+    assert drive_until_int(2, max_ticks: 250)
     ack_response
 
     @cdrom.write8(1, 0x10) # GetlocL

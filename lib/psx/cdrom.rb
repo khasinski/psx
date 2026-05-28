@@ -40,6 +40,7 @@ module PSX
     CYCLES_PER_SECTOR_1X = 33_868_800 / 75
     CYCLES_PER_SECTOR_2X = CYCLES_PER_SECTOR_1X / 2
     CYCLES_PER_RESPONSE  = 20_000
+    CYCLES_INIT_RESPONSE = 4_000_000
     CYCLES_MOTOR_ON_RESPONSE = 400_000
     CYCLES_SPEED_CHANGE_SINGLE_TO_DOUBLE = 20_321_280
     CYCLES_SPEED_CHANGE_DOUBLE_TO_SINGLE = 23_708_160
@@ -867,7 +868,7 @@ module PSX
       @last_subq_valid = saved_last_subq_valid
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
       queue_response(0, 3, [@stat])
-      queue_response(CYCLES_PER_RESPONSE * 4, 2, [@stat])
+      queue_response(CYCLES_INIT_RESPONSE, 2, [@stat])
     end
 
     def cmd_mute
