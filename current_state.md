@@ -10,6 +10,20 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU fixed-volume/current-volume behavior:
+  - Main and per-voice volume writes now reset a separate current-volume
+    level instead of using the raw register bits directly during mixing.
+  - Fixed-volume registers now use DuckStation's signed 15-bit, shifted-left
+    interpretation; for example `0x3FFF` becomes `0x7FFE`, `0x4000` becomes
+    `0x8000`, and `0x7FFF` becomes `0xFFFE`.
+  - Current main-volume reads (`0xDB8/0xDBA`) and current per-voice volume
+    reads (`0xE00..0xE5E`) now expose those live levels.
+  - Dynamic sweep ticking is still a remaining SPU conformance gap.
+- Verification:
+  - Focused SPU spec passed: `37 runs, 78 assertions, 0 failures`.
+  - Full suite passed: `372 runs, 969 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU repeat-address side effects:
   - Writing a voice ADPCM repeat address (`VxADSR repeat`, offset `0x0E`)
     now updates the live voice state, not just the register shadow.

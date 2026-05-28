@@ -31,6 +31,9 @@ module PSX
     REVERB_ON_HIGH    = 0xD9A
     CD_AUDIO_VOL_LEFT = 0xDB0
     CD_AUDIO_VOL_RIGHT = 0xDB2
+    CURRENT_MAIN_VOL_LEFT = 0xDB8
+    CURRENT_MAIN_VOL_RIGHT = 0xDBA
+    CURRENT_VOICE_VOL_BASE = 0xE00
     CYCLES_PER_SAMPLE = 768
 
     # SPUCNT bits 4-5 = transfer mode
@@ -57,6 +60,8 @@ module PSX
       :last_volume,
       :is_first_block,
       :ignore_loop_address,
+      :left_volume,
+      :right_volume,
       keyword_init: true
     )
 
@@ -79,6 +84,8 @@ module PSX
       @voice_active = 0
       @main_left_volume = 0
       @main_right_volume = 0
+      @main_left_current_volume = 0
+      @main_right_current_volume = 0
       @pitch_modulation_enable = 0
       @noise_mode_enable = 0
       @noise_count = 0
@@ -102,7 +109,9 @@ module PSX
           sample_counter: 0,
           last_volume: 0,
           is_first_block: false,
-          ignore_loop_address: false
+          ignore_loop_address: false,
+          left_volume: 0,
+          right_volume: 0
         )
       end
       # 1KB shadow of the SPU register window (0x1F801C00..0x1F801FFF).
@@ -138,7 +147,12 @@ module PSX
       when SPUSTAT           then @stat
       when CD_AUDIO_VOL_LEFT then @cd_audio_left_volume
       when CD_AUDIO_VOL_RIGHT then @cd_audio_right_volume
+      when CURRENT_MAIN_VOL_LEFT then @main_left_current_volume & 0xFFFF
+      when CURRENT_MAIN_VOL_RIGHT then @main_right_current_volume & 0xFFFF
       else
+        current_voice_volume = read_current_voice_volume(offset)
+        return current_voice_volume unless current_voice_volume.nil?
+
         idx = offset - 0xC00
         return 0 unless idx >= 0 && idx < 0x400 - 1
         @regs.getbyte(idx) | (@regs.getbyte(idx + 1) << 8)
@@ -205,8 +219,10 @@ module PSX
         @dtc = v
       when MAIN_VOL_LEFT
         @main_left_volume = v
+        @main_left_current_volume = reset_volume_level(v, @main_left_current_volume)
       when MAIN_VOL_RIGHT
         @main_right_volume = v
+        @main_right_current_volume = reset_volume_level(v, @main_right_current_volume)
       when PITCH_MOD_LOW
         @pitch_modulation_enable = (@pitch_modulation_enable & 0xFFFF_0000) | v
       when PITCH_MOD_HIGH
@@ -370,6 +386,10 @@ module PSX
       reg = voice_offset & 0x0F
       voice = @voices[voice_index]
       case reg
+      when 0x00
+        voice.left_volume = reset_volume_level(value, voice.left_volume)
+      when 0x02
+        voice.right_volume = reset_volume_level(value, voice.right_volume)
       when 0x08, 0x0A
         update_adsr_envelope(voice_index) unless voice.adsr_phase == :off
       when 0x0C
@@ -420,8 +440,8 @@ module PSX
         sample = noise_enabled?(voice_index) ? signed16(@noise_level & 0xFFFF) : (voice.decoded_samples[voice.sample_index] || 0)
         volume = apply_volume(sample, voice.adsr_volume)
         voice.last_volume = volume
-        left_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10)))
-        right_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10 + 0x02)))
+        left_sum += apply_volume(volume, voice.left_volume)
+        right_sum += apply_volume(volume, voice.right_volume)
         tick_voice_adsr(voice_index)
 
         voice.sample_counter += pitch
@@ -442,8 +462,8 @@ module PSX
         right_sum += apply_volume(cd_right, signed16(@cd_audio_right_volume))
       end
 
-      left_sum = apply_volume(clamp16(left_sum), signed16(@main_left_volume))
-      right_sum = apply_volume(clamp16(right_sum), signed16(@main_right_volume))
+      left_sum = apply_volume(clamp16(left_sum), @main_left_current_volume)
+      right_sum = apply_volume(clamp16(right_sum), @main_right_current_volume)
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
     end
 
@@ -634,6 +654,21 @@ module PSX
 
     def apply_volume(sample, volume)
       (sample * volume) >> 15
+    end
+
+    def reset_volume_level(register, current_level)
+      return current_level if (register & 0x8000) != 0
+
+      value = register & 0x7FFF
+      value -= 0x8000 if (value & 0x4000) != 0
+      value * 2
+    end
+
+    def read_current_voice_volume(offset)
+      return nil unless offset >= CURRENT_VOICE_VOL_BASE && offset < CURRENT_VOICE_VOL_BASE + 24 * 4
+
+      voice = @voices[(offset - CURRENT_VOICE_VOL_BASE) / 4]
+      ((offset & 0x02).zero? ? voice.left_volume : voice.right_volume) & 0xFFFF
     end
 
     def signed16(value)

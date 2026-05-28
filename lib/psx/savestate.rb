@@ -217,6 +217,8 @@ module PSX
         voice_active: @voice_active,
         main_left_volume: @main_left_volume,
         main_right_volume: @main_right_volume,
+        main_left_current_volume: @main_left_current_volume || 0,
+        main_right_current_volume: @main_right_current_volume || 0,
         pitch_modulation_enable: @pitch_modulation_enable || 0,
         noise_mode_enable: @noise_mode_enable || 0,
         noise_count: @noise_count || 0,
@@ -244,6 +246,8 @@ module PSX
       @voice_active = s[:voice_active] || 0
       @main_left_volume = s[:main_left_volume] || 0
       @main_right_volume = s[:main_right_volume] || 0
+      @main_left_current_volume = s[:main_left_current_volume] || 0
+      @main_right_current_volume = s[:main_right_current_volume] || 0
       @pitch_modulation_enable = s[:pitch_modulation_enable] || 0
       @noise_mode_enable = s[:noise_mode_enable] || 0
       @noise_count = s[:noise_count] || 0
@@ -269,7 +273,9 @@ module PSX
             sample_counter: voice[:sample_counter] || 0,
             last_volume: voice[:last_volume] || 0,
             is_first_block: voice[:is_first_block] || false,
-            ignore_loop_address: voice[:ignore_loop_address] || false
+            ignore_loop_address: voice[:ignore_loop_address] || false,
+            left_volume: voice[:left_volume] || 0,
+            right_volume: voice[:right_volume] || 0
           )
         end
       end
