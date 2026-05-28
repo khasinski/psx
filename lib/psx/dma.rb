@@ -514,38 +514,51 @@ module PSX
       set_irq_flag(MDEC_IN)
     end
 
-    # MDEC0 -> RAM (channel 1). Game configures dest addr + block_size and
-    # we drain the decoder's output FIFO into RAM. Phase 2: the FIFO is
-    # still empty (no decoder yet), so reads return 0 and the destination
-    # buffer ends up zero-filled — better than hanging.
+    # MDEC0 -> RAM (channel 1). DuckStation starts a request-mode block when
+    # MDEC DRQ is asserted, reads whatever words are currently in the output
+    # FIFO, and advances the DMA block even if the FIFO empties before the
+    # full block size. Under-read destination words are left untouched.
     def transfer_mdec_out(memory)
       channel = @channels[MDEC_OUT]
       return unless @mdec&.data_out_available?
 
       size  = channel.block_size; size  = 0x10000 if size.zero?
       count = channel.block_count; count = 1     if count.zero?
-      total = size * count
       addr  = channel.base_addr
       step  = channel.step
-      transferred = 0
 
-      while transferred < total && @mdec&.data_out_available?
-        word = @mdec ? @mdec.read32_data : 0
-        memory.write32(addr & 0x1F_FFFC, word)
-        addr = (addr + step) & 0xFFFF_FFFF
-        transferred += 1
-      end
+      case channel.sync_mode
+      when SYNC_REQUEST
+        blocks_remaining = count
 
-      remaining = total - transferred
-      if remaining.positive?
-        channel.base_addr = addr & 0x00FF_FFFC
-        if remaining <= size
-          channel.block_ctrl = (1 << 16) | remaining
-        else
-          remaining_blocks = (remaining + size - 1) / size
-          channel.block_ctrl = (remaining_blocks << 16) | size
+        while blocks_remaining.positive? && @mdec&.data_out_available?
+          block_addr = addr
+          transferred = 0
+          while transferred < size && @mdec&.data_out_available?
+            word = @mdec.read32_data
+            memory.write32(block_addr & 0x1F_FFFC, word)
+            block_addr = (block_addr + step) & 0xFFFF_FFFF
+            transferred += 1
+          end
+
+          addr = (addr + (step * size)) & 0xFFFF_FFFF
+          blocks_remaining -= 1
         end
-        return true
+
+        if blocks_remaining.positive?
+          channel.base_addr = addr & 0x00FF_FFFC
+          channel.block_ctrl = (blocks_remaining << 16) | size
+          return true
+        end
+      else
+        total = size * count
+        transferred = 0
+        while transferred < total && @mdec&.data_out_available?
+          word = @mdec.read32_data
+          memory.write32(addr & 0x1F_FFFC, word)
+          addr = (addr + step) & 0xFFFF_FFFF
+          transferred += 1
+        end
       end
 
       channel.finish!

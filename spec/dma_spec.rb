@@ -392,7 +392,7 @@ class DMASpec < Minitest::Test
     assert_equal 0x3333_4444, ram.read32(0x2004)
   end
 
-  def test_mdec_out_dma_pauses_when_output_fifo_empties_mid_block
+  def test_mdec_out_dma_underread_advances_request_block
     ram = PSX::RAM.new
     bios_data = "\x00" * 512 * 1024
     bios = PSX::BIOS.allocate
@@ -432,18 +432,66 @@ class DMASpec < Minitest::Test
 
     @dma.tick(memory)
 
-    assert @dma.channels[PSX::DMA::MDEC_OUT].active?, "MDEC-out DMA should stay armed for the rest of the block"
-    assert_equal 0x0000_2004, @dma.channels[PSX::DMA::MDEC_OUT].base_addr
-    assert_equal((1 << 16) | 2, @dma.channels[PSX::DMA::MDEC_OUT].block_ctrl)
+    refute @dma.channels[PSX::DMA::MDEC_OUT].active?, "DuckStation completes the request block after an under-read"
     assert_equal 0x1111_2222, ram.read32(0x2000)
-    assert_equal 0, ram.read32(0x2004), "DMA must not synthesize words when the MDEC FIFO is empty"
+    assert_equal 0, ram.read32(0x2004), "MDEC DMA under-read must leave later words untouched"
+    assert_equal 0, ram.read32(0x2008), "MDEC DMA under-read must not synthesize padding words"
+  end
 
-    fake_mdec.provide([0x3333_4444, 0x5555_6666])
+  def test_mdec_out_dma_waits_after_underread_when_request_blocks_remain
+    ram = PSX::RAM.new
+    bios_data = "\x00" * 512 * 1024
+    bios = PSX::BIOS.allocate
+    bios.instance_variable_set(:@data, bios_data)
+    memory = PSX::Memory.new(
+      bios: bios,
+      ram: ram,
+      interrupts: @interrupts,
+      dma: @dma,
+      timers: PSX::Timers.new(interrupts: @interrupts)
+    )
+    @dma.memory = memory
+
+    fake_mdec = Class.new do
+      def initialize(words)
+        @words = words.dup
+      end
+
+      def provide(words)
+        @words.concat(words)
+      end
+
+      def data_out_available?
+        !@words.empty?
+      end
+
+      def read32_data
+        @words.shift || 0
+      end
+    end.new([0x1111_2222])
+
+    @dma.mdec = fake_mdec
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::MDEC_OUT * 4 + 3)))
+    @dma.write(0x10, 0x0000_2000)
+    @dma.write(0x14, (2 << 16) | 3)
+    @dma.write(0x18, PSX::DMA::CTRL_START_BUSY | (PSX::DMA::SYNC_REQUEST << 9))
+
+    @dma.tick(memory)
+
+    assert @dma.channels[PSX::DMA::MDEC_OUT].active?, "remaining request blocks should stay armed"
+    assert_equal 0x0000_200C, @dma.channels[PSX::DMA::MDEC_OUT].base_addr
+    assert_equal((1 << 16) | 3, @dma.channels[PSX::DMA::MDEC_OUT].block_ctrl)
+    assert_equal 0x1111_2222, ram.read32(0x2000)
+    assert_equal 0, ram.read32(0x2004)
+    assert_equal 0, ram.read32(0x2008)
+
+    fake_mdec.provide([0x3333_4444, 0x5555_6666, 0x7777_8888])
     @dma.tick_cycles(1)
 
     refute @dma.channels[PSX::DMA::MDEC_OUT].active?
-    assert_equal 0x3333_4444, ram.read32(0x2004)
-    assert_equal 0x5555_6666, ram.read32(0x2008)
+    assert_equal 0x3333_4444, ram.read32(0x200C)
+    assert_equal 0x5555_6666, ram.read32(0x2010)
+    assert_equal 0x7777_8888, ram.read32(0x2014)
   end
 
   private

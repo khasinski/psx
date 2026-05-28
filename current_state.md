@@ -8,6 +8,37 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 MDEC-out DMA DuckStation alignment:
+
+- Corrected the previous MDEC-out "pause mid-block" model:
+  - DuckStation's request-mode DMA starts a block when MDEC DRQ is asserted,
+    asks MDEC for the whole block, and advances the DMA block even if the
+    output FIFO contains fewer words than requested.
+  - The Ruby DMA path had been preserving the partially completed block and
+    leaving BUSY set until later decoded words arrived. That was not
+    DuckStation behavior and is a plausible cause of Rage getting stuck after
+    an FMV/loading transition if a request block under-reads.
+  - Ruby now writes only the words that are currently available, leaves the
+    under-read destination words untouched, advances by the full request
+    block size, and only remains armed when more request blocks are still
+    pending.
+- Added focused DMA regressions for:
+  - A one-block MDEC-out under-read completing without synthesized padding.
+  - A multi-block MDEC-out under-read advancing to the next block and waiting
+    there for the next DRQ.
+- Verification:
+  - Focused DMA spec passed: `21 runs, 65 assertions, 0 failures`.
+  - Focused MDEC spec passed: `18 runs, 49 assertions, 0 failures`.
+  - Filtered ps1-tests baselines passed: `dma` `TOTAL 4  OK 4  FAIL 0`;
+    `mdec` `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `432 runs, 1170 assertions, 0 failures`.
+  - Rage Europe smoke from `tmp/rage-eu-2p4b.state` with a broad Start/Cross
+    script exercised the 24-bit monologue/FMV region without visible striping
+    (`tmp/rage-mdecout-duckstation-smoke/ridge-024.png`), but the script did
+    not enter the Grand Prix path and ended back at the title screen by 4.0B
+    absolute cycles (`ridge-032.png`). Do not count this as a Grand Prix
+    loading-stall proof.
+
 2026-05-28 GPU texture modulation follow-up:
 
 - Matched DuckStation's no-dither textured modulation rounding:
