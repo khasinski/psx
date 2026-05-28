@@ -102,7 +102,7 @@ class SPUSpec < Minitest::Test
     assert_equal 8, samples[0]
   end
 
-  def test_key_on_latches_start_address_and_decodes_first_block
+  def test_key_on_latches_start_address_without_decoding_first_block
     @spu.write16(0xC00 + 0x06, 0x0020) # voice 0 ADPCM start address
     @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0020)
     @spu.dma_write_word(0x00F1_0000)
@@ -112,6 +112,10 @@ class SPUSpec < Minitest::Test
 
     voice = @spu.instance_variable_get(:@voices)[0]
     assert_equal 0x0020, voice.current_address
+    assert_empty voice.decoded_samples
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
     assert_equal 4096, voice.decoded_samples[0]
     assert_equal(-4096, voice.decoded_samples[1])
   end
@@ -173,6 +177,8 @@ class SPUSpec < Minitest::Test
     write_adpcm_block(2, flags: 0x04)
 
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
     voice = @spu.instance_variable_get(:@voices)[0]
     assert_equal 0x0002, voice.repeat_address
@@ -804,6 +810,7 @@ class SPUSpec < Minitest::Test
     @spu.write16(0xC00 + 0x06, 0x0200)
     write_adpcm_block(0x0200, flags: 0x00)
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)
 
     @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
@@ -812,11 +819,25 @@ class SPUSpec < Minitest::Test
     assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
   end
 
+  def test_enabling_irq9_skips_keyed_voice_until_first_sample
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(0xC00 + 0x06, 0x0200)
+    write_adpcm_block(0x0200, flags: 0x00)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)
+
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+
+    assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert_equal 0, @interrupts.stat & PSX::Interrupts::IRQ_SPU
+  end
+
   def test_irq_address_write_checks_active_voice_sample_addresses
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(0xC00 + 0x06, 0x0200)
     write_adpcm_block(0x0200, flags: 0x00)
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
     @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
 
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)

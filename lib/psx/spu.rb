@@ -504,12 +504,13 @@ module PSX
         @voices[voice].adsr_phase = :attack
         @voices[voice].last_samples = [0, 0]
         @voices[voice].interpolation_samples = [0, 0, 0]
+        @voices[voice].decoded_samples = []
+        @voices[voice].current_block_flags = 0
         @voices[voice].sample_index = 0
         @voices[voice].sample_counter = 0
         @voices[voice].is_first_block = true
         @voices[voice].ignore_loop_address = false
         update_adsr_envelope(voice)
-        decode_voice_block(voice)
       end
     end
 

@@ -10,6 +10,18 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's deferred SPU key-on ADPCM decode timing:
+  - Key-on now resets voice sample state and marks the voice ready to start,
+    but the first ADPCM block is decoded on the next SPU sample rather than
+    during the key-on register write.
+  - Late RAM IRQ checks now naturally skip a just-keyed voice until its first
+    block has actually been sampled, matching DuckStation's `has_samples`
+    guard in `CheckForLateRAMIRQs`.
+- Verification:
+  - Focused SPU spec passed: `64 runs, 159 assertions, 0 failures`.
+  - Full suite passed: `399 runs, 1050 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU Gaussian voice interpolation:
   - Voices now keep the previous three decoded samples as interpolation
     history.
