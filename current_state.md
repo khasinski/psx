@@ -2,6 +2,10 @@
 
 Snapshot of where the emulator is and what we just spent time on.
 
+The newest `Latest continuation` section is authoritative. Older historical
+sections below were kept for investigation context and may describe bugs that
+later entries have fixed.
+
 ## Latest continuation
 
 2026-05-28 latest continuation:

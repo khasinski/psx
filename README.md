@@ -201,8 +201,8 @@ What works:
   conformance are still open.
 - MDEC: register surface (Phase 1), quant + IDCT tables and DMA 0/1
   ingress / egress (Phase 2), real RLC + dequant + IDCT + YCbCr → RGB
-  decoder (Phase 3). DMA1 completion IRQ wired. CD-XA sectors now decode
-  and feed the SPU CD-audio path, though full FMV timing is still rough.
+  decoder (Phase 3). DMA1 completion IRQ wired. CD-XA sectors decode
+  and feed the SPU CD-audio path.
 - Save states: F5 / F8 in the SDL window quicksave / quickload, full
   machine round-trip via `Marshal` (CPU + GTE + COP0 + RAM + GPU VRAM +
   SPU + MDEC + CD-ROM + timers + interrupts).
@@ -211,24 +211,24 @@ What works:
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 268/268 unit tests pass.
-- 18/21 of the JaCzekanski/ps1-tests cases that have a `psx.log`
-  reference (cpu/, dma/, gpu/, gte/, mdec/, spu/, timers/) — see
-  `bin/_ps1tests-baseline`.
+- 357/357 unit tests pass.
+- JaCzekanski/ps1-tests baseline passes for the checked non-CD-ROM
+  cases (`TOTAL 18  OK 18  FAIL 0`). CD-ROM ps1-tests are run
+  separately with a disc image via `PSX_TEST_DISC` and currently pass
+  (`TOTAL 3  OK 3  FAIL 0`).
+- Rage Racer Europe boots through the intro FMV to the title screen,
+  accepts a Start edge on the title screen, and reaches the in-engine
+  attract/race scene in the current smoke tests.
 
 What doesn't:
 
 - SPU audio is incomplete: no reverb, noise, pitch modulation, or
   conformance-grade ADSR yet.
-- The 3 remaining ps1-tests failures are all CD-ROM (`cdrom/disc-swap`,
-  `cdrom/getloc`, `cdrom/timing`) — they need a disc image wired into
-  the bare-EXE loader path that `bin/psx-test` doesn't currently provide.
 - DMA timing isn't cycle-accurate — `dma/chopping` runs but reports
   `29 CPU cycles` for every block size where real hardware sees
   thousands; structural test passes, not bit-perfect timing.
-- Retail games that drive FMV (Rage Racer, Ridge Racer, …) get past
-  the BIOS shell and SCE / publisher splash but stall on game-specific
-  codec / streaming code that we don't yet emulate correctly.
+- GPU, CD-ROM, and MDEC timing are still approximate in places even where
+  structural conformance tests pass.
 
 ## License
 
