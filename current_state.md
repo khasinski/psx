@@ -8,6 +8,25 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM new-read async cancellation:
+
+- Matched another DuckStation `BeginReading` behavior:
+  - Beginning a real new read now cancels pending non-ACK CD-ROM responses,
+    covering old async sector interrupts and delayed command second responses
+    such as `Pause` INT2.
+  - Ruby had allowed a stale delayed `Pause` completion to survive into a new
+    `ReadN`, where it could beat the new read's sector delivery or command
+    ACK depending on timing.
+- Added a focused CD-ROM regression that ages a queued `Pause` INT2 to one
+  cycle before delivery, starts a new `SetLoc`/`ReadN`, and verifies the old
+  INT2 does not fire before the new sector INT1.
+- Verification:
+  - Focused CD-ROM spec passed: `65 runs, 237 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `438 runs, 1194 assertions, 0 failures`.
+
 2026-05-28 CD-ROM ReadN sector-buffer alignment:
 
 - Matched two DuckStation `ReadN`/`ReadS` behaviors around active streams:

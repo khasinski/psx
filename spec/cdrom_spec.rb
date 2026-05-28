@@ -138,6 +138,36 @@ class CDROMSpec < Minitest::Test
     assert_equal sectors_since_read, @cdrom.instance_variable_get(:@sectors_since_read)
   end
 
+  def test_new_read_cancels_pending_pause_second_response
+    @cdrom.disc = build_disc([
+      ("ONE!" + "\x00" * 2044).b,
+      ("TWO!" + "\x00" * 2044).b,
+    ])
+    deliver_first_sector
+
+    @cdrom.write8(1, 0x09)   # Pause queues a delayed INT2.
+    drain_response
+
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 1)
+    @cdrom.write8(1, 0x02)   # SetLoc LBA 1.
+    drain_response
+
+    pending_pause = @cdrom.instance_variable_get(:@pending).find { |entry| entry[3] == 2 }
+    refute_nil pending_pause
+    pending_pause[0] = 1
+
+    @cdrom.write8(1, 0x06)   # New ReadN clears old async/second response.
+    drain_response
+
+    @cdrom.tick(1)
+    assert_equal 0, @cdrom.instance_variable_get(:@irq_flags),
+                 "old Pause INT2 should not survive into the new read"
+    assert drive_until_int(1, max_ticks: 20), "new read should deliver sector INT1"
+    assert_equal "TWO!".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+  end
+
   def test_clearing_bfrd_resets_data_fifo_read_position
     @cdrom.disc = build_one_sector_disc(("\x01\x02\x03\x04" + ("\x00" * 2044)).b)
     deliver_first_sector

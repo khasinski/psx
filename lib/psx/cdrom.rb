@@ -408,6 +408,10 @@ module PSX
       @bfrd_active = false
     end
 
+    def clear_async_and_second_responses
+      @pending.reject! { |entry| entry[3] != 3 }
+    end
+
     def unread_sector_blocks_stream?
       return false unless @data_buffer && @data_pos < @data_buffer.bytesize
       return false unless @bfrd_active
@@ -645,6 +649,7 @@ module PSX
       @read_lba = @want_seek ? @seek_lba : @read_lba
       read_distance = @want_seek ? (@read_lba - @last_sector_lba).abs : 0
       @want_seek = false
+      clear_async_and_second_responses
       clear_sector_buffer
       @reading = true
       @sectors_since_read = 0
