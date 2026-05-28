@@ -972,7 +972,7 @@ module PSX
     end
 
     # Software rendering
-    def draw_pixel(x, y, r, g, b)
+    def draw_pixel(x, y, r, g, b, dither: false)
       return if x < @draw_area_left || x > @draw_area_right
       return if y < @draw_area_top || y > @draw_area_bottom
       return if x < 0 || x >= VRAM_WIDTH || y < 0 || y >= VRAM_HEIGHT
@@ -983,7 +983,14 @@ module PSX
         return  # Masked pixel
       end
 
-      pixel = rgb_to_vram(r, g, b)
+      pixel =
+        if dither
+          dither_channel_to_5bit(r, x, y) |
+            (dither_channel_to_5bit(g, x, y) << 5) |
+            (dither_channel_to_5bit(b, x, y) << 10)
+        else
+          rgb_to_vram(r, g, b)
+        end
       pixel |= 0x8000 if @set_mask_bit
 
       @vram[idx] = pixel
@@ -1091,10 +1098,11 @@ module PSX
       steps = [dx.abs, dy.abs].max
       steps = 1 if steps == 0
 
+      step = 0
+      dither = (@status & STAT_DITHER) != 0
       loop do
-        t = steps > 0 ? (gouraud ? ((x0 - x0).abs + (y0 - y0).abs).to_f / steps : 0) : 0
         if gouraud && steps > 0
-          progress = ((x0 - x0).abs + (y0 - y0).abs).to_f / steps
+          progress = step.to_f / steps
           r = (c0[:r] + (c1[:r] - c0[:r]) * progress).to_i
           g = (c0[:g] + (c1[:g] - c0[:g]) * progress).to_i
           b = (c0[:b] + (c1[:b] - c0[:b]) * progress).to_i
@@ -1102,10 +1110,11 @@ module PSX
           r, g, b = c0[:r], c0[:g], c0[:b]
         end
 
-        draw_pixel(x0, y0, r, g, b)
+        draw_pixel(x0, y0, r, g, b, dither: dither)
 
         break if x0 == x1 && y0 == y1
 
+        step += 1
         e2 = 2 * err
         if e2 >= dy
           err += dy

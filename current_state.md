@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's line color stepping/dither behavior:
+  - Gouraud lines now advance their color interpolation across plotted pixels
+    instead of reusing the first vertex color for every pixel.
+  - Line primitives now apply the draw-mode dither matrix when E1 bit 9 is
+    enabled, matching DuckStation's `IsDitheringEnabled` rule for lines.
+- Verification:
+  - Focused GPU regression spec passed: `22 runs, 56 assertions, 0 failures`.
+  - Full suite passed: `410 runs, 1091 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation's GPU dither matrix for Gouraud triangles:
   - Non-textured shaded triangles now apply the 4x4 draw-mode dither matrix
     before reducing 8-bit RGB channels to 5-bit VRAM values when E1 bit 9 is

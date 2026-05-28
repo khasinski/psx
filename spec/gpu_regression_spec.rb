@@ -112,6 +112,33 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x0000, @gpu.vram[0], "negative dither at x=0,y=0 keeps red=7 below 5-bit red 1"
   end
 
+  def test_gouraud_line_interpolates_vertex_colors
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_04_08)
+
+    @gpu.gp0(0x50_00_00_00) # shaded opaque line, black to red
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x00_00_00_FF)
+    @gpu.gp0(0x00_00_00_08)
+
+    assert_equal 0x0000, @gpu.vram[0]
+    assert_equal 0x001F, @gpu.vram[8]
+    assert_operator @gpu.vram[4] & 0x001F, :>, 0
+  end
+
+  def test_flat_line_applies_draw_mode_dither
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_04_03)
+    @gpu.gp0(0xE1_00_02_00) # dither enabled
+
+    @gpu.gp0(0x40_00_00_07) # flat opaque line, red=7
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x00_00_00_03)
+
+    assert_equal 0x0000, @gpu.vram[0], "negative dither at x=0,y=0 keeps red=7 below 5-bit red 1"
+    assert_equal 0x0001, @gpu.vram[3], "DuckStation dithers line primitives when E1 bit 9 is set"
+  end
+
   def test_textured_draw_preserves_texel_mask_bit
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_10_10)
