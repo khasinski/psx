@@ -8,6 +8,29 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 GPU flat primitive dither follow-up:
+
+- Corrected the previous texture-modulation no-dither note:
+  - Current DuckStation indexes the software dither LUT at fixed coordinate
+    `[2][3]` when draw-mode dithering is disabled, and that matrix entry is
+    `0`, not `+1`.
+  - Ruby now uses the same fixed LUT coordinate for modulated textured
+    no-dither output, which returns the same result as truncation for
+    non-negative channel values.
+- Matched DuckStation dither handling for non-textured flat primitives:
+  - Flat rectangles and flat triangles now honor GP0 E1 dithering. Lines and
+    Gouraud triangles already had focused dither coverage; rectangles and
+    flat triangles were still using a constant undithered 5-bit colour.
+  - Added a focused GPU regression proving red/blue `7` stays zero at a
+    negative matrix coordinate and rises to one at positive dither
+    coordinates for flat rectangles/triangles.
+- Verification:
+  - Focused GPU regression spec passed: `30 runs, 77 assertions, 0 failures`.
+  - Full suite passed: `433 runs, 1173 assertions, 0 failures`.
+  - Filtered GPU ps1-tests with a 90s wall cap passed `gpu/gp0-e1` and
+    `gpu/mask-bit`; `gpu/bandwidth` timed out on wall clock. Re-running only
+    `gpu/bandwidth` with a 180s wall cap passed: `TOTAL 1  OK 1  FAIL 0`.
+
 2026-05-28 MDEC status request/busy alignment:
 
 - Matched two DuckStation MDEC status semantics:

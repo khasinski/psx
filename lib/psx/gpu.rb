@@ -1005,9 +1005,9 @@ module PSX
         g5 = dither_channel_to_5bit(g, x, y)
         b5 = dither_channel_to_5bit(b, x, y)
       else
-        r5 = (r >> 3) & 0x1F
-        g5 = (g >> 3) & 0x1F
-        b5 = (b >> 3) & 0x1F
+        r5 = dither_channel_to_5bit(r, 3, 2)
+        g5 = dither_channel_to_5bit(g, 3, 2)
+        b5 = dither_channel_to_5bit(b, 3, 2)
       end
 
       r5, g5, b5 = stp_blend5(@vram[idx], r5, g5, b5, @semi_transparency) if semi
@@ -1026,7 +1026,10 @@ module PSX
 
     def draw_rect(x, y, w, h, color, semi = false)
       cr = color[:r]; cg = color[:g]; cb = color[:b]
-      fr5 = (cr >> 3) & 0x1F; fg5 = (cg >> 3) & 0x1F; fb5 = (cb >> 3) & 0x1F
+      dither = (@status & STAT_DITHER) != 0
+      fr5 = dither_channel_to_5bit(cr, 3, 2)
+      fg5 = dither_channel_to_5bit(cg, 3, 2)
+      fb5 = dither_channel_to_5bit(cb, 3, 2)
       pixel_opaque = fr5 | (fg5 << 5) | (fb5 << 10)
       smb = @set_mask_bit
       pixel_opaque |= 0x8000 if smb
@@ -1045,7 +1048,17 @@ module PSX
           idx = row + px
           bg = vram[idx]
           next if cmb && (bg & 0x8000) != 0
-          if stp_mode >= 0
+          if dither
+            pr5 = dither_channel_to_5bit(cr, px, py)
+            pg5 = dither_channel_to_5bit(cg, px, py)
+            pb5 = dither_channel_to_5bit(cb, px, py)
+            if stp_mode >= 0
+              pr5, pg5, pb5 = stp_blend5(bg, pr5, pg5, pb5, stp_mode)
+            end
+            pix = pr5 | (pg5 << 5) | (pb5 << 10)
+            pix |= 0x8000 if smb
+            vram[idx] = pix
+          elsif stp_mode >= 0
             r5, g5, b5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
             pix = r5 | (g5 << 5) | (b5 << 10)
             pix |= 0x8000 if smb
@@ -1178,6 +1191,7 @@ module PSX
       cmb = @check_mask_bit; smb = @set_mask_bit
       vram = @vram
       stp_mode = semi ? @semi_transparency : -1
+      dither = (@status & STAT_DITHER) != 0
 
       y = y_lo - 1
       while (y += 1) <= y_hi
@@ -1227,12 +1241,14 @@ module PSX
             r = (lr + dr * t).to_i; r = 0 if r < 0; r = 255 if r > 255
             g = (lg + dg * t).to_i; g = 0 if g < 0; g = 255 if g > 255
             b = (lb + db * t).to_i; b = 0 if b < 0; b = 255 if b > 255
-            if (@status & STAT_DITHER) != 0
+            if dither
               fr = dither_channel_to_5bit(r, x, y)
               fg = dither_channel_to_5bit(g, x, y)
               fb = dither_channel_to_5bit(b, x, y)
             else
-              fr = (r >> 3) & 0x1F; fg = (g >> 3) & 0x1F; fb = (b >> 3) & 0x1F
+              fr = dither_channel_to_5bit(r, 3, 2)
+              fg = dither_channel_to_5bit(g, 3, 2)
+              fb = dither_channel_to_5bit(b, 3, 2)
             end
             if stp_mode >= 0
               fr, fg, fb = stp_blend5(bg, fr, fg, fb, stp_mode)
@@ -1243,10 +1259,12 @@ module PSX
           end
         else
           cr = c_left[:r]; cg = c_left[:g]; cb = c_left[:b]
-          fr_const = (cr >> 3) & 0x1F; fg_const = (cg >> 3) & 0x1F; fb_const = (cb >> 3) & 0x1F
+          fr_const = dither_channel_to_5bit(cr, 3, 2)
+          fg_const = dither_channel_to_5bit(cg, 3, 2)
+          fb_const = dither_channel_to_5bit(cb, 3, 2)
           opaque_pixel = fr_const | (fg_const << 5) | (fb_const << 10)
           opaque_pixel |= 0x8000 if smb
-          if !cmb && stp_mode < 0 && x_end >= x_start
+          if !dither && !cmb && stp_mode < 0 && x_end >= x_start
             # Pure opaque flat fill — the Sony logo and most BIOS UI hit
             # this path. Array#fill is a single C-level memset over the
             # span; we previously ran a 100-1000 iteration Ruby loop per
@@ -1258,7 +1276,15 @@ module PSX
               idx = row + x
               bg = vram[idx]
               next if cmb && (bg & 0x8000) != 0
-              if stp_mode >= 0
+              if dither
+                r5 = dither_channel_to_5bit(cr, x, y)
+                g5 = dither_channel_to_5bit(cg, x, y)
+                b5 = dither_channel_to_5bit(cb, x, y)
+                r5, g5, b5 = stp_blend5(bg, r5, g5, b5, stp_mode) if stp_mode >= 0
+                pixel = r5 | (g5 << 5) | (b5 << 10)
+                pixel |= 0x8000 if smb
+                vram[idx] = pixel
+              elsif stp_mode >= 0
                 r5, g5, b5 = stp_blend5(bg, fr_const, fg_const, fb_const, stp_mode)
                 pixel = r5 | (g5 << 5) | (b5 << 10)
                 pixel |= 0x8000 if smb
@@ -1318,9 +1344,8 @@ module PSX
         dither_channel_to_5bit(value, x, y)
       else
         # DuckStation's no-dither path still indexes the dither LUT at
-        # matrix coordinate [2][3], whose bias is +1.
-        rounded = (value + 1) >> 3
-        rounded > 0x1F ? 0x1F : rounded
+        # matrix coordinate [2][3], whose current matrix bias is zero.
+        dither_channel_to_5bit(value, 3, 2)
       end
     end
 

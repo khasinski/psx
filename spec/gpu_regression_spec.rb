@@ -139,6 +139,24 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x0001, @gpu.vram[3], "DuckStation dithers line primitives when E1 bit 9 is set"
   end
 
+  def test_flat_rectangles_and_triangles_apply_draw_mode_dither
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_04_04)
+    @gpu.gp0(0xE1_00_02_00) # dither enabled
+
+    @gpu.gp0(0x60_00_00_07) # variable rectangle, red=7
+    @gpu.gp0(0x0000_0000)
+    @gpu.gp0(0x0001_0004)
+    @gpu.gp0(0x20_07_00_00) # flat opaque triangle, blue=7
+    @gpu.gp0(0x0001_0000)
+    @gpu.gp0(0x0001_0004)
+    @gpu.gp0(0x0004_0000)
+
+    assert_equal 0x0000, @gpu.vram[0], "negative dither at x=0,y=0 keeps red=7 below 5-bit red 1"
+    assert_equal 0x0001, @gpu.vram[3], "positive dither should lift a flat rectangle pixel"
+    assert_equal 0x0400, @gpu.vram[PSX::GPU::VRAM_WIDTH + 2], "positive dither should lift a flat triangle pixel"
+  end
+
   def test_semi_transparent_line_blends_with_background
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_00_00)
@@ -169,7 +187,7 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x0000, @gpu.vram[0], "negative dither should keep the same modulated texel at zero"
   end
 
-  def test_modulated_textured_rectangle_uses_duckstation_no_dither_rounding
+  def test_modulated_textured_rectangle_uses_duckstation_no_dither_lut_coordinate
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_01_01)
     @gpu.gp0(0xE1_00_01_10) # direct-color texture page at Y=256, dither disabled
@@ -180,7 +198,7 @@ class GPURegressionSpec < Minitest::Test
     @gpu.gp0(0x0000_00_00)
     @gpu.gp0(0x00_01_00_01)
 
-    assert_equal 0x0001, @gpu.vram[0], "DuckStation applies fixed no-dither rounding after texture modulation"
+    assert_equal 0x0000, @gpu.vram[0], "DuckStation's fixed no-dither matrix coordinate has zero bias"
   end
 
   def test_textured_draw_preserves_texel_mask_bit
