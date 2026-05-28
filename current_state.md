@@ -10,6 +10,17 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU reverb register surface:
+  - Reverb output volumes (`0xD84/0xD86`), reverb base (`0xDA2`), and the
+    32-word reverb parameter block (`0xDC0..0xDFE`) are now stateful and
+    readable.
+  - Save states preserve those reverb registers in addition to the existing
+    reverb voice mask. This is still register coverage, not reverb mixing.
+- Verification:
+  - Focused SPU spec passed: `40 runs, 89 assertions, 0 failures`.
+  - Full suite passed: `375 runs, 980 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU volume-sweep ticking:
   - Main and per-voice volume registers in sweep mode now keep an envelope
     and advance their current-volume levels once per produced SPU sample.

@@ -23,17 +23,22 @@ module PSX
     SPU_IRQ_ADDR      = 0xDA4
     MAIN_VOL_LEFT     = 0xD80
     MAIN_VOL_RIGHT    = 0xD82
+    REVERB_VOL_LEFT   = 0xD84
+    REVERB_VOL_RIGHT  = 0xD86
     PITCH_MOD_LOW     = 0xD90
     PITCH_MOD_HIGH    = 0xD92
     NOISE_MODE_LOW    = 0xD94
     NOISE_MODE_HIGH   = 0xD96
     REVERB_ON_LOW     = 0xD98
     REVERB_ON_HIGH    = 0xD9A
+    REVERB_BASE       = 0xDA2
     CD_AUDIO_VOL_LEFT = 0xDB0
     CD_AUDIO_VOL_RIGHT = 0xDB2
     CURRENT_MAIN_VOL_LEFT = 0xDB8
     CURRENT_MAIN_VOL_RIGHT = 0xDBA
     CURRENT_VOICE_VOL_BASE = 0xE00
+    REVERB_REG_BASE   = 0xDC0
+    REVERB_REG_END    = 0xE00
     CYCLES_PER_SAMPLE = 768
 
     # SPUCNT bits 4-5 = transfer mode
@@ -99,6 +104,10 @@ module PSX
       @noise_count = 0
       @noise_level = 1
       @reverb_on_enable = 0
+      @reverb_left_volume = 0
+      @reverb_right_volume = 0
+      @reverb_base = 0
+      @reverb_registers = Array.new(32, 0)
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
       @cd_audio_fifo = []
@@ -152,6 +161,9 @@ module PSX
       when NOISE_MODE_HIGH   then (@noise_mode_enable >> 16) & 0xFFFF
       when REVERB_ON_LOW     then @reverb_on_enable & 0xFFFF
       when REVERB_ON_HIGH    then (@reverb_on_enable >> 16) & 0xFFFF
+      when REVERB_VOL_LEFT   then @reverb_left_volume
+      when REVERB_VOL_RIGHT  then @reverb_right_volume
+      when REVERB_BASE       then @reverb_base
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
       when SPU_FIFO          then 0xFFFF
       when SPUCNT            then @cnt
@@ -162,6 +174,9 @@ module PSX
       when CURRENT_MAIN_VOL_LEFT then @main_left_current_volume & 0xFFFF
       when CURRENT_MAIN_VOL_RIGHT then @main_right_current_volume & 0xFFFF
       else
+        reverb_register = read_reverb_register(offset)
+        return reverb_register unless reverb_register.nil?
+
         current_voice_volume = read_current_voice_volume(offset)
         return current_voice_volume unless current_voice_volume.nil?
 
@@ -249,11 +264,19 @@ module PSX
         @reverb_on_enable = (@reverb_on_enable & 0xFFFF_0000) | v
       when REVERB_ON_HIGH
         @reverb_on_enable = (@reverb_on_enable & 0x0000_FFFF) | (v << 16)
+      when REVERB_VOL_LEFT
+        @reverb_left_volume = v
+      when REVERB_VOL_RIGHT
+        @reverb_right_volume = v
+      when REVERB_BASE
+        @reverb_base = v
       when CD_AUDIO_VOL_LEFT
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
         @cd_audio_right_volume = v
       else
+        return if write_reverb_register(offset, v)
+
         handle_voice_register_write(offset, v)
       end
     end
@@ -765,6 +788,19 @@ module PSX
 
       voice = @voices[(offset - CURRENT_VOICE_VOL_BASE) / 4]
       ((offset & 0x02).zero? ? voice.left_volume : voice.right_volume) & 0xFFFF
+    end
+
+    def read_reverb_register(offset)
+      return nil unless offset >= REVERB_REG_BASE && offset < REVERB_REG_END
+
+      @reverb_registers[(offset - REVERB_REG_BASE) / 2]
+    end
+
+    def write_reverb_register(offset, value)
+      return false unless offset >= REVERB_REG_BASE && offset < REVERB_REG_END
+
+      @reverb_registers[(offset - REVERB_REG_BASE) / 2] = value
+      true
     end
 
     def signed16(value)

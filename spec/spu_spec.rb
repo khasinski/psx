@@ -311,11 +311,29 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0080, @spu.read16(PSX::SPU::REVERB_ON_HIGH)
   end
 
+  def test_reverb_parameter_registers_read_back
+    @spu.write16(PSX::SPU::REVERB_VOL_LEFT, 0x1111)
+    @spu.write16(PSX::SPU::REVERB_VOL_RIGHT, 0x2222)
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x3333)
+    @spu.write16(PSX::SPU::REVERB_REG_BASE, 0x4444)
+    @spu.write16(PSX::SPU::REVERB_REG_END - 2, 0x5555)
+
+    assert_equal 0x1111, @spu.read16(PSX::SPU::REVERB_VOL_LEFT)
+    assert_equal 0x2222, @spu.read16(PSX::SPU::REVERB_VOL_RIGHT)
+    assert_equal 0x3333, @spu.read16(PSX::SPU::REVERB_BASE)
+    assert_equal 0x4444, @spu.read16(PSX::SPU::REVERB_REG_BASE)
+    assert_equal 0x5555, @spu.read16(PSX::SPU::REVERB_REG_END - 2)
+  end
+
   def test_state_snapshot_preserves_noise_and_reverb_voice_masks
     @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x1357)
     @spu.write16(PSX::SPU::NOISE_MODE_HIGH, 0x0024)
     @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x2468)
     @spu.write16(PSX::SPU::REVERB_ON_HIGH, 0x0080)
+    @spu.write16(PSX::SPU::REVERB_VOL_LEFT, 0x1111)
+    @spu.write16(PSX::SPU::REVERB_VOL_RIGHT, 0x2222)
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x3333)
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 4, 0x4444)
     @spu.instance_variable_set(:@noise_count, 0x1234_5678)
     @spu.instance_variable_set(:@noise_level, 0x0000_4000)
 
@@ -326,6 +344,10 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0024, restored.read16(PSX::SPU::NOISE_MODE_HIGH)
     assert_equal 0x2468, restored.read16(PSX::SPU::REVERB_ON_LOW)
     assert_equal 0x0080, restored.read16(PSX::SPU::REVERB_ON_HIGH)
+    assert_equal 0x1111, restored.read16(PSX::SPU::REVERB_VOL_LEFT)
+    assert_equal 0x2222, restored.read16(PSX::SPU::REVERB_VOL_RIGHT)
+    assert_equal 0x3333, restored.read16(PSX::SPU::REVERB_BASE)
+    assert_equal 0x4444, restored.read16(PSX::SPU::REVERB_REG_BASE + 4)
     assert_equal 0x1234_5678, restored.instance_variable_get(:@noise_count)
     assert_equal 0x0000_4000, restored.instance_variable_get(:@noise_level)
   end

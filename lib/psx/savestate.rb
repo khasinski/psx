@@ -228,6 +228,10 @@ module PSX
         noise_count: @noise_count || 0,
         noise_level: @noise_level || 1,
         reverb_on_enable: @reverb_on_enable || 0,
+        reverb_left_volume: @reverb_left_volume || 0,
+        reverb_right_volume: @reverb_right_volume || 0,
+        reverb_base: @reverb_base || 0,
+        reverb_registers: (@reverb_registers || Array.new(32, 0)).dup,
         cd_audio_left_volume: @cd_audio_left_volume,
         cd_audio_right_volume: @cd_audio_right_volume,
         cd_audio_fifo: @cd_audio_fifo.dup,
@@ -261,6 +265,10 @@ module PSX
       @noise_count = s[:noise_count] || 0
       @noise_level = s[:noise_level] || 1
       @reverb_on_enable = s[:reverb_on_enable] || 0
+      @reverb_left_volume = s[:reverb_left_volume] || 0
+      @reverb_right_volume = s[:reverb_right_volume] || 0
+      @reverb_base = s[:reverb_base] || 0
+      @reverb_registers = s[:reverb_registers]&.dup || Array.new(32, 0)
       @cd_audio_left_volume = s[:cd_audio_left_volume] || 0
       @cd_audio_right_volume = s[:cd_audio_right_volume] || 0
       @cd_audio_fifo = s[:cd_audio_fifo]&.dup || []
