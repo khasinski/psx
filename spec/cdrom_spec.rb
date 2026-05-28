@@ -82,6 +82,13 @@ class CDROMSpec < Minitest::Test
                  @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY
   end
 
+  def test_parameter_fifo_overflow_drops_oldest_byte
+    @cdrom.write8(0, 0)
+    17.times { |i| @cdrom.write8(2, i) }
+
+    assert_equal (1..16).to_a, @cdrom.instance_variable_get(:@parameters)
+  end
+
   def test_bfrd_clears_after_dma_consumes_sector_buffer
     @cdrom.disc = build_one_sector_disc(("\xAA" * 2048).b)
     deliver_first_sector

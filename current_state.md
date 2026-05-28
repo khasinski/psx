@@ -8,6 +8,21 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM parameter FIFO overflow:
+
+- Matched DuckStation's parameter FIFO overflow behavior:
+  - Writing a parameter byte when the 16-byte command parameter FIFO is full
+    now drops the oldest byte before pushing the new one.
+  - Ruby had ignored the overflow byte and kept the oldest 16 bytes.
+- Added a focused CD-ROM regression that writes 17 parameter bytes and checks
+  the retained FIFO contents are bytes `1..16`.
+- Verification:
+  - Focused CD-ROM spec passed: `75 runs, 279 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `448 runs, 1236 assertions, 0 failures`.
+
 2026-05-28 CD-ROM MotorOn response alignment:
 
 - Matched DuckStation's `MotorOn` command behavior:

@@ -230,7 +230,8 @@ module PSX
       when 2
         case @index
         when 0
-          @parameters.push(v) if @parameters.size < 16
+          @parameters.shift if @parameters.size >= 16
+          @parameters.push(v)
         when 1
           @irq_enable = v & 0x1F
         # 2/3 = audio routing — ignore
