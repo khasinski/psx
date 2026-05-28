@@ -402,6 +402,12 @@ module PSX
       ]
     end
 
+    def clear_sector_buffer
+      @data_buffer = nil
+      @data_pos = 0
+      @bfrd_active = false
+    end
+
     def unread_sector_blocks_stream?
       return false unless @data_buffer && @data_pos < @data_buffer.bytesize
       return false unless @bfrd_active
@@ -626,9 +632,20 @@ module PSX
         queue_response(CYCLES_PER_RESPONSE * 2, 5, [SF_ERROR | @stat, 0x80])
         return
       end
+
+      # DuckStation ignores ReadN/ReadS if the drive is already reading the
+      # same next sector. It ACKs the command, clears the pending SetLoc, and
+      # leaves the sector buffers and read timing alone.
+      if @reading && (!@want_seek || @seek_lba == @read_lba)
+        @want_seek = false
+        queue_response(0, 3, [@stat])
+        return
+      end
+
       @read_lba = @want_seek ? @seek_lba : @read_lba
       read_distance = @want_seek ? (@read_lba - @last_sector_lba).abs : 0
       @want_seek = false
+      clear_sector_buffer
       @reading = true
       @sectors_since_read = 0
       @read_pending_seek = read_distance > Disc::FRAMES_PER_SEC

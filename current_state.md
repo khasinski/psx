@@ -8,6 +8,35 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM ReadN sector-buffer alignment:
+
+- Matched two DuckStation `ReadN`/`ReadS` behaviors around active streams:
+  - A real new read clears the current sector buffer, read position, and BFRD
+    request bit before scheduling new sector delivery. Ruby had allowed an
+    old open sector buffer to remain DMA/read-visible after `SetLoc` plus a
+    new `ReadN`.
+  - A duplicate `ReadN` while already reading the same next sector is now
+    ACKed and ignored, preserving the active sector buffer, sector timer, and
+    delivered-sector counter. Ruby had been resetting the stream timing for
+    this duplicate command.
+- Added focused CD-ROM regressions for:
+  - `SetLoc` to a different sector followed by `ReadN` clearing an open BFRD
+    sector buffer.
+  - Duplicate `ReadN` without a new `SetLoc` leaving stream state untouched.
+- Verification:
+  - Focused CD-ROM spec passed: `64 runs, 232 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `437 runs, 1189 assertions, 0 failures`.
+- Rage smoke evidence after the change:
+  - Fresh Rage Europe fast-boot FMV ran to 900M cycles in 24-bit mode;
+    `tmp/rage-fmv-after-readn-clear/ridge-018.png` is a coherent car hood
+    frame without visible striping.
+  - Saved Grand Prix race-start path from
+    `tmp/rage-grandprix-seek-audio-4b.state` reached gameplay/pause at
+    `tmp/rage-racestart-after-readn-clear/ridge-020.png`.
+
 2026-05-28 CD-ROM DMA under-read alignment:
 
 - Corrected CD-ROM DMA block completion to match DuckStation:

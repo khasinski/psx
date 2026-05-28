@@ -97,6 +97,47 @@ class CDROMSpec < Minitest::Test
                  "DuckStation clears BFRD/DRQ when DMA consumes the buffer"
   end
 
+  def test_new_read_clears_open_sector_buffer
+    @cdrom.disc = build_disc([
+      ("OLD!" + "\x00" * 2044).b,
+      ("NEW!" + "\x00" * 2044).b,
+    ])
+    deliver_first_sector
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+    assert @cdrom.dma_data_ready?, "first read leaves an open sector buffer"
+
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(1, 0x02)   # SetLoc LBA 0, not the stream's next sector.
+    drain_response
+    @cdrom.write8(1, 0x06)   # ReadN starts a new read and clears buffers.
+    drain_response
+
+    refute @cdrom.data_fifo_has_data?
+    refute @cdrom.dma_data_ready?
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY
+  end
+
+  def test_duplicate_readn_does_not_reset_active_stream
+    @cdrom.disc = build_disc([
+      ("ONE!" + "\x00" * 2044).b,
+      ("TWO!" + "\x00" * 2044).b,
+    ])
+    deliver_first_sector
+    next_sector_cycles = @cdrom.instance_variable_get(:@sector_cycles)
+    sectors_since_read = @cdrom.instance_variable_get(:@sectors_since_read)
+
+    @cdrom.write8(1, 0x06)   # Duplicate ReadN with no new SetLoc.
+    drain_response
+
+    assert_equal "ONE!".b, @cdrom.instance_variable_get(:@data_buffer).byteslice(0, 4)
+    assert_equal next_sector_cycles, @cdrom.instance_variable_get(:@sector_cycles)
+    assert_equal sectors_since_read, @cdrom.instance_variable_get(:@sectors_since_read)
+  end
+
   def test_clearing_bfrd_resets_data_fifo_read_position
     @cdrom.disc = build_one_sector_disc(("\x01\x02\x03\x04" + ("\x00" * 2044)).b)
     deliver_first_sector
