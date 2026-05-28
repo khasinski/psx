@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's odd-width VRAM-to-CPU readback packing:
+  - GP0 C0 readbacks now stream pixels across row boundaries before packing
+    two 16-bit pixels into each GPUREAD word, instead of rounding each row up
+    independently.
+  - Odd total pixel counts now zero-fill the final high halfword, and the
+    final GPUREAD word remains latched after the transfer returns to idle.
+  - Added a regression covering a 3x3 readback where row-boundary packing and
+    final zero-fill are both observable.
+- Verification:
+  - Focused GPU regression spec passed: `27 runs, 70 assertions, 0 failures`.
+  - Full suite passed: `416 runs, 1107 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's odd-sized CPU-to-VRAM upload bounds:
   - GP0 A0 transfers now track remaining pixels separately from remaining
     command data words, so the padded halfword for odd `width * height`

@@ -156,7 +156,10 @@ module PSX
 
     def read_data
       if @vram_transfer_mode == :vram_to_cpu && !@vram_read_buffer.empty?
-        @vram_read_buffer.shift
+        value = @vram_read_buffer.shift
+        @gpu_info_latch = value
+        @vram_transfer_mode = nil if @vram_read_buffer.empty?
+        value
       else
         @gpu_info_latch
       end
@@ -745,19 +748,22 @@ module PSX
       w = (((size & 0xFFFF) - 1) & 0x3FF) + 1
       h = ((((size >> 16) & 0xFFFF) - 1) & 0x1FF) + 1
 
-      # Read VRAM into buffer
+      # Read pixels in transfer order and pack GPUREAD words across row boundaries.
       @vram_read_buffer = []
+      pending_pixel = nil
       h.times do |dy|
         row_start = ((y + dy) % VRAM_HEIGHT) * VRAM_WIDTH
-        x_pos = x
-        (w / 2.0).ceil.times do
-          p0 = @vram[row_start + (x_pos % VRAM_WIDTH)]
-          x_pos += 1
-          p1 = @vram[row_start + (x_pos % VRAM_WIDTH)]
-          x_pos += 1
-          @vram_read_buffer << ((p1 << 16) | p0)
+        w.times do |dx|
+          pixel = @vram[row_start + ((x + dx) % VRAM_WIDTH)]
+          if pending_pixel
+            @vram_read_buffer << ((pixel << 16) | pending_pixel)
+            pending_pixel = nil
+          else
+            pending_pixel = pixel
+          end
         end
       end
+      @vram_read_buffer << pending_pixel if pending_pixel
 
       @vram_transfer_mode = :vram_to_cpu
       @status |= STAT_VRAM_TO_CPU_READY

@@ -229,6 +229,30 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x1234, @gpu.vram[1], "odd-sized uploads should consume but not store the padding halfword"
   end
 
+  def test_odd_vram_to_cpu_read_packs_across_rows_and_zero_fills_last_halfword
+    @gpu.vram[0] = 0x1111
+    @gpu.vram[1] = 0x2222
+    @gpu.vram[2] = 0x7777
+    @gpu.vram[PSX::GPU::VRAM_WIDTH] = 0x3333
+    @gpu.vram[PSX::GPU::VRAM_WIDTH + 1] = 0x4444
+    @gpu.vram[PSX::GPU::VRAM_WIDTH + 2] = 0x8888
+    @gpu.vram[2 * PSX::GPU::VRAM_WIDTH] = 0x5555
+    @gpu.vram[2 * PSX::GPU::VRAM_WIDTH + 1] = 0x6666
+    @gpu.vram[2 * PSX::GPU::VRAM_WIDTH + 2] = 0x9999
+
+    @gpu.gp0(0xC0_00_00_00)
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x00_03_00_03)
+
+    assert_equal 0x2222_1111, @gpu.read_data
+    assert_equal 0x3333_7777, @gpu.read_data, "odd-width reads should stream into the next row before packing"
+    assert_equal 0x8888_4444, @gpu.read_data
+    assert_equal 0x6666_5555, @gpu.read_data
+    assert_equal 0x0000_9999, @gpu.read_data, "odd total pixel count should zero-fill the high halfword"
+    assert_equal 0x0000_9999, @gpu.read_data, "GPUREAD should latch the final transfer word"
+    assert_nil @gpu.instance_variable_get(:@vram_transfer_mode)
+  end
+
   def test_textured_polygon_tpage_updates_following_rectangle_texture_page
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_40_40)
