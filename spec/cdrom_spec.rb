@@ -89,6 +89,48 @@ class CDROMSpec < Minitest::Test
     assert_equal (1..16).to_a, @cdrom.instance_variable_get(:@parameters)
   end
 
+  def test_new_command_clears_unread_response_fifo
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x13) # GetTN leaves three response bytes.
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+
+    @cdrom.write8(1, 0x01) # GetStat should clear unread GetTN bytes.
+    ack_response
+    assert drive_until_int(3, max_ticks: 20)
+
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal 0, @cdrom.read8(1), "stale GetTN bytes should not remain after GetStat"
+  end
+
+  def test_status_busy_tracks_pending_command_ack
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x01) # GetStat
+
+    assert_equal PSX::CDROM::STAT_BUSY, @cdrom.read8(0) & PSX::CDROM::STAT_BUSY
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_BUSY
+  end
+
+  def test_status_busy_ignores_pending_second_response
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x08) # Stop queues ACK plus delayed INT2.
+    drain_response
+
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_BUSY
+    assert @cdrom.instance_variable_get(:@pending).any? { |entry| entry[3] == 2 },
+           "test needs a delayed second response to remain pending"
+  end
+
   def test_bfrd_clears_after_dma_consumes_sector_buffer
     @cdrom.disc = build_one_sector_disc(("\xAA" * 2048).b)
     deliver_first_sector

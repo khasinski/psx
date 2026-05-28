@@ -132,7 +132,7 @@ module PSX
       @response = []
       @irq_enable = 0
       @irq_flags = 0
-      @pending = []          # [[delay_cycles, sequence, group, int_type, [bytes...]], ...]
+      @pending = []          # [[delay_cycles, sequence, group, int_type, [bytes...], command_busy], ...]
       @pending_seq = 0
       @pending_group = 0
       @current_response_group = 0
@@ -390,17 +390,20 @@ module PSX
       s |= STAT_PARAMETER_FIFO_NOT_FULL if @parameters.size < 16
       s |= STAT_RESPONSE_FIFO_NOT_EMPTY unless @response.empty?
       s |= STAT_DATA_FIFO_NOT_EMPTY     if @bfrd_active
+      s |= STAT_BUSY                    if @pending.any? { |entry| entry[5] }
       s
     end
 
     def queue_response(delay_cycles, int_type, data)
+      command_busy = delay_cycles.zero?
       @pending_seq += 1
       @pending << [
         delay_cycles.zero? ? CYCLES_PER_RESPONSE : delay_cycles,
         @pending_seq,
         @current_response_group,
         int_type,
-        data.dup
+        data.dup,
+        command_busy
       ]
     end
 

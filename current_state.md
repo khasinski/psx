@@ -8,6 +8,26 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM command BUSY status:
+
+- Matched DuckStation's CD-ROM status BUSYSTS bit for command ACK delivery:
+  - Status bit 7 now asserts while a command's immediate ACK/error response
+    is pending.
+  - Delayed second responses such as `Stop`/`Pause` completion INT2s do not
+    keep BUSYSTS asserted after the command ACK has been delivered.
+- Added focused CD-ROM regressions for:
+  - `GetStat` setting BUSYSTS while its ACK is pending and clearing it once
+    the ACK interrupt is delivered.
+  - A pending delayed `Stop` second response not keeping BUSYSTS set.
+  - A new command overwriting unread response FIFO bytes rather than exposing
+    stale response data.
+- Verification:
+  - Focused CD-ROM spec passed: `78 runs, 289 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `451 runs, 1246 assertions, 0 failures`.
+
 2026-05-28 CD-ROM parameter FIFO overflow:
 
 - Matched DuckStation's parameter FIFO overflow behavior:
