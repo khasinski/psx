@@ -8,6 +8,30 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 Rage fast-boot region mismatch:
+
+- Fixed the Rage Europe fast-boot smoke harness with the SCPH1001 US BIOS:
+  - `fast_boot_from_disc` previously waited up to 300M cycles for the BIOS
+    retail boot path even when the known BIOS region and disc region could
+    not match. For the PAL Rage disc with the NTSC-U SCPH1001 BIOS, that
+    left the machine deep in the failed license path before manually loading
+    the executable.
+  - Known BIOS images now expose a `region_code`; fast boot skips the retail
+    BIOS wait when both BIOS and disc regions are known and differ, then uses
+    the short BIOS-init/manual-EXE fallback directly.
+  - This restores the useful fresh Rage FMV smoke path:
+    `tmp/rage-fastboot-region-fix/ridge-010.png` reaches a coherent 24-bit
+    red-car FMV frame by 500M post-load cycles instead of staying on the
+    PlayStation license screen.
+- Added focused coverage for:
+  - SCPH1001 region detection as `:ntsc_u`.
+  - Retail BIOS fast-boot eligibility for matching and mismatched disc
+    regions.
+- Verification:
+  - Focused BIOS spec passed: `8 runs, 14 assertions, 0 failures`.
+  - Focused emulator spec passed: `7 runs, 9 assertions, 0 failures`.
+  - Full suite passed: `460 runs, 1265 assertions, 0 failures`.
+
 2026-05-28 CD-ROM 2x CDDA sample stride:
 
 - Matched DuckStation's 2x CDDA output stride:

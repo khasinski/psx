@@ -23,7 +23,7 @@ require_relative "psx/savestate"
 
 module PSX
   class Emulator
-    attr_reader :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom, :sio0, :spu, :mdec
+    attr_reader :bios, :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom, :sio0, :spu, :mdec
     attr_accessor :controller_state_proc
 
     # Timing constants
@@ -32,7 +32,7 @@ module PSX
     CYCLES_PER_SCANLINE = CYCLES_PER_FRAME / 263  # NTSC has 263 scanlines
 
     def initialize(bios_path, disc_path: nil, fast_boot: false)
-      bios = BIOS.new(bios_path, fast_boot: fast_boot)
+      @bios = BIOS.new(bios_path, fast_boot: fast_boot)
       ram = RAM.new
       @interrupts = Interrupts.new
       @spu = SPU.new(interrupts: @interrupts)
@@ -45,7 +45,7 @@ module PSX
       @controller_state_proc = -> { 0xFFFF }
       @sio0 = SIO0.new(interrupts: @interrupts, controller_state: -> { @controller_state_proc.call })
       @memory = Memory.new(
-        bios: bios, ram: ram, interrupts: @interrupts,
+        bios: @bios, ram: ram, interrupts: @interrupts,
         dma: @dma, timers: @timers, cdrom: @cdrom, sio0: @sio0, spu: @spu, mdec: @mdec
       )
       @memory.gpu = @gpu
@@ -118,11 +118,13 @@ module PSX
       end
 
       cycles_run = 0
-      chunk = 1_000_000
-      while cycles_run < max_bios_cycles && !saw_execute
-        step = [chunk, max_bios_cycles - cycles_run].min
-        run(steps: step)
-        cycles_run += step
+      if retail_bios_boot_possible?
+        chunk = 1_000_000
+        while cycles_run < max_bios_cycles && !saw_execute
+          step = [chunk, max_bios_cycles - cycles_run].min
+          run(steps: step)
+          cycles_run += step
+        end
       end
       @cpu.tty_handler = orig_handler
 
@@ -139,6 +141,15 @@ module PSX
       end
       load_psexe(exe_bytes)
       exe_path
+    end
+
+    def retail_bios_boot_possible?
+      bios_region = @bios.region_code
+      disc = @cdrom.disc
+      disc_region = disc.region_code if disc&.respond_to?(:region_code)
+      return true if bios_region.nil? || disc_region.nil?
+
+      bios_region == disc_region
     end
 
     def run(steps: nil, debug: false)

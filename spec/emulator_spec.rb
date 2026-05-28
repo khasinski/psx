@@ -70,9 +70,29 @@ class EmulatorSpec < Minitest::Test
     assert_equal 0, emu.memory.read32(0x8000_0000)
   end
 
+  def test_fast_boot_skips_retail_bios_boot_for_region_mismatch
+    emu = PSX::Emulator.new(BIOS)
+    emu.cdrom.disc = disc_with_region(:pal)
+
+    refute emu.send(:retail_bios_boot_possible?)
+  end
+
+  def test_fast_boot_allows_retail_bios_boot_for_matching_region
+    emu = PSX::Emulator.new(BIOS)
+    emu.cdrom.disc = disc_with_region(:ntsc_u)
+
+    assert emu.send(:retail_bios_boot_possible?)
+  end
+
   private
 
   def bytes_at(emu, addr, count)
     count.times.map { |i| emu.memory.read8(addr + i) }
+  end
+
+  def disc_with_region(region)
+    Object.new.tap do |disc|
+      disc.define_singleton_method(:region_code) { region }
+    end
   end
 end

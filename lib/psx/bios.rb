@@ -3,6 +3,7 @@
 module PSX
   class BIOS
     SIZE = 512 * 1024  # 512 KB
+    attr_reader :region_code
 
     # SHA1s of recognised BIOS images and the fast-boot patches we know for
     # them. Each patch is [byte_offset, 32-bit value]; the value is written
@@ -21,6 +22,7 @@ module PSX
       # 0x80079D9C in RAM).
       "10155d8d6e6e832d6ea66db9bc098321fb5e8ebf" => {
         name: "SCPH-1001",
+        region_code: :ntsc_u,
         fast_boot_patches: []
       }
     }.freeze
@@ -34,6 +36,7 @@ module PSX
 
       require "digest"
       @sha1 = Digest::SHA1.hexdigest(@data)
+      @region_code = KNOWN_BIOSES[@sha1]&.fetch(:region_code, nil)
 
       if fast_boot
         info = KNOWN_BIOSES[@sha1]

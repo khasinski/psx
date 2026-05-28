@@ -84,4 +84,13 @@ class BIOSTest < Minitest::Test
       PSX::BIOS.new("/nonexistent/path/bios.bin")
     end
   end
+
+  def test_known_scph1001_reports_ntsc_u_region
+    path = File.expand_path("../SCPH1001.BIN", __dir__)
+    skip "SCPH1001 BIOS not present" unless File.exist?(path)
+
+    bios = PSX::BIOS.new(path)
+
+    assert_equal :ntsc_u, bios.region_code
+  end
 end
