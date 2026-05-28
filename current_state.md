@@ -23,6 +23,10 @@ later entries have fixed.
     `tmp/rage-fastboot-region-fix/ridge-010.png` reaches a coherent 24-bit
     red-car FMV frame by 500M post-load cycles instead of staying on the
     PlayStation license screen.
+  - A longer fresh Rage Europe smoke after the commit ran to 900M post-load
+    cycles in `tmp/rage-fmv-current-after-region-fix/`; `ridge-016.png` and
+    `ridge-018.png` show coherent 24-bit FMV frames in the headless harness,
+    so the reported striped FMV is still not reproduced there.
 - Added focused coverage for:
   - SCPH1001 region detection as `:ntsc_u`.
   - Retail BIOS fast-boot eligibility for matching and mismatched disc
