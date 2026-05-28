@@ -8,6 +8,27 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM DMA under-read alignment:
+
+- Corrected CD-ROM DMA block completion to match DuckStation:
+  - Once channel 3 starts a DMA read while BFRD is open, DuckStation asks the
+    CD-ROM device for the whole DMA block. If the sector buffer runs out
+    before the requested word count, the remaining destination bytes are
+    zero-filled and the DMA block still completes.
+  - Ruby had kept the partially completed CD-ROM DMA channel BUSY and waited
+    for a later sector to provide the rest of the same block. That was the
+    same partial-DMA model used earlier for CD-ROM/MDEC, but it is not what
+    DuckStation's `CDROM::DMARead` does.
+- Updated the focused DMA regression so a four-word channel-3 block with only
+  two device words writes those two words, zero-fills the remaining two, and
+  clears BUSY.
+- Verification:
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Focused CD-ROM spec passed: `62 runs, 223 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `435 runs, 1180 assertions, 0 failures`.
+
 2026-05-28 CD-ROM DMA BFRD gating follow-up:
 
 - Matched DuckStation's CD-ROM DMA readiness more closely:

@@ -212,7 +212,7 @@ class DMASpec < Minitest::Test
     refute @dma.channels[2].active?, "GPU channel should be marked finished after the bounded walk"
   end
 
-  def test_cdrom_dma_waits_for_next_sector_when_fifo_empties
+  def test_cdrom_dma_zero_fills_when_sector_buffer_underreads
     ram = PSX::RAM.new
     bios_data = "\x00" * 512 * 1024
     bios = PSX::BIOS.allocate
@@ -234,8 +234,12 @@ class DMASpec < Minitest::Test
         !@words.empty?
       end
 
+      def dma_data_ready?
+        !@words.empty?
+      end
+
       def dma_read_word
-        @words.shift
+        @words.shift || 0
       end
     end
 
@@ -247,18 +251,11 @@ class DMASpec < Minitest::Test
 
     @dma.tick(memory)
 
-    assert @dma.channels[PSX::DMA::CDROM].active?
-    assert_equal 0x0000_1008, @dma.channels[PSX::DMA::CDROM].base_addr
-    assert_equal((1 << 16) | 2, @dma.channels[PSX::DMA::CDROM].block_ctrl)
+    refute @dma.channels[PSX::DMA::CDROM].active?, "DuckStation completes the DMA block after a sector-buffer under-read"
     assert_equal 0x1111_1111, ram.read32(0x1000)
     assert_equal 0x2222_2222, ram.read32(0x1004)
-
-    @dma.cdrom = fake_cdrom.new([0x3333_3333, 0x4444_4444])
-    @dma.tick(memory)
-
-    refute @dma.channels[PSX::DMA::CDROM].active?
-    assert_equal 0x3333_3333, ram.read32(0x1008)
-    assert_equal 0x4444_4444, ram.read32(0x100C)
+    assert_equal 0, ram.read32(0x1008)
+    assert_equal 0, ram.read32(0x100C)
   end
 
   def test_cdrom_dma_waits_until_bfrd_opens_buffer

@@ -404,25 +404,10 @@ module PSX
 
       addr = channel.base_addr
       step = channel.step
-      transferred = 0
-
-      while transferred < total && cdrom_dma_ready?
+      total.times do
         word = @cdrom.dma_read_word
         memory.write32(addr & 0x1F_FFFC, word)
         addr = (addr + step) & 0xFFFF_FFFF
-        transferred += 1
-      end
-
-      remaining = total - transferred
-      if remaining.positive?
-        channel.base_addr = addr & 0x00FF_FFFC
-        if remaining <= size
-          channel.block_ctrl = (1 << 16) | remaining
-        else
-          remaining_blocks = (remaining + size - 1) / size
-          channel.block_ctrl = (remaining_blocks << 16) | size
-        end
-        return true
       end
 
       channel.finish!
