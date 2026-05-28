@@ -31,6 +31,28 @@ Snapshot of where the emulator is and what we just spent time on.
     the decoder still overruns. The remaining lead is still the software STR
     bitstream decode/terminator path or another CPU/data-path issue, not pad
     Start handling.
+  - A focused CD DMA trace shows the suspect source bytes at `0x800FF6EC`
+    are direct whole-sector STR payload bytes from disc, not a later RAM
+    scribble. The repeating `02 28...` pattern seen in early probes exists in
+    the disc stream itself for some sectors; later sectors at the same ring
+    address contain varied payload bytes such as `41 95 84 2F...`.
+  - A decoder trace shows Rage does eventually take the `0x7C1F` terminator
+    path, but far too late: at the observed hit, `src=0x8019C796` and
+    `out=0x8020BF70`, so the decoder has already crossed the 2 MB RAM mirror
+    and corrupted low RAM/stack state. This reinforces that the blocker is
+    "decoder consumes the wrong/too much stream data before terminator", not
+    that the terminator branch is never implemented.
+  - Rejected probes from this continuation:
+    - Prefer cache-isolated instruction words over nonzero RAM fetches. This
+      either masks loaded game code when cached zero-fill is present or, when
+      limited to nonzero cache words, does not change the Rage overrun because
+      the low vector words were not captured as nonzero isolated-cache writes.
+    - Treat Rage's `k0` low-vector trampoline as unusable and force installed
+      callback fallback. This regresses before the intro stream, matching
+      earlier notes that the loader still needs the real/vector path.
+    - Force CD-ROM 2x timing down to 1x. The failure still reaches the
+      corrupted low-vector path, so simple sector cadence is not the root
+      fix.
 
 2026-05-27 sixth update:
 
