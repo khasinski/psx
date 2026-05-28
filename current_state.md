@@ -8,6 +8,24 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM 2x CDDA sample stride:
+
+- Matched DuckStation's 2x CDDA output stride:
+  - 1x CDDA still forwards a full 2352-byte S16LE stereo sector to the SPU
+    audio path.
+  - 2x CDDA now forwards every other stereo frame from each audio sector,
+    matching DuckStation's half-sector sample loop instead of queuing the
+    full 2352 bytes at the faster sector cadence.
+- Added a focused CD-ROM regression using patterned stereo frames to prove
+  2x playback outputs frames 0, 2, 4, ... while preserving normal 1x output.
+- Verification:
+  - Focused CD-ROM spec passed: `84 runs, 305 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed using the
+    larger wall cap required by DuckStation-sized `Init` timing:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `457 runs, 1262 assertions, 0 failures`.
+
 2026-05-28 CD-ROM GetlocP audio sub-Q:
 
 - Matched DuckStation's `GetlocP` behavior for audio tracks:

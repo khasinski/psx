@@ -1525,6 +1525,28 @@ class CDROMSpec < Minitest::Test
     assert_equal 2352, cdda.first.bytesize
   end
 
+  def test_cdda_2x_outputs_every_other_stereo_frame
+    @cdrom.disc = build_audio_pattern_disc(sectors: 2)
+    cdda = []
+    @cdrom.cdda_sink = ->(bytes) { cdda << bytes }
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x80)   # SetMode params: bit 7 = 2x speed
+    @cdrom.write8(1, 0x0E)
+    drain_response
+    @cdrom.write8(2, 0x01)
+    @cdrom.write8(1, 0x03)   # Cmd Play track 1
+    drain_response
+
+    @cdrom.tick(PSX::CDROM::CYCLES_FIRST_SECTOR)
+
+    assert_equal 1, cdda.length
+    samples = cdda.first.unpack("s<*")
+    assert_equal 294 * 2, samples.length
+    assert_equal [0, 1000, 2, 1002, 4, 1004], samples[0, 6]
+  end
+
   def test_xa_filter_suppresses_mismatched_audio_sector_sink
     xa_payload = xa_adpcm_payload(first_word: 0x0000_0001)
     data_payload = ("DATA" + "\x00" * 2044).b
@@ -1617,6 +1639,26 @@ class CDROMSpec < Minitest::Test
       disc.define_singleton_method(:track_for_lba) { |lba| lba >= 0 && lba < sectors ? track : nil }
       disc.define_singleton_method(:read_audio_sector) do |lba|
         lba >= 0 && lba < sectors ? ([lba & 0xFF].pack("C") + ("\x00" * 2351)).b : nil
+      end
+    end
+  end
+
+  def build_audio_pattern_disc(sectors:)
+    track = Struct.new(:number, :lba_start, :lba_length, keyword_init: true) do
+      def audio? = true
+      def data? = false
+      def lba_end = lba_start + lba_length
+    end.new(number: 1, lba_start: 0, lba_length: sectors)
+
+    sector = 588.times.flat_map { |frame| [frame, 1000 + frame] }.pack("s<*")
+
+    Object.new.tap do |disc|
+      disc.define_singleton_method(:tracks) { [track] }
+      disc.define_singleton_method(:track_count) { 1 }
+      disc.define_singleton_method(:total_sectors) { sectors }
+      disc.define_singleton_method(:track_for_lba) { |lba| lba >= 0 && lba < sectors ? track : nil }
+      disc.define_singleton_method(:read_audio_sector) do |lba|
+        lba >= 0 && lba < sectors ? sector : nil
       end
     end
   end

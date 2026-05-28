@@ -364,7 +364,7 @@ module PSX
 
     # Advance CDDA playback by `cycles` CPU cycles. Reads one audio sector
     # per CYCLES_PER_SECTOR (1×/2× depending on @speed_2x) and forwards it
-    # to the host audio sink as 2352 bytes of S16LE stereo PCM.
+    # to the host audio sink as S16LE stereo PCM.
     def tick_cdda(cycles)
       return unless @cdda_playing && @disc
 
@@ -378,10 +378,22 @@ module PSX
           break
         end
         update_last_subq(@cdda_lba)
-        @cdda_sink&.call(bytes) unless @muted
+        @cdda_sink&.call(cdda_output_bytes(bytes)) unless @muted
         @cdda_lba += 1
         @cdda_cycles += period
       end
+    end
+
+    def cdda_output_bytes(bytes)
+      return bytes unless @speed_2x
+
+      samples = bytes.unpack("s<*")
+      output = []
+      samples.each_slice(4) do |left, right, _skip_left, _skip_right|
+        break if left.nil? || right.nil?
+        output << left << right
+      end
+      output.pack("s<*")
     end
 
     def decode_xa_adpcm_sector(whole)
