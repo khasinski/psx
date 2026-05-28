@@ -10,6 +10,18 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's pending SPU KON/KOFF application timing:
+  - KEY_ON/KEY_OFF writes now update the readable latches first and apply
+    voice start/release after the next generated SPU sample, matching
+    DuckStation's pending-register lifecycle.
+  - The first generated sample after KON still reflects the pre-key state;
+    the voice starts on the following sample. Specs now make that frame
+    boundary explicit.
+- Verification:
+  - Focused SPU spec passed: `68 runs, 185 assertions, 0 failures`.
+  - Full suite passed: `403 runs, 1076 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Extended SPU transfer IRQ coverage to DMA reads:
   - Added the read-side companion regression for DuckStation's after-halfword
     RAM IRQ check when DMA reads advance the SPU transfer pointer onto the

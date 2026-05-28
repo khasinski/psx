@@ -284,16 +284,12 @@ module PSX
       case offset
       when KEY_ON_LOW
         @key_on = (@key_on & 0xFFFF_0000) | v
-        key_on(v)
       when KEY_ON_HIGH
         @key_on = (@key_on & 0x0000_FFFF) | (v << 16)
-        key_on(v << 16)
       when KEY_OFF_LOW
         @key_off = (@key_off & 0xFFFF_0000) | v
-        key_off(v)
       when KEY_OFF_HIGH
         @key_off = (@key_off & 0x0000_FFFF) | (v << 16)
-        key_off(v << 16)
       when SPU_IRQ_ADDR
         @irq_addr = v
         check_late_ram_irqs if irq_enabled?
@@ -487,7 +483,7 @@ module PSX
       end
     end
 
-    def key_on(mask)
+    def apply_key_on(mask)
       mask &= 0x00FF_FFFF
       @voice_active |= mask
       @endx &= ~mask
@@ -514,7 +510,7 @@ module PSX
       end
     end
 
-    def key_off(mask)
+    def apply_key_off(mask)
       mask &= 0x00FF_FFFF
       24.times do |voice|
         next if (mask & (1 << voice)).zero?
@@ -589,8 +585,6 @@ module PSX
       right_sum = 0
       reverb_in_left = 0
       reverb_in_right = 0
-      @key_on = 0
-      @key_off = 0
       update_noise
       cd_capture_left = 0
       cd_capture_right = 0
@@ -665,6 +659,18 @@ module PSX
       @pcm_sink&.call([clamp16(left_sum), clamp16(right_sum)].pack("s<*"))
       tick_main_volume_sweeps
       write_capture_buffers(cd_capture_left, cd_capture_right)
+      apply_pending_keys
+    end
+
+    def apply_pending_keys
+      key_off = @key_off
+      key_on = @key_on
+      return if key_off.zero? && key_on.zero?
+
+      @key_off = 0
+      @key_on = 0
+      apply_key_off(key_off)
+      apply_key_on(key_on)
     end
 
     def pitch_modulation_enabled?(voice_index)
