@@ -1045,6 +1045,7 @@ module PSX
     def draw_textured_rect(x, y, w, h, tex_u, tex_v, clut_x, clut_y, base_color, raw_texture, semi = false)
       br = base_color[:r]; bg_c = base_color[:g]; bb = base_color[:b]
       tpx = @texture_page_x; tpy = @texture_page_y; tdp = @texture_depth
+      clut_cache = texture_clut_cache(clut_x, clut_y, tdp)
       al = @draw_area_left; ar = @draw_area_right
       at = @draw_area_top; ab = @draw_area_bottom
       cmb = @check_mask_bit; smb = @set_mask_bit
@@ -1060,7 +1061,7 @@ module PSX
 
           u = (tex_u + dx) & 0xFF
           v = (tex_v + dy) & 0xFF
-          texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp)
+          texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp, clut_cache)
           next if texel == 0
 
           idx = row + px
@@ -1306,7 +1307,19 @@ module PSX
 
     # Sample a texel from VRAM
     # Returns 15-bit color value or nil if transparent
-    def sample_texture(u, v, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth)
+    def texture_clut_cache(clut_x, clut_y, tex_depth)
+      entries =
+        case tex_depth
+        when 0 then 16
+        when 1 then 256
+        else return nil
+        end
+
+      row = (clut_y % VRAM_HEIGHT) * VRAM_WIDTH
+      entries.times.map { |i| @vram[row + ((clut_x + i) % VRAM_WIDTH)] || 0 }
+    end
+
+    def sample_texture(u, v, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth, clut_cache = nil)
       # Apply texture window wrapping
       # Formula: texcoord = (texcoord AND NOT(Mask*8)) OR ((Offset AND Mask)*8)
       u = (u & ~(@texture_window_mask_x * 8)) | ((@texture_window_offset_x & @texture_window_mask_x) * 8)
@@ -1324,8 +1337,7 @@ module PSX
         index = (word >> shift) & 0x0F
 
         # Look up in CLUT
-        clut_addr = clut_y * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)
-        @vram[clut_addr] || 0
+        clut_cache ? clut_cache[index] : (@vram[(clut_y % VRAM_HEIGHT) * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)] || 0)
 
       when 1  # 8-bit CLUT
         # Each 16-bit VRAM word holds 2 texels
@@ -1338,8 +1350,7 @@ module PSX
         index = (word >> shift) & 0xFF
 
         # Look up in CLUT
-        clut_addr = clut_y * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)
-        @vram[clut_addr] || 0
+        clut_cache ? clut_cache[index] : (@vram[(clut_y % VRAM_HEIGHT) * VRAM_WIDTH + ((clut_x + index) % VRAM_WIDTH)] || 0)
 
       when 2, 3  # 15-bit direct; mode 3 is reserved but aliases direct color
         texel_x = tex_page_x + u
@@ -1368,6 +1379,7 @@ module PSX
       # Extract CLUT position
       clut_x = (clut & 0x3F) * 16
       clut_y = (clut >> 6) & 0x1FF
+      clut_cache = texture_clut_cache(clut_x, clut_y, tex_depth)
 
       unless gouraud
         c1 = c0
@@ -1448,7 +1460,7 @@ module PSX
           u = (u1 + du * t).to_i & 0xFF
           v_coord = (v1_tex + dv * t).to_i & 0xFF
 
-          texel = sample_texture(u, v_coord, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth)
+          texel = sample_texture(u, v_coord, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth, clut_cache)
           next if texel == 0
 
           idx = row + x

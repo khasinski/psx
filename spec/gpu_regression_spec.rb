@@ -199,6 +199,24 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x001F, @gpu.vram[0]
   end
 
+  def test_textured_rectangle_snapshots_clut_before_drawing
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_03_01)
+    @gpu.gp0(0xE1_00_00_10) # 4-bit texture page at Y=256
+
+    @gpu.vram[1] = 0x03E0 # CLUT index 1 = green
+    @gpu.vram[2] = 0x001F # CLUT index 2 = red
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x0012 # U0=index 2, U1=index 1
+
+    @gpu.gp0(0x65_7F_7F_7F) # raw textured variable rectangle
+    @gpu.gp0(0x00_00_00_01) # draw over CLUT entry 1 first
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_01_00_02)
+
+    assert_equal 0x001F, @gpu.vram[1]
+    assert_equal 0x03E0, @gpu.vram[2], "DuckStation snapshots the CLUT before rasterizing textured primitives"
+  end
+
   def test_textured_polygon_tpage_updates_following_rectangle_texture_page
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_40_40)

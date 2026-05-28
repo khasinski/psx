@@ -10,6 +10,22 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's per-primitive CLUT snapshot behavior:
+  - Textured 4-bit/8-bit rectangles and triangles now cache the active CLUT
+    before rasterization instead of rereading palette entries from live VRAM
+    for every pixel.
+  - This prevents a primitive that draws over its own palette row from
+    changing the colours of later pixels in the same draw.
+  - Added a regression where a textured rectangle overwrites a CLUT entry
+    before a later texel indexes that same entry.
+- Verification:
+  - Focused GPU regression spec passed: `25 runs, 61 assertions, 0 failures`.
+  - Full suite passed: `414 runs, 1098 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+  - Rage Europe title-state smoke from `tmp/rage-eu-2p4b.state` completed to
+    2.7B absolute cycles and still reached the selectable menu; screenshot
+    `tmp/rage-title-clut-snapshot/ridge-006.png` shows the title/menu logo.
+
 - Fixed Rage Racer's direct-pad Start bit for intro/title input:
   - The BIOS direct pad buffer now keeps the controller's serial low/high
     button byte order (`00 41 F7 FF` for Start) instead of normalizing it to
