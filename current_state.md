@@ -10,6 +10,18 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's odd-sized CPU-to-VRAM upload bounds:
+  - GP0 A0 transfers now track remaining pixels separately from remaining
+    command data words, so the padded halfword for odd `width * height`
+    uploads is consumed but not written into VRAM.
+  - Save states now preserve the in-flight CPU-to-VRAM pixel counter.
+  - Added a regression for a 1x1 upload whose second halfword must not
+    overwrite the adjacent VRAM pixel.
+- Verification:
+  - Focused GPU regression spec passed: `26 runs, 63 assertions, 0 failures`.
+  - Full suite passed: `415 runs, 1100 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's per-primitive CLUT snapshot behavior:
   - Textured 4-bit/8-bit rectangles and triangles now cache the active CLUT
     before rasterization instead of rereading palette entries from live VRAM

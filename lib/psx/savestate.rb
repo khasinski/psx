@@ -181,7 +181,7 @@ module PSX
       cmd_remaining current_cmd polyline_active
       vram_transfer_x vram_transfer_y vram_transfer_start_x
       vram_transfer_width vram_transfer_height vram_transfer_count
-      vram_transfer_mode
+      vram_transfer_pixels_remaining vram_transfer_mode
       dma_direction odd_field
     ].freeze
 
@@ -198,6 +198,7 @@ module PSX
       GPU_IVARS.each { |k| instance_variable_set(:"@#{k}", s[k]) }
       @texture_x_flip = false if @texture_x_flip.nil?
       @texture_y_flip = false if @texture_y_flip.nil?
+      @vram_transfer_pixels_remaining = @vram_transfer_count.to_i * 2 if @vram_transfer_pixels_remaining.nil?
       @cmd_buffer = s[:cmd_buffer].dup
       @vram_read_buffer = s[:vram_read_buffer].dup
       # Invalidate any cached display frame.

@@ -116,6 +116,7 @@ module PSX
       @vram_transfer_width = 0
       @vram_transfer_height = 0
       @vram_transfer_count = 0
+      @vram_transfer_pixels_remaining = 0
       @vram_transfer_mode = nil  # :cpu_to_vram or :vram_to_cpu
       @vram_read_buffer = []
 
@@ -728,6 +729,7 @@ module PSX
       h = ((((size >> 16) & 0xFFFF) - 1) & 0x1FF) + 1
       @vram_transfer_width = w
       @vram_transfer_height = h
+      @vram_transfer_pixels_remaining = w * h
       @vram_transfer_count = ((w * h + 1) & ~1) / 2  # Words to transfer
       @vram_transfer_mode = :cpu_to_vram
 
@@ -764,13 +766,20 @@ module PSX
     def vram_write_data(value)
       return if @vram_transfer_count <= 0
 
-      vram_write_pixel(value & 0xFFFF)
-      vram_write_pixel((value >> 16) & 0xFFFF)
+      if @vram_transfer_pixels_remaining > 0
+        vram_write_pixel(value & 0xFFFF)
+        @vram_transfer_pixels_remaining -= 1
+      end
+      if @vram_transfer_pixels_remaining > 0
+        vram_write_pixel((value >> 16) & 0xFFFF)
+        @vram_transfer_pixels_remaining -= 1
+      end
 
       @vram_transfer_count -= 1
 
       if @vram_transfer_count <= 0
         @vram_transfer_mode = nil
+        @vram_transfer_pixels_remaining = 0
         @status |= STAT_CMD_READY
       end
     end

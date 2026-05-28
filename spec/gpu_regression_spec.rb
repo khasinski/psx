@@ -217,6 +217,18 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x03E0, @gpu.vram[2], "DuckStation snapshots the CLUT before rasterizing textured primitives"
   end
 
+  def test_odd_cpu_to_vram_upload_does_not_write_padding_halfword
+    @gpu.vram[1] = 0x1234
+
+    @gpu.gp0(0xA0_00_00_00)
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x00_01_00_01)
+    @gpu.gp0(0x03E0_001F)
+
+    assert_equal 0x001F, @gpu.vram[0]
+    assert_equal 0x1234, @gpu.vram[1], "odd-sized uploads should consume but not store the padding halfword"
+  end
+
   def test_textured_polygon_tpage_updates_following_rectangle_texture_page
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_40_40)
