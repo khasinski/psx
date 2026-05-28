@@ -236,6 +236,8 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::NOISE_MODE_HIGH, 0x0024)
     @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x2468)
     @spu.write16(PSX::SPU::REVERB_ON_HIGH, 0x0080)
+    @spu.instance_variable_set(:@noise_count, 0x1234_5678)
+    @spu.instance_variable_set(:@noise_level, 0x0000_4000)
 
     restored = PSX::SPU.new
     restored.restore_state(@spu.state_snapshot)
@@ -244,6 +246,36 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0024, restored.read16(PSX::SPU::NOISE_MODE_HIGH)
     assert_equal 0x2468, restored.read16(PSX::SPU::REVERB_ON_LOW)
     assert_equal 0x0080, restored.read16(PSX::SPU::REVERB_ON_HIGH)
+    assert_equal 0x1234_5678, restored.instance_variable_get(:@noise_count)
+    assert_equal 0x0000_4000, restored.instance_variable_get(:@noise_level)
+  end
+
+  def test_noise_enabled_voice_uses_noise_level_instead_of_adpcm_sample
+    voices = @spu.instance_variable_get(:@voices)
+    voice = voices[0]
+    voice.adsr_volume = 0x7FFF
+    voice.adsr_phase = :sustain
+    voice.decoded_samples = Array.new(28, 0)
+    @spu.instance_variable_set(:@voice_active, 0x0001)
+    @spu.instance_variable_set(:@noise_level, 0x4000)
+    @spu.write16(0xC00 + 0x04, 0x0001)
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_operator voice.last_volume, :>, 0
+  end
+
+  def test_noise_enabled_voice_ignores_loop_end_mute_flag
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x0001)
+    write_adpcm_block(0, flags: 0x01)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 28)
+
+    assert_equal 0x0001, @spu.read16(PSX::SPU::ENDX_LOW)
+    assert_equal 0x0001, @spu.instance_variable_get(:@voice_active) & 0x0001
   end
 
   def test_pitch_modulation_ignores_voice_zero_bit

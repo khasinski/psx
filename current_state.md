@@ -22,6 +22,18 @@ later entries have fixed.
   - Focused SPU spec passed: `30 runs, 64 assertions, 0 failures`.
   - Full suite passed: `363 runs, 948 assertions, 0 failures`.
   - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+- Added a minimal DuckStation/PCSX-R-backed SPU noise path:
+  - Ruby now advances the SPU noise generator from SPUCNT noise-clock bits,
+    substitutes the generated noise level for ADPCM samples when a voice's
+    noise mask bit is enabled, and preserves `@noise_count` / `@noise_level`
+    in save states.
+  - Loop-end mute is ignored for noise-enabled voices, matching DuckStation's
+    voice block handling.
+  - README SPU status now distinguishes basic noise/pitch support from the
+    remaining reverb/full-ADSR gaps.
+- Verification:
+  - Focused SPU spec passed: `32 runs, 70 assertions, 0 failures`.
+  - Full suite passed: `365 runs, 954 assertions, 0 failures`.
 
 - Added runnable regression coverage for the latest Rage title/input and GPU
   texture investigations:

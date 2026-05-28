@@ -79,6 +79,8 @@ module PSX
       @main_right_volume = 0
       @pitch_modulation_enable = 0
       @noise_mode_enable = 0
+      @noise_count = 0
+      @noise_level = 1
       @reverb_on_enable = 0
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
@@ -378,6 +380,7 @@ module PSX
     def tick_sample
       left_sum = 0
       right_sum = 0
+      update_noise
 
       24.times do |voice_index|
         next if (@voice_active & (1 << voice_index)).zero?
@@ -387,7 +390,7 @@ module PSX
         pitch = [pitch, 0x3FFF].min
         next if pitch.zero?
 
-        sample = voice.decoded_samples[voice.sample_index] || 0
+        sample = noise_enabled?(voice_index) ? signed16(@noise_level & 0xFFFF) : (voice.decoded_samples[voice.sample_index] || 0)
         volume = apply_volume(sample, voice.adsr_volume)
         voice.last_volume = volume
         left_sum += apply_volume(volume, signed16(read16(0xC00 + voice_index * 0x10)))
@@ -447,10 +450,37 @@ module PSX
       if (voice.current_block_flags & 0x01) != 0
         @endx |= mask
         voice.current_address = voice.repeat_address & ~1
-        @voice_active &= ~mask if (voice.current_block_flags & 0x02).zero?
+        @voice_active &= ~mask if (voice.current_block_flags & 0x02).zero? && !noise_enabled?(voice_index)
       end
 
       decode_voice_block(voice_index) if (@voice_active & mask) != 0
+    end
+
+    def noise_enabled?(voice_index)
+      (@noise_mode_enable & (1 << voice_index)) != 0
+    end
+
+    def update_noise
+      noise_wave_add = [
+        1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0,
+        1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0,
+        0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1,
+        0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1
+      ]
+      noise_freq_add = [0, 84, 140, 180, 210]
+      noise_clock = (@cnt >> 8) & 0x3F
+      level = (0x8000 >> (noise_clock >> 2)) << 16
+
+      @noise_count += 0x10000 + noise_freq_add[noise_clock & 3]
+      if (@noise_count & 0xFFFF) >= noise_freq_add[4]
+        @noise_count += 0x10000
+        @noise_count -= noise_freq_add[noise_clock & 3]
+      end
+
+      return if @noise_count < level
+
+      @noise_count %= level
+      @noise_level = ((@noise_level << 1) | noise_wave_add[(@noise_level >> 10) & 63]) & 0xFFFF_FFFF
     end
 
     def tick_voice_adsr(voice_index)
