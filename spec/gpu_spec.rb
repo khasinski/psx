@@ -203,12 +203,12 @@ class GPUSpec < Minitest::Test
 
     fb = @gpu.framebuffer
 
-    assert_equal 0x33, fb[:rgba].getbyte(0), "First pixel red should come from byte 2"
+    assert_equal 0x11, fb[:rgba].getbyte(0), "First pixel red should come from byte 0"
     assert_equal 0x22, fb[:rgba].getbyte(1), "First pixel green should come from byte 1"
-    assert_equal 0x11, fb[:rgba].getbyte(2), "First pixel blue should come from byte 0"
-    assert_equal 0x66, fb[:rgba].getbyte(4), "Second pixel red should come from byte 5"
+    assert_equal 0x33, fb[:rgba].getbyte(2), "First pixel blue should come from byte 2"
+    assert_equal 0x44, fb[:rgba].getbyte(4), "Second pixel red should come from byte 3"
     assert_equal 0x55, fb[:rgba].getbyte(5), "Second pixel green should come from byte 4"
-    assert_equal 0x44, fb[:rgba].getbyte(6), "Second pixel blue should come from byte 3"
+    assert_equal 0x66, fb[:rgba].getbyte(6), "Second pixel blue should come from byte 5"
   end
 
 end

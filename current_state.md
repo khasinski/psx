@@ -6,6 +6,21 @@ Snapshot of where the emulator is and what we just spent time on.
 
 2026-05-28 latest continuation:
 
+- Fixed 24-bit GPU display scanout byte order. DuckStation's software and
+  hardware scanout paths read 24-bit VRAM bytes as R/G/B; Ruby's framebuffer
+  extractor was interpreting the same bytes as B/G/R. This left the now-RGB
+  MDEC output visibly blue-swapped in screenshots and display output.
+- Updated the GPU framebuffer spec to assert RGB byte order for consecutive
+  24-bit display pixels.
+- Verification for the 24-bit scanout fix:
+  - Focused GPU spec passed: `15 runs, 37 assertions, 0 failures`.
+  - Focused GPU regression spec passed: `14 runs, 41 assertions, 0 failures`.
+  - Full suite passed: `348 runs, 883 assertions, 0 failures`.
+  - Rage Europe smoke to 1.6B cycles with Start held from 1.0B stayed stable
+    in the 24-bit intro path. Fresh screenshots under
+    `conformance-shots/rage-eu-24bit-scanout-rgb/` show the car and clock FMV
+    with the intended red palette at `ridge-004.png` and `ridge-008.png`.
+
 - Fixed the MDEC IDCT/dequant precision path against DuckStation's current
   decoder. The Ruby decoder was dequantising into an 11-bit coefficient range
   before IDCT and using a simpler pass formula; full-frame output was

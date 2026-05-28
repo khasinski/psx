@@ -286,9 +286,9 @@ module PSX
         if @color_depth_24
           base_byte = ((@display_start_y + y) * VRAM_WIDTH + @display_start_x) * 2
           width.times do |x|
-            b = vram_byte(base_byte + x * 3)
+            r = vram_byte(base_byte + x * 3)
             g = vram_byte(base_byte + x * 3 + 1)
-            r = vram_byte(base_byte + x * 3 + 2)
+            b = vram_byte(base_byte + x * 3 + 2)
             rgba_arr[dst_i] = r
             rgba_arr[dst_i + 1] = g
             rgba_arr[dst_i + 2] = b
