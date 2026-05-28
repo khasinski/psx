@@ -58,6 +58,22 @@ Snapshot of where the emulator is and what we just spent time on.
       under `conformance-shots/rage-eu-start-after-pad-normalize/` show the
       title screen with the full Rage Racer logo at `ridge-012.png`, then an
       in-engine attract/race scene at `ridge-014.png`.
+- Fixed a DuckStation-backed GPU primitive coordinate mismatch. GPU drawing
+  primitive positions are 11-bit signed fields, and variable rectangle
+  dimensions are masked to the VRAM width/height fields; the Ruby renderer was
+  treating primitive positions and variable sprite sizes as full 16-bit
+  fields. This can misplace or stretch textured sprites when high bits are
+  present in command words.
+- Added GPU regression specs for 11-bit rectangle positions and masked
+  variable rectangle sizes.
+- Verification for the GPU coordinate fix:
+  - Focused GPU regression spec passed:
+    `14 runs, 41 assertions, 0 failures`.
+  - Focused GPU spec passed: `15 runs, 37 assertions, 0 failures`.
+  - Full suite passed: `345 runs, 865 assertions, 0 failures`.
+  - Rage Europe smoke to 2.4B cycles with Start held from 1.0B reached the
+    same 15-bit title path; `conformance-shots/rage-eu-gpu-vertex-coords/ridge-012.png`
+    shows the full Rage Racer logo and `PRESS START`.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.

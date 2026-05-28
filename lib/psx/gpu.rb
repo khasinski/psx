@@ -477,10 +477,8 @@ module PSX
 
         # Position
         pos = @cmd_buffer[idx]
-        x = (pos & 0xFFFF)
-        x = x - 0x10000 if x >= 0x8000  # Sign extend
-        y = (pos >> 16) & 0xFFFF
-        y = y - 0x10000 if y >= 0x8000
+        x = gpu_vertex_coord(pos)
+        y = gpu_vertex_coord(pos >> 16)
         points << { x: x + @draw_offset_x, y: y + @draw_offset_y }
         idx += 1
 
@@ -542,10 +540,8 @@ module PSX
       color0 = { r: c0 & 0xFF, g: (c0 >> 8) & 0xFF, b: (c0 >> 16) & 0xFF }
 
       pos0 = @cmd_buffer[1]
-      x0 = (pos0 & 0xFFFF)
-      x0 = x0 - 0x10000 if x0 >= 0x8000
-      y0 = (pos0 >> 16) & 0xFFFF
-      y0 = y0 - 0x10000 if y0 >= 0x8000
+      x0 = gpu_vertex_coord(pos0)
+      y0 = gpu_vertex_coord(pos0 >> 16)
 
       if gouraud
         c1 = @cmd_buffer[2]
@@ -556,10 +552,8 @@ module PSX
         pos1 = @cmd_buffer[2]
       end
 
-      x1 = (pos1 & 0xFFFF)
-      x1 = x1 - 0x10000 if x1 >= 0x8000
-      y1 = (pos1 >> 16) & 0xFFFF
-      y1 = y1 - 0x10000 if y1 >= 0x8000
+      x1 = gpu_vertex_coord(pos1)
+      y1 = gpu_vertex_coord(pos1 >> 16)
 
       draw_line(
         x0 + @draw_offset_x, y0 + @draw_offset_y,
@@ -604,12 +598,13 @@ module PSX
       { r: word & 0xFF, g: (word >> 8) & 0xFF, b: (word >> 16) & 0xFF }
     end
 
+    def gpu_vertex_coord(value)
+      value &= 0x7FF
+      value >= 0x400 ? value - 0x800 : value
+    end
+
     def line_point(word)
-      x = word & 0xFFFF
-      x -= 0x10000 if x >= 0x8000
-      y = (word >> 16) & 0xFFFF
-      y -= 0x10000 if y >= 0x8000
-      { x: x, y: y }
+      { x: gpu_vertex_coord(word), y: gpu_vertex_coord(word >> 16) }
     end
 
     def gp0_rectangle
@@ -623,12 +618,8 @@ module PSX
       color = { r: c & 0xFF, g: (c >> 8) & 0xFF, b: (c >> 16) & 0xFF }
 
       pos = @cmd_buffer[1]
-      x = (pos & 0xFFFF)
-      x = x - 0x10000 if x >= 0x8000
-      y = (pos >> 16) & 0xFFFF
-      y = y - 0x10000 if y >= 0x8000
-      x += @draw_offset_x
-      y += @draw_offset_y
+      x = gpu_vertex_coord(gpu_vertex_coord(pos) + @draw_offset_x)
+      y = gpu_vertex_coord(gpu_vertex_coord(pos >> 16) + @draw_offset_y)
 
       idx = 2
       tex_u = 0
@@ -649,8 +640,8 @@ module PSX
       case size_mode
       when 0  # Variable
         dims = @cmd_buffer[idx]
-        w = dims & 0xFFFF
-        h = (dims >> 16) & 0xFFFF
+        w = dims & 0x3FF
+        h = (dims >> 16) & 0x1FF
       when 1  # 1x1
         w = 1
         h = 1

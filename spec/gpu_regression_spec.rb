@@ -201,6 +201,29 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x001F, @gpu.vram[PSX::GPU::VRAM_WIDTH * 2], "last row should sample the rectangle's top edge"
   end
 
+  def test_rectangle_positions_are_11bit_signed
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_00_00)
+    @gpu.gp0(0xE5_00_00_01) # draw offset x=1
+
+    @gpu.gp0(0x68_00_00_FF) # 1x1 red rectangle
+    @gpu.gp0(0x0000_07FF)   # x=-1 in the GPU's 11-bit vertex format
+
+    assert_equal 0x001F, @gpu.vram[0], "11-bit x=-1 plus offset 1 should land at x=0"
+  end
+
+  def test_variable_rectangle_size_masks_to_vram_dimensions
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_04_00)
+
+    @gpu.gp0(0x60_00_00_FF) # variable-size red rectangle
+    @gpu.gp0(0x0000_0000)
+    @gpu.gp0(0x0001_0401)   # width masks to 1, height masks to 1
+
+    assert_equal 0x001F, @gpu.vram[0]
+    assert_equal 0, @gpu.vram[1], "high width bits must not stretch the rectangle"
+  end
+
   def test_8bit_clut_lookup_wraps_at_vram_row_end
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_01_01)
