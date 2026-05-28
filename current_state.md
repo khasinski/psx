@@ -10,6 +10,17 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's modulated textured triangle dither:
+  - Textured polygons with modulation now apply the draw-mode dither matrix
+    after texture/color multiplication and before the final 5-bit channel
+    reduction when E1 bit 9 is enabled.
+  - Added a regression that distinguishes the positive and negative dither
+    entries on a low-intensity modulated texel.
+- Verification:
+  - Focused GPU regression spec passed: `23 runs, 58 assertions, 0 failures`.
+  - Full suite passed: `411 runs, 1093 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's line color stepping/dither behavior:
   - Gouraud lines now advance their color interpolation across plotted pixels
     instead of reusing the first vertex color for every pixel.

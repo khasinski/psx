@@ -139,6 +139,24 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0x0001, @gpu.vram[3], "DuckStation dithers line primitives when E1 bit 9 is set"
   end
 
+  def test_modulated_textured_triangle_applies_draw_mode_dither
+    @gpu.gp0(0xE3_00_00_00)
+    @gpu.gp0(0xE4_00_20_08)
+    @gpu.gp0(0xE1_00_02_00) # dither enabled
+    @gpu.vram[256 * PSX::GPU::VRAM_WIDTH] = 0x001F
+
+    @gpu.gp0(0x24_00_00_04) # modulated textured opaque triangle, red=4
+    @gpu.gp0(0x00_00_00_00)
+    @gpu.gp0(0x0000_00_00)
+    @gpu.gp0(0x00_00_00_08)
+    @gpu.gp0(0x0110_00_00) # direct-color texture page at Y=256
+    @gpu.gp0(0x00_08_00_00)
+    @gpu.gp0(0x0000_00_00)
+
+    assert_equal 0x0001, @gpu.vram[3], "positive dither should lift the modulated texel above zero"
+    assert_equal 0x0000, @gpu.vram[0], "negative dither should keep the same modulated texel at zero"
+  end
+
   def test_textured_draw_preserves_texel_mask_bit
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_10_10)
