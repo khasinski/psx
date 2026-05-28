@@ -10,6 +10,15 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed coverage for SPU capture-buffer RAM IRQs:
+  - Capture-buffer writes now have an explicit regression proving they trigger
+    SPU IRQ9 when `irq_address * 8` matches the capture buffer write address,
+    matching DuckStation's `WriteToCaptureBuffer` path.
+- Verification:
+  - Focused SPU spec passed: `52 runs, 132 assertions, 0 failures`.
+  - Full suite passed: `387 runs, 1023 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched SPUCNT mute behavior against DuckStation:
   - When SPUCNT bit 14 (`mute_n`) is clear, voice mix and voice reverb input
     are muted before CD audio is mixed.

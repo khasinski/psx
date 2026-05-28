@@ -323,6 +323,17 @@ class SPUSpec < Minitest::Test
     assert_equal 1 << 11, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 11)
   end
 
+  def test_capture_buffer_write_triggers_ram_irq9
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0080) # capture buffer 1 starts at byte 0x400
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
   def test_external_volume_registers_read_back
     @spu.write16(PSX::SPU::EXTERNAL_VOL_LEFT, 0x1357)
     @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x2468)
