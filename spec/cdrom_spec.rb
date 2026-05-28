@@ -437,6 +437,34 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::DEFAULT_STAT_NO_DISC | PSX::CDROM::SF_MOTOR_ON, @cdrom.read8(1)
   end
 
+  def test_eject_disc_raises_shell_open_error_interrupt
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.eject_disc
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.write8(1, 0x01) # GetStat
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_SHELL_OPEN, @cdrom.read8(1)
+  end
+
+  def test_insert_disc_reports_shell_closing_status_sequence
+    @cdrom.insert_disc(build_one_sector_disc("\x00".b * 2048))
+    enable_irqs(0x1F)
+
+    [0x12, 0x10, 0x00].each do |expected|
+      @cdrom.write8(0, 0)
+      @cdrom.write8(1, 0x01) # GetStat
+      assert drive_until_int(3, max_ticks: 20)
+      assert_equal expected, @cdrom.read8(1)
+      ack_response
+    end
+  end
+
   def test_test_command_05_returns_scex_counters_without_stat
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

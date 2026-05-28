@@ -316,6 +316,7 @@ module PSX
       stat index irq_enable irq_flags data_pos seek_lba read_lba
       mode speed_2x xa_enabled xa_filter_file xa_filter_channel
       muted reading want_seek whole_sector sector_cycles sectors_since_read
+      read_pending_seek pause_after_first_sector
       bfrd_active cdda_playing cdda_lba cdda_cycles
       last_sector_lba last_sector_header_valid
     ].freeze
@@ -331,6 +332,7 @@ module PSX
       h[:last_sector_subheader] = @last_sector_subheader.dup
       h[:last_subq] = @last_subq.dup
       h[:last_subq_valid] = @last_subq_valid
+      h[:disc_insert_stat_sequence] = @disc_insert_stat_sequence.dup
       h[:xa_last_samples] = @xa_last_samples.dup
       h
     end
@@ -345,6 +347,7 @@ module PSX
       @last_sector_subheader = s[:last_sector_subheader]&.dup || [0, 0, 0, 0]
       @last_subq = s[:last_subq]&.dup || [0, 0, 0, 0, 0, 0, 0, 0]
       @last_subq_valid = s[:last_subq_valid] || false
+      @disc_insert_stat_sequence = s[:disc_insert_stat_sequence]&.dup || []
       @xa_last_samples = s[:xa_last_samples]&.dup || [0, 0, 0, 0]
     end
   end

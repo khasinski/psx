@@ -57,6 +57,17 @@ Snapshot of where the emulator is and what we just spent time on.
   - `PSX_TEST_FILTER=cdrom/getloc PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue PSX_MAX_CYCLES=250000000 PSX_WALL_TIMEOUT=45 bin/_ps1tests-baseline`
     passed: `TOTAL 1  OK 1  FAIL 0`.
   - Full suite passed: `354 runs, 923 assertions, 0 failures`.
+- Added an explicit CD-ROM eject/insert path and used it in `bin/psx-test`
+  to automate ps1-tests' interactive `cdrom/disc-swap` prompts. Eject now
+  raises an INT5 shell-open error, insert reports the observed `0x12`,
+  `0x10`, `0x00` GetStat sequence, and psx-test stops after the disc is
+  detected.
+- Verification for `cdrom/disc-swap`:
+  - Focused CD-ROM and savestate specs passed:
+    `58 runs, 203 assertions, 0 failures`.
+  - `PSX_TEST_FILTER=cdrom/disc-swap PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue PSX_MAX_CYCLES=120000000 PSX_WALL_TIMEOUT=45 bin/_ps1tests-baseline`
+    passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full suite passed: `356 runs, 933 assertions, 0 failures`.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware

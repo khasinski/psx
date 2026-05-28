@@ -97,10 +97,32 @@ module PSX
     def disc=(disc)
       @disc = disc
       @stat = disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
+      @disc_insert_stat_sequence = []
     end
 
     def disc
       @disc
+    end
+
+    def eject_disc
+      @disc = nil
+      @reading = false
+      @cdda_playing = false
+      @read_pending_seek = false
+      @pause_after_first_sector = false
+      @data_buffer = nil
+      @data_pos = 0
+      @last_sector_header_valid = false
+      @last_subq_valid = false
+      @stat = SF_SHELL_OPEN
+      @disc_insert_stat_sequence = []
+      queue_response(0, 5, [SF_ERROR])
+    end
+
+    def insert_disc(disc)
+      @disc = disc
+      @stat = SF_SHELL_OPEN | SF_MOTOR_ON
+      @disc_insert_stat_sequence = [SF_SHELL_OPEN | SF_MOTOR_ON, SF_SHELL_OPEN, 0x00]
     end
 
     def reset
@@ -138,6 +160,7 @@ module PSX
       @last_sector_header_valid = false
       @last_subq = [0, 0, 0, 0, 0, 0, 0, 0]
       @last_subq_valid = false
+      @disc_insert_stat_sequence = []
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
 
       # CDDA (redbook audio) playback state. Independent of @reading so a
@@ -553,6 +576,7 @@ module PSX
     # --- Commands -----------------------------------------------------------
 
     def cmd_getstat
+      @stat = @disc_insert_stat_sequence.shift if @disc && !@disc_insert_stat_sequence.empty?
       queue_response(0, 3, [@stat])
     end
 
