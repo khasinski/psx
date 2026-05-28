@@ -67,6 +67,18 @@ class SIO0Test < Minitest::Test
     assert_equal 0xFF & ~(1 << 6), btn_hi
   end
 
+  def test_start_button_uses_serial_low_then_high_order
+    @button_state = 0xFFFF & ~(1 << 3) # Start pressed (active low)
+    tx(0x01); rx
+    tx(0x42); rx
+    tx(0x00); rx
+    tx(0x00); btn_lo = rx
+    tx(0x00); btn_hi = rx
+
+    assert_equal 0xF7, btn_lo
+    assert_equal 0xFF, btn_hi
+  end
+
   def test_digital_pad_rejects_unknown_controller_command
     tx(0x01)
     assert_equal 0xFF, rx
