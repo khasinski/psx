@@ -232,6 +232,7 @@ module PSX
         reverb_right_volume: @reverb_right_volume || 0,
         reverb_base: @reverb_base || 0,
         reverb_current_address: @reverb_current_address || 0,
+        reverb_resample_position: @reverb_resample_position || 0,
         last_reverb_input: (@last_reverb_input || [0, 0]).dup,
         last_reverb_output: (@last_reverb_output || [0, 0]).dup,
         reverb_registers: (@reverb_registers || Array.new(32, 0)).dup,
@@ -274,6 +275,7 @@ module PSX
       @reverb_right_volume = s[:reverb_right_volume] || 0
       @reverb_base = s[:reverb_base] || 0
       @reverb_current_address = s[:reverb_current_address] || ((@reverb_base << 2) & (SPU::RAM_SIZE - 1))
+      @reverb_resample_position = s[:reverb_resample_position] || 0
       @last_reverb_input = s[:last_reverb_input]&.dup || [0, 0]
       @last_reverb_output = s[:last_reverb_output]&.dup || [0, 0]
       @reverb_registers = s[:reverb_registers]&.dup || Array.new(32, 0)

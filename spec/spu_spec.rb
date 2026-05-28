@@ -403,6 +403,19 @@ class SPUSpec < Minitest::Test
     assert_operator right, :>, 1900
   end
 
+  def test_reverb_current_address_advances_on_odd_resample_phase
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
+    start = @spu.instance_variable_get(:@reverb_current_address)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+    assert_equal start, @spu.instance_variable_get(:@reverb_current_address)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+    assert_equal start + 2, @spu.instance_variable_get(:@reverb_current_address)
+    assert_equal 2, @spu.instance_variable_get(:@reverb_resample_position)
+  end
+
   def test_state_snapshot_preserves_noise_and_reverb_voice_masks
     @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x1357)
     @spu.write16(PSX::SPU::NOISE_MODE_HIGH, 0x0024)
@@ -415,6 +428,7 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::EXTERNAL_VOL_LEFT, 0x5555)
     @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x6666)
     @spu.instance_variable_set(:@reverb_current_address, 0x7778)
+    @spu.instance_variable_set(:@reverb_resample_position, 0x12)
     @spu.instance_variable_set(:@last_reverb_input, [111, 222])
     @spu.instance_variable_set(:@last_reverb_output, [333, 444])
     @spu.instance_variable_set(:@noise_count, 0x1234_5678)
@@ -434,6 +448,7 @@ class SPUSpec < Minitest::Test
     assert_equal 0x5555, restored.read16(PSX::SPU::EXTERNAL_VOL_LEFT)
     assert_equal 0x6666, restored.read16(PSX::SPU::EXTERNAL_VOL_RIGHT)
     assert_equal 0x7778, restored.instance_variable_get(:@reverb_current_address)
+    assert_equal 0x12, restored.instance_variable_get(:@reverb_resample_position)
     assert_equal [111, 222], restored.instance_variable_get(:@last_reverb_input)
     assert_equal [333, 444], restored.instance_variable_get(:@last_reverb_output)
     assert_equal 0x1234_5678, restored.instance_variable_get(:@noise_count)

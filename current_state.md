@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Tightened the SPU reverb work-address cadence against DuckStation:
+  - The simple reverb delay-line return now tracks a 64-step resample phase.
+  - The reverb current address advances only on odd resample phases, matching
+    DuckStation's 44.1 kHz input / 22.05 kHz work-buffer cadence.
+  - Save states preserve the reverb resample phase.
+- Verification:
+  - Focused SPU spec passed: `46 runs, 116 assertions, 0 failures`.
+  - Full suite passed: `381 runs, 1007 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added a bounded DuckStation-backed SPU reverb mixer hook:
   - The SPU mixer now accumulates reverb sends from voices whose
     `REVERB_ON` bit is set and from CD audio when SPUCNT bit 2 is set.

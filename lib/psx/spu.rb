@@ -110,6 +110,7 @@ module PSX
       @reverb_right_volume = 0
       @reverb_base = 0
       @reverb_current_address = 0
+      @reverb_resample_position = 0
       @last_reverb_input = [0, 0]
       @last_reverb_output = [0, 0]
       @reverb_registers = Array.new(32, 0)
@@ -614,8 +615,11 @@ module PSX
         write_ram_s16(addr + 2, right_in)
       end
 
-      @reverb_current_address = (addr + 4) & (RAM_SIZE - 1)
-      @reverb_current_address = reverb_base_address if @reverb_current_address.zero?
+      if @reverb_resample_position.odd?
+        @reverb_current_address = (addr + 2) & (RAM_SIZE - 1)
+        @reverb_current_address = reverb_base_address if @reverb_current_address.zero?
+      end
+      @reverb_resample_position = (@reverb_resample_position + 1) & 0x3F
       @last_reverb_output = [
         apply_volume(delayed_left, signed16(@reverb_left_volume)),
         apply_volume(delayed_right, signed16(@reverb_right_volume)),
