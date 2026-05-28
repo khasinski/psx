@@ -261,7 +261,7 @@ class DMASpec < Minitest::Test
     assert_equal 0x4444_4444, ram.read32(0x100C)
   end
 
-  def test_gpu_block_dma_keeps_busy_until_ram_cycles_elapsed
+  def test_gpu_request_block_dma_completes_after_immediate_transfer
     memory = dma_memory
     gpu = Class.new do
       attr_reader :words
@@ -278,12 +278,6 @@ class DMASpec < Minitest::Test
     @dma.tick(memory, gpu: gpu)
 
     assert_equal 16, gpu.words.length
-    assert_equal PSX::DMA::CTRL_START_BUSY, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
-
-    @dma.tick_cycles(16)
-    assert_equal PSX::DMA::CTRL_START_BUSY, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
-
-    @dma.tick_cycles(1)
     assert_equal 0, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
   end
 
@@ -313,6 +307,38 @@ class DMASpec < Minitest::Test
 
     @dma.tick_cycles(1)
     assert_equal 0, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
+  end
+
+  def test_rearming_gpu_dma_cancels_stale_busy_completion
+    memory = dma_memory
+    gpu = Class.new do
+      attr_reader :words
+      def initialize = @words = []
+      def gp0(word) = @words << word
+    end.new
+
+    4.times { |i| memory.write32(0x1000 + i * 4, 0xAA00_0000 | i) }
+    4.times { |i| memory.write32(0x2000 + i * 4, 0xBB00_0000 | i) }
+    @dma.write(0x70, @dma.dpcr | (1 << (PSX::DMA::GPU * 4 + 3)))
+    @dma.write(0x20, 0x0000_1000)
+    @dma.write(0x24, 4)
+    chopping_chcr = PSX::DMA::CTRL_START_BUSY |
+                    PSX::DMA::CTRL_START_TRIGGER |
+                    PSX::DMA::CTRL_DIRECTION |
+                    PSX::DMA::CTRL_CHOPPING |
+                    (2 << 20)
+    @dma.write(0x28, chopping_chcr)
+    @dma.tick(memory, gpu: gpu)
+
+    @dma.write(0x20, 0x0000_2000)
+    @dma.write(0x24, 4)
+    @dma.write(0x28, chopping_chcr)
+    @dma.tick(memory, gpu: gpu)
+    @dma.tick_cycles(4)
+
+    assert_equal [0xAA00_0000, 0xAA00_0001, 0xAA00_0002, 0xAA00_0003,
+                  0xBB00_0000, 0xBB00_0001, 0xBB00_0002, 0xBB00_0003], gpu.words
+    assert_equal PSX::DMA::CTRL_START_BUSY, @dma.read(0x28) & PSX::DMA::CTRL_START_BUSY
   end
 
   def test_mdec_out_dma_waits_until_output_is_available

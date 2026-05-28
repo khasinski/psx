@@ -161,6 +161,7 @@ module PSX
         when 0x4
           channel.block_ctrl = value
         when 0x8
+          cancel_pending_completion(channel_num)
           # OTC (channel 6) has hard-wired CHCR bits: only bits 24, 28, 30
           # are writable, and bit 1 (Memory Address Step = backward) always
           # reads as 1. Verified against ps1-tests/dma/otc-test.
@@ -552,14 +553,19 @@ module PSX
       @pending_completions << channel_num unless @pending_completions.include?(channel_num)
     end
 
+    def cancel_pending_completion(channel_num)
+      @channels[channel_num].busy_cycles = 0
+      @pending_completions&.delete(channel_num)
+    end
+
     def dma_ram_cycles(word_count)
       word_count + ((word_count + 15) / 16)
     end
 
     def gpu_dma_completion_cycles(channel, word_count)
-      cycles = dma_ram_cycles(word_count)
-      return cycles unless channel.sync_mode == SYNC_MANUAL && (channel.channel_ctrl & CTRL_CHOPPING) != 0
+      return 0 unless channel.sync_mode == SYNC_MANUAL && (channel.channel_ctrl & CTRL_CHOPPING) != 0
 
+      cycles = dma_ram_cycles(word_count)
       dma_window = (channel.channel_ctrl >> 16) & 0x7
       cpu_window = (channel.channel_ctrl >> 20) & 0x7
       blocks = word_count >> dma_window

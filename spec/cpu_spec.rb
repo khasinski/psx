@@ -245,6 +245,27 @@ class CPUSpec < Minitest::Test
     assert_equal 7, get_reg(2)
   end
 
+  def test_dma_callback_service_drains_nested_mdec_out_flags
+    dma = @memory.dma
+    callback = 0x8001_EBC8
+    calls = 0
+
+    @memory.write32(PSX::CPU::DMA_CALLBACK_TABLE_BASE + PSX::DMA::MDEC_OUT * 4, callback)
+    dma.write(0x74, (1 << 23) | (1 << (16 + PSX::DMA::MDEC_OUT)))
+
+    @cpu.define_singleton_method(:execute_interrupt_callback) do |addr|
+      calls += 1
+      dma.set_irq_flag(PSX::DMA::MDEC_OUT) if calls < 3
+      raise "unexpected callback #{addr.to_s(16)}" unless addr == callback
+    end
+
+    dma.set_irq_flag(PSX::DMA::MDEC_OUT)
+    @cpu.send(:service_dma_channel_callbacks)
+
+    assert_equal 3, calls, "MDEC-out callbacks raised by the previous callback should be drained in order"
+    assert_equal 0, dma.dicr & (1 << (24 + PSX::DMA::MDEC_OUT))
+  end
+
   def test_sw_instruction
     set_reg(8, 0x200)       # Base address
     set_reg(9, 0xCAFE_BABE) # Value to store

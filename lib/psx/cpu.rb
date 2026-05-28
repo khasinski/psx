@@ -410,16 +410,21 @@ module PSX
       dma = @memory.dma
       return unless dma
 
-      dicr_flags = dma.dicr & 0x7F00_0000
-      return if dicr_flags.zero?
+      serviced = 0
+      loop do
+        dicr_flags = dma.dicr & 0x7F00_0000
+        pending_flags = dicr_flags
+        break if pending_flags.zero? || serviced >= 64
 
-      7.times do |channel|
-        flag = 1 << (24 + channel)
-        next if (dicr_flags & flag).zero?
+        7.times do |channel|
+          flag = 1 << (24 + channel)
+          next if (pending_flags & flag).zero?
 
-        dma.write(0x74, (dma.dicr & 0x00FF_803F) | flag)
-        callback = @memory.read32(DMA_CALLBACK_TABLE_BASE + channel * 4)
-        execute_interrupt_callback(callback) if callback != 0
+          dma.write(0x74, (dma.dicr & 0x00FF_803F) | flag)
+          callback = @memory.read32(DMA_CALLBACK_TABLE_BASE + channel * 4)
+          execute_interrupt_callback(callback) if callback != 0
+          serviced += 1
+        end
       end
     end
 

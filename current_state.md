@@ -10,6 +10,35 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Fixed the Rage Racer striped FMV regression from GPU DMA busy timing:
+  - Bisected the visual regression with 800M-cycle Rage Europe smokes:
+    `b6c22cd` and `dc0ed84` produced coherent FMV frames, while `b2b4577`
+    (`Delay GPU DMA busy completion`) already showed repeated 16-pixel
+    vertical striping.
+  - GPU request-mode block DMA now transfers and completes immediately again;
+    the synthetic busy delay remains only for manual chopping, where it was
+    added for `dma/chopping`.
+  - Re-arming a channel via CHCR now cancels any stale delayed completion for
+    the previous transfer, so a later completion cannot clear a newly-started
+    channel.
+  - The installed DMA callback service now drains DMA flags raised by DMA
+    callbacks in the same pass, with a hard bound, covering Rage's nested
+    MDEC-out callback chain.
+  - Added regressions for nested MDEC-out DMA callbacks and stale delayed GPU
+    DMA completions.
+- Verification:
+  - Focused DMA/CPU specs passed: DMA `19 runs, 51 assertions, 0 failures`;
+    CPU `30 runs, 36 assertions, 0 failures`.
+  - Full suite passed: `419 runs, 1111 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+  - Rage Europe 800M-cycle smoke from a fresh fast boot produced coherent FMV
+    output again; `tmp/rage-fmv-request-immediate/ridge-004.png` shows the
+    red car frame without the repeated vertical striping seen in
+    `tmp/rage-fmv-striped-check/ridge-004.png`.
+- Remaining next-session regression:
+  - Rage Racer gets stuck on the loading screen after the monologue intro when
+    starting a new Grand Prix.
+
 - Matched DuckStation's GPU save-state GPUREAD latch behavior:
   - GPU save states now preserve `@gpu_info_latch`, matching DuckStation's
     serialized `GPUREAD_latch`.
@@ -18,11 +47,6 @@ later entries have fixed.
 - Verification:
   - Focused GPU regression spec passed: `28 runs, 72 assertions, 0 failures`.
   - Full suite passed: `417 runs, 1109 assertions, 0 failures`.
-- Next-session regressions to investigate:
-  - FMV playback is striped.
-  - Rage Racer gets stuck on the loading screen after the monologue intro when
-    starting a new Grand Prix.
-
 - Matched DuckStation's odd-width VRAM-to-CPU readback packing:
   - GP0 C0 readbacks now stream pixels across row boundaries before packing
     two 16-bit pixels into each GPUREAD word, instead of rounding each row up
