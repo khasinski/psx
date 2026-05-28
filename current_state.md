@@ -27,6 +27,17 @@ Snapshot of where the emulator is and what we just spent time on.
     trap. It reaches repeated 24-bit 320x240 intro state with
     `vec=3C1A0000` still intact; the earlier 200M `0x80000080/84` failure is
     gone in this window.
+  - Longer Start-tapping probes after this fix:
+    - `bin/_ridge-boot` to 2.8B cycles with Start toggled from 1.0B stayed
+      stable and produced visible intro screenshots under
+      `conformance-shots/rage-eu-start-after-dma-guard/`, including
+      `ridge-014.png`.
+    - A controller-poll counter run to 2.8B shows Rage is polling the pad
+      during the later intro (`~1.6K polls per 200M-cycle chunk`, all seeing
+      Start pressed after 1.0B). The run still did not prove a title/menu skip
+      by 2.8B, so the original Start-to-skip complaint is now a separate input
+      semantics/game-state issue rather than being blocked by the old stream
+      decoder crash.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.
