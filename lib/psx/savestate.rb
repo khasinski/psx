@@ -218,6 +218,8 @@ module PSX
         main_left_volume: @main_left_volume,
         main_right_volume: @main_right_volume,
         pitch_modulation_enable: @pitch_modulation_enable || 0,
+        noise_mode_enable: @noise_mode_enable || 0,
+        reverb_on_enable: @reverb_on_enable || 0,
         cd_audio_left_volume: @cd_audio_left_volume,
         cd_audio_right_volume: @cd_audio_right_volume,
         cd_audio_fifo: @cd_audio_fifo.dup,
@@ -241,6 +243,8 @@ module PSX
       @main_left_volume = s[:main_left_volume] || 0
       @main_right_volume = s[:main_right_volume] || 0
       @pitch_modulation_enable = s[:pitch_modulation_enable] || 0
+      @noise_mode_enable = s[:noise_mode_enable] || 0
+      @reverb_on_enable = s[:reverb_on_enable] || 0
       @cd_audio_left_volume = s[:cd_audio_left_volume] || 0
       @cd_audio_right_volume = s[:cd_audio_right_volume] || 0
       @cd_audio_fifo = s[:cd_audio_fifo]&.dup || []

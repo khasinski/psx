@@ -215,6 +215,37 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0040, @spu.read16(PSX::SPU::PITCH_MOD_HIGH)
   end
 
+  def test_noise_mode_registers_read_back
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x1357)
+    @spu.write16(PSX::SPU::NOISE_MODE_HIGH, 0x0024)
+
+    assert_equal 0x1357, @spu.read16(PSX::SPU::NOISE_MODE_LOW)
+    assert_equal 0x0024, @spu.read16(PSX::SPU::NOISE_MODE_HIGH)
+  end
+
+  def test_reverb_on_registers_read_back
+    @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x2468)
+    @spu.write16(PSX::SPU::REVERB_ON_HIGH, 0x0080)
+
+    assert_equal 0x2468, @spu.read16(PSX::SPU::REVERB_ON_LOW)
+    assert_equal 0x0080, @spu.read16(PSX::SPU::REVERB_ON_HIGH)
+  end
+
+  def test_state_snapshot_preserves_noise_and_reverb_voice_masks
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x1357)
+    @spu.write16(PSX::SPU::NOISE_MODE_HIGH, 0x0024)
+    @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x2468)
+    @spu.write16(PSX::SPU::REVERB_ON_HIGH, 0x0080)
+
+    restored = PSX::SPU.new
+    restored.restore_state(@spu.state_snapshot)
+
+    assert_equal 0x1357, restored.read16(PSX::SPU::NOISE_MODE_LOW)
+    assert_equal 0x0024, restored.read16(PSX::SPU::NOISE_MODE_HIGH)
+    assert_equal 0x2468, restored.read16(PSX::SPU::REVERB_ON_LOW)
+    assert_equal 0x0080, restored.read16(PSX::SPU::REVERB_ON_HIGH)
+  end
+
   def test_pitch_modulation_ignores_voice_zero_bit
     @spu.write16(0xC00 + 0x04, 0x1000)
     write_adpcm_block(0, flags: 0x00)

@@ -10,6 +10,18 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU register coverage for the per-voice noise and
+  reverb masks:
+  - Ruby now exposes `NOISE_MODE_LOW/HIGH` (`0x1F801D94/96`) and
+    `REVERB_ON_LOW/HIGH` (`0x1F801D98/9A`) as stateful readable registers,
+    matching DuckStation's `noise_mode_register` and `reverb_on_register`
+    paths.
+  - Save states preserve both masks so quicksave/quickload does not lose
+    these SPU control bits.
+- Verification:
+  - Focused SPU spec passed: `30 runs, 64 assertions, 0 failures`.
+  - Full suite passed: `363 runs, 948 assertions, 0 failures`.
+
 - Added runnable regression coverage for the latest Rage title/input and GPU
   texture investigations:
   - `spec/emulator_spec.rb` now proves the normal `run(steps:)` fast path

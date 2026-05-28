@@ -25,6 +25,10 @@ module PSX
     MAIN_VOL_RIGHT    = 0xD82
     PITCH_MOD_LOW     = 0xD90
     PITCH_MOD_HIGH    = 0xD92
+    NOISE_MODE_LOW    = 0xD94
+    NOISE_MODE_HIGH   = 0xD96
+    REVERB_ON_LOW     = 0xD98
+    REVERB_ON_HIGH    = 0xD9A
     CD_AUDIO_VOL_LEFT = 0xDB0
     CD_AUDIO_VOL_RIGHT = 0xDB2
     CYCLES_PER_SAMPLE = 768
@@ -74,6 +78,8 @@ module PSX
       @main_left_volume = 0
       @main_right_volume = 0
       @pitch_modulation_enable = 0
+      @noise_mode_enable = 0
+      @reverb_on_enable = 0
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
       @cd_audio_fifo = []
@@ -115,6 +121,10 @@ module PSX
       when MAIN_VOL_RIGHT    then @main_right_volume
       when PITCH_MOD_LOW     then @pitch_modulation_enable & 0xFFFF
       when PITCH_MOD_HIGH    then (@pitch_modulation_enable >> 16) & 0xFFFF
+      when NOISE_MODE_LOW    then @noise_mode_enable & 0xFFFF
+      when NOISE_MODE_HIGH   then (@noise_mode_enable >> 16) & 0xFFFF
+      when REVERB_ON_LOW     then @reverb_on_enable & 0xFFFF
+      when REVERB_ON_HIGH    then (@reverb_on_enable >> 16) & 0xFFFF
       when SPU_TRANSFER_ADDR then @transfer_addr >> 3
       when SPU_FIFO          then 0xFFFF
       when SPUCNT            then @cnt
@@ -195,6 +205,14 @@ module PSX
         @pitch_modulation_enable = (@pitch_modulation_enable & 0xFFFF_0000) | v
       when PITCH_MOD_HIGH
         @pitch_modulation_enable = (@pitch_modulation_enable & 0x0000_FFFF) | (v << 16)
+      when NOISE_MODE_LOW
+        @noise_mode_enable = (@noise_mode_enable & 0xFFFF_0000) | v
+      when NOISE_MODE_HIGH
+        @noise_mode_enable = (@noise_mode_enable & 0x0000_FFFF) | (v << 16)
+      when REVERB_ON_LOW
+        @reverb_on_enable = (@reverb_on_enable & 0xFFFF_0000) | v
+      when REVERB_ON_HIGH
+        @reverb_on_enable = (@reverb_on_enable & 0x0000_FFFF) | (v << 16)
       when CD_AUDIO_VOL_LEFT
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
