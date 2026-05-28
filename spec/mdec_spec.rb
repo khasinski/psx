@@ -133,6 +133,21 @@ class MDECSpec < Minitest::Test
     assert_equal 0x4631, @mdec.send(:rgb888_to_rgb555, 132, 132, 132)
   end
 
+  def test_ps1tests_frame_15bit_samples_match_reference
+    decoded = decode_mdec_frame_fixture(depth: 3)
+    vram = swizzled_15bit_frame_vram(decoded)
+
+    {
+      [0, 0] => [88, 96, 96],
+      [7, 7] => [80, 80, 88],
+      [80, 80] => [176, 184, 168],
+      [160, 120] => [224, 136, 24],
+      [319, 239] => [24, 16, 16]
+    }.each do |(x, y), expected_rgb|
+      assert_rgb_close expected_rgb, rgb555_to_rgb888(vram[y * 1024 + x]), "pixel #{x},#{y}"
+    end
+  end
+
   private
 
   def load_flat_identity_tables
@@ -148,5 +163,73 @@ class MDECSpec < Minitest::Test
     command |= 1 << 26 if signed
     @mdec.write32_data(command)
     6.times { @mdec.write32_data(0xFE00_0000) }
+  end
+
+  def decode_mdec_frame_fixture(depth:)
+    load_ps1tests_mdec_tables
+
+    words = File.binread(File.expand_path("../.tests/mdec/frame/sunset.mdec", __dir__)).unpack("V*")
+    @mdec.write32_data((PSX::MDEC::CMD_DECODE << 29) | (depth << 27) | words.length)
+    words.each { |word| @mdec.write32_data(word) }
+
+    output = +""
+    output << [@mdec.read32_data].pack("V") while @mdec.data_out_available?
+    output
+  end
+
+  def load_ps1tests_mdec_tables
+    source = File.read(File.expand_path("../.tests/common/mdec.cpp", __dir__))
+    idct = source[/int16_t idct\[64\] = \{(.*?)\};/m, 1].scan(/-?\d+/).map(&:to_i)
+    quant = source[/uint8_t quant\[128\] = \{(.*?)\};/m, 1].scan(/0x[0-9a-f]+|\d+/i).map { |n| Integer(n) }
+
+    @mdec.write32_data((PSX::MDEC::CMD_SET_QUANT_TABLE << 29) | 1)
+    quant.each_slice(4) do |slice|
+      @mdec.write32_data(slice[0] | (slice[1] << 8) | (slice[2] << 16) | (slice[3] << 24))
+    end
+
+    @mdec.write32_data(PSX::MDEC::CMD_SET_IDCT_TABLE << 29)
+    idct.each_slice(2) do |slice|
+      @mdec.write32_data((slice[0] & 0xFFFF) | ((slice[1] & 0xFFFF) << 16))
+    end
+  end
+
+  def swizzled_15bit_frame_vram(decoded)
+    vram = Array.new(1024 * 512, 0)
+    offset = 0
+
+    20.times do |stripe|
+      15.times do |macroblock_y|
+        words = Array.new(256) do
+          pixel = decoded.getbyte(offset).to_i | (decoded.getbyte(offset + 1).to_i << 8)
+          offset += 2
+          pixel
+        end
+
+        2.times do |pair_y|
+          8.times do |y|
+            2.times do |pair_x|
+              block = pair_y * 2 + pair_x
+              8.times do |x|
+                dst_x = stripe * 16 + pair_x * 8 + x
+                dst_y = macroblock_y * 16 + pair_y * 8 + y
+                vram[dst_y * 1024 + dst_x] = words[block * 64 + y * 8 + x]
+              end
+            end
+          end
+        end
+      end
+    end
+
+    vram
+  end
+
+  def rgb555_to_rgb888(pixel)
+    [(pixel & 0x001F) << 3, (pixel & 0x03E0) >> 2, (pixel & 0x7C00) >> 7]
+  end
+
+  def assert_rgb_close(expected, actual, message)
+    expected.zip(actual).each do |exp, act|
+      assert_in_delta exp, act, 8, message
+    end
   end
 end

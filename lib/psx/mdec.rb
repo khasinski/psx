@@ -8,12 +8,10 @@ module PSX
   # macroblocks. Used by every retail PSX game with an FMV intro
   # (Rage Racer, Ridge Racer, Crash Bandicoot, etc.).
   #
-  # This is the Phase 1 stub from docs/mdec_scoping.md: the bus surface
-  # and command-word state machine are wired up so games don't hang on a
-  # NULL bus, but the actual IDCT / YCbCr / output formatter haven't
-  # landed yet — reads of the output FIFO return zero. The next phase
-  # adds the quant/IDCT table loaders + DMA0 ingress so games can at
-  # least submit data successfully; phase 3 is the decoder proper.
+  # The implementation is intentionally simple rather than cycle-exact:
+  # command/data FIFO state, quant/IDCT table loads, DMA ingress/egress, RLE
+  # decode, IDCT, colour conversion, and output packing are represented well
+  # enough for BIOS, ps1-tests, and retail FMV/texture upload paths.
   #
   # Register layout (offsets from IO_START):
   #   0x820  MDEC0 (write: command + RLE data; read: decoded output)
@@ -42,29 +40,18 @@ module PSX
     CMD_SET_IDCT_TABLE     = 3   # load IDCT scale table (64 × s16 = 128 bytes)
     # 4..7 reserved
 
-    # Zig-zag scan order for an 8x8 DCT block — the layout MDEC's RLC
-    # stream uses to walk the coefficients (low-frequency first, then
-    # diagonally outward). Standard JPEG / MPEG zigzag.
+    # Zig-zag scan order for an 8x8 DCT block in the row-major coefficient
+    # layout consumed by the DuckStation/Mednafen-style IDCT path below.
     ZIGZAG = [
-       0,  1,  8, 16,  9,  2,  3, 10,
-      17, 24, 32, 25, 18, 11,  4,  5,
-      12, 19, 26, 33, 40, 48, 41, 34,
-      27, 20, 13,  6,  7, 14, 21, 28,
-      35, 42, 49, 56, 57, 50, 43, 36,
-      29, 22, 15, 23, 30, 37, 44, 51,
-      58, 59, 52, 45, 38, 31, 39, 46,
-      53, 60, 61, 54, 47, 55, 62, 63
+       0,  8,  1,  2,  9, 16, 24, 17,
+      10,  3,  4, 11, 18, 25, 32, 40,
+      33, 26, 19, 12,  5,  6, 13, 20,
+      27, 34, 41, 48, 56, 49, 42, 35,
+      28, 21, 14,  7, 15, 22, 29, 36,
+      43, 50, 57, 58, 51, 44, 37, 30,
+      23, 31, 38, 45, 52, 59, 60, 53,
+      46, 39, 47, 54, 61, 62, 55, 63
     ].freeze
-
-    # Precomputed cosines for the 8x8 IDCT. We use a straightforward
-    # direct-form IDCT; precision is good enough that the test fixtures
-    # render visually correct, even if not bit-exact with the hardware.
-    IDCT_COS = Array.new(8) do |k|
-      Array.new(8) do |n|
-        scale = (k.zero? ? 1.0 / Math.sqrt(2) : 1.0)
-        Math.cos((2 * n + 1) * k * Math::PI / 16) * scale
-      end
-    end.freeze
 
     # End-of-block marker in the RLC stream: any halfword equal to 0xFE00
     # terminates the current block (the decoder then advances to the
@@ -321,11 +308,13 @@ module PSX
       # lengths advance in zig-zag order, while the quant table is indexed by
       # that zig-zag coefficient number as on the hardware.
       coeffs = Array.new(64, 0)
-      coeffs[0] = if q_scale.zero?
-                    clamp_signed_11(dc_raw * 2)
-                  else
-                    clamp_signed_11(dc_raw * qtable[0])
-                  end
+      coeffs[ZIGZAG[0]] = if q_scale.zero?
+                            clamp_signed_15(dc_raw << 5)
+                          else
+                            coeff = (dc_raw * qtable[0]) << 4
+                            coeff += dc_raw.positive? ? -8 : 8 if dc_raw != 0
+                            clamp_signed_15(coeff)
+                          end
 
       idx = 0
       while pos < halfwords.size
@@ -340,15 +329,13 @@ module PSX
         idx += run + 1
         if idx < 64
           coef = if q_scale.zero?
-                   val * 2
+                   val << 5
                  else
-                   (val * qtable[idx] * q_scale + 4) / 8
+                   scq = q_scale * qtable[idx]
+                   ((val * scq) >> 3) << 4
                  end
-          coef = if q_scale.zero?
-                   clamp_signed_11(coef)
-                 else
-                   clamp_signed_11(coef | 1)
-                 end
+          coef += val.positive? ? -8 : 8 if !q_scale.zero? && val != 0
+          coef = clamp_signed_15(coef)
           coeffs[ZIGZAG[idx]] = coef
         end
         break if idx >= 63
@@ -360,30 +347,44 @@ module PSX
       [idct_8x8(coeffs), pos]
     end
 
-    # In-place 8x8 inverse DCT. Input: 64 ints (un-zigzagged DCT coeffs).
-    # Output: 64 ints, signed 9-bit clamped (-256..255), one per pixel.
-    # Two-pass: row IDCT then column IDCT.
+    # Two-pass integer IDCT following DuckStation's current MDEC path. The
+    # RLE decoder keeps four fractional coefficient bits; each row pass
+    # rounds with +0x20000 >> 18, then the final value is sign-extended from
+    # 9 bits and clamped to the signed byte range used by colour conversion.
     def idct_8x8(coeffs)
-      idct_pass(idct_pass(coeffs))
-    end
-
-    def idct_pass(src)
-      dst = Array.new(64, 0)
+      temp = Array.new(64, 0)
       8.times do |x|
         8.times do |y|
-          sum = 0
-          8.times do |z|
-            sum += src[y + z * 8] * @idct_table[x + z * 8]
-          end
-          dst[x + y * 8] = ((sum / 8) + 0x0FFF) / 0x2000
+          temp[y * 8 + x] = idct_row(coeffs, x * 8, y * 8)
         end
       end
-      dst
+
+      out = Array.new(64, 0)
+      8.times do |x|
+        8.times do |y|
+          sum = idct_row(temp, x * 8, y * 8)
+          out[x * 8 + y] = [[sign_extend_9(sum), -128].max, 127].min
+        end
+      end
+      out
     end
 
-    def clamp_signed_11(v)
-      return -0x400 if v < -0x400
-      return 0x3FF if v > 0x3FF
+    def idct_row(values, value_offset, scale_offset)
+      sum = 0
+      8.times do |i|
+        sum += values[value_offset + i] * @idct_table[scale_offset + i]
+      end
+      (sum + 0x2_0000) >> 18
+    end
+
+    def sign_extend_9(v)
+      v &= 0x1FF
+      (v & 0x100) != 0 ? v - 0x200 : v
+    end
+
+    def clamp_signed_15(v)
+      return -0x4000 if v < -0x4000
+      return 0x3FFF if v > 0x3FFF
       v
     end
 

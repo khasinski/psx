@@ -4,6 +4,31 @@ Snapshot of where the emulator is and what we just spent time on.
 
 ## Latest continuation
 
+2026-05-28 latest continuation:
+
+- Fixed the MDEC IDCT/dequant precision path against DuckStation's current
+  decoder. The Ruby decoder was dequantising into an 11-bit coefficient range
+  before IDCT and using a simpler pass formula; full-frame output was
+  recognizable but had a strong 8x8 block lattice. The decoder now keeps
+  DuckStation's four fractional coefficient bits, uses the row-major zigzag
+  layout, applies the same coefficient sign correction, and runs the two-pass
+  integer IDCT with `+0x20000 >> 18` rounding and final 9-bit sign extension.
+- Added an MDEC regression spec that decodes ps1-tests'
+  `.tests/mdec/frame/sunset.mdec`, applies the same 15-bit block swizzle used
+  by the ps1-tests helper, and samples the resulting VRAM image against the
+  `vram-15bit.png` reference.
+- Verification:
+  - Focused MDEC spec passed: `13 runs, 37 assertions, 0 failures`.
+  - ps1-tests `mdec/4bit`, `mdec/8bit`, and `mdec/step-by-step-log` all still
+    match their marker expectations.
+  - Full suite passed: `348 runs, 883 assertions, 0 failures`.
+  - Direct ps1-tests frame check improved from a visibly gridded sunset frame
+    to a coherent image; the sampled reference spec now covers this path.
+  - Rage Europe smoke to 1.6B cycles with Start held from 1.0B stayed stable
+    in the 24-bit intro path. Screenshots under
+    `conformance-shots/rage-eu-mdec-idct/` show coherent FMV frames, including
+    `ridge-004.png` and `ridge-008.png`.
+
 2026-05-28 continuation:
 
 - Fixed the current Rage Europe intro decoder overrun. The root cause was not
