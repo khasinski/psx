@@ -809,6 +809,40 @@ class SPUSpec < Minitest::Test
     assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
   end
 
+  def test_manual_transfer_irq9_fires_after_halfword_reaches_irq_address
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0101)
+    @spu.write16(PSX::SPU::SPUCNT, (1 << 6) | (1 << 4))
+
+    3.times { @spu.write16(PSX::SPU::SPU_FIFO, 0x1234) }
+
+    assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert_equal 0, @interrupts.stat & PSX::Interrupts::IRQ_SPU
+
+    @spu.write16(PSX::SPU::SPU_FIFO, 0x5678)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
+  def test_dma_transfer_irq9_fires_after_halfword_reaches_irq_address
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0101)
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+
+    @spu.dma_write_word(0x1122_3344)
+
+    assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert_equal 0, @interrupts.stat & PSX::Interrupts::IRQ_SPU
+
+    @spu.dma_write_word(0x5566_7788)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
   def test_enabling_irq9_checks_active_voice_sample_addresses
     @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
     @spu.write16(0xC00 + 0x06, 0x0200)

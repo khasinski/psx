@@ -383,18 +383,18 @@ module PSX
     def dma_read_word
       word = 0
       4.times do |i|
-        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
         word |= @ram.getbyte(@current_addr) << (i * 8)
         @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
+        trigger_ram_irq if i.odd? && irq_enabled? && irq_transfer_match?(@current_addr)
       end
       word
     end
 
     def dma_write_word(word)
       4.times do |i|
-        trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
         @ram.setbyte(@current_addr, (word >> (i * 8)) & 0xFF)
         @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
+        trigger_ram_irq if i.odd? && irq_enabled? && irq_transfer_match?(@current_addr)
       end
     end
 
@@ -563,12 +563,11 @@ module PSX
     end
 
     def write_word_to_ram(v)
-      trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
       @ram.setbyte(@current_addr, v & 0xFF)
       @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
-      trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
       @ram.setbyte(@current_addr, (v >> 8) & 0xFF)
       @current_addr = (@current_addr + 1) & (RAM_SIZE - 1)
+      trigger_ram_irq if irq_enabled? && irq_transfer_match?(@current_addr)
     end
 
     def drain_fifo
