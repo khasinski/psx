@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched SPU reverb work-area addressing against DuckStation:
+  - Reverb current/base addresses are now treated as halfword-address units,
+    with byte conversion at RAM access time.
+  - Reverb RAM access now wraps inside the configured work area using
+    DuckStation's base-add-on-overflow rule.
+- Verification:
+  - Focused SPU spec passed: `49 runs, 125 assertions, 0 failures`.
+  - Full suite passed: `384 runs, 1016 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU capture-buffer writes:
   - Each generated SPU sample now writes raw CD left/right samples and voice
     1/3 last-volume levels to the four 0x400-byte capture buffers in SPU RAM.

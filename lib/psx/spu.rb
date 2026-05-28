@@ -608,12 +608,12 @@ module PSX
     end
 
     def reverb_base_address
-      (@reverb_base << 2) & (RAM_SIZE - 1)
+      (@reverb_base << 2) & ((RAM_SIZE - 1) / 2)
     end
 
     def process_reverb(left_in, right_in)
       @last_reverb_input = [left_in, right_in]
-      addr = @reverb_current_address & (RAM_SIZE - 1)
+      addr = reverb_memory_address(0)
       delayed_left = read_ram_s16(addr)
       delayed_right = read_ram_s16(addr + 2)
 
@@ -623,7 +623,7 @@ module PSX
       end
 
       if @reverb_resample_position.odd?
-        @reverb_current_address = (addr + 2) & (RAM_SIZE - 1)
+        @reverb_current_address = (@reverb_current_address + 1) & ((RAM_SIZE - 1) / 2)
         @reverb_current_address = reverb_base_address if @reverb_current_address.zero?
       end
       @reverb_resample_position = (@reverb_resample_position + 1) & 0x3F
@@ -631,6 +631,13 @@ module PSX
         apply_volume(delayed_left, signed16(@reverb_left_volume)),
         apply_volume(delayed_right, signed16(@reverb_right_volume)),
       ]
+    end
+
+    def reverb_memory_address(offset)
+      mask = (RAM_SIZE - 1) / 2
+      halfword_offset = @reverb_current_address + (offset & mask)
+      halfword_offset += reverb_base_address if (halfword_offset & 0x40000) != 0
+      (halfword_offset & mask) * 2
     end
 
     def read_ram_s16(address)

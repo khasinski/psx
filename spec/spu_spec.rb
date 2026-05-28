@@ -396,7 +396,7 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::REVERB_VOL_LEFT, 0x3FFF)
     @spu.write16(PSX::SPU::REVERB_VOL_RIGHT, 0x2000)
     @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
-    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0080)
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
     @spu.dma_write_word((4000 << 16) | 4000)
 
     @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
@@ -437,8 +437,15 @@ class SPUSpec < Minitest::Test
     assert_equal start, @spu.instance_variable_get(:@reverb_current_address)
 
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
-    assert_equal start + 2, @spu.instance_variable_get(:@reverb_current_address)
+    assert_equal start + 1, @spu.instance_variable_get(:@reverb_current_address)
     assert_equal 2, @spu.instance_variable_get(:@reverb_resample_position)
+  end
+
+  def test_reverb_memory_address_wraps_inside_work_area
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x1000)
+    @spu.instance_variable_set(:@reverb_current_address, 0x3FFFF)
+
+    assert_equal 0x8000, @spu.send(:reverb_memory_address, 1)
   end
 
   def test_state_snapshot_preserves_noise_and_reverb_voice_masks
