@@ -6,6 +6,23 @@ Snapshot of where the emulator is and what we just spent time on.
 
 2026-05-28 latest continuation:
 
+- Fixed CD-ROM SeekL completion for data tracks. DuckStation completes a
+  logical seek by processing the target sector header, which makes GetlocL
+  valid after SeekL even before streaming reads begin. Ruby now reads the
+  target data sector during successful SeekL completion, updates the cached
+  header/subheader/SubQ state, clears stale seek errors, and returns an INT5
+  seek error for targets outside a data track instead of reporting a false
+  completion.
+- Added CD-ROM regression specs for GetlocL immediately after SeekL and for
+  out-of-range SeekL failure.
+- Verification:
+  - Focused CD-ROM spec passed: `52 runs, 164 assertions, 0 failures`.
+  - Full suite passed: `350 runs, 894 assertions, 0 failures`.
+  - ps1-tests `cdrom/getloc` with a synthetic disc now gets past the
+    data-track SeekL/GetlocL mismatch. It exposes a separate remaining pregap
+    edge: `SetLoc 00:00:30` maps to negative LBA `-120` and real hardware
+    accepts it, while Ruby currently treats it as out of range.
+
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
   rectangle paths do not consume draw-mode bits 12/13 when stepping sprite

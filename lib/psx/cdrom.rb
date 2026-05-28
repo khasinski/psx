@@ -383,6 +383,13 @@ module PSX
       @last_subq_valid = true
     end
 
+    def data_track_for_lba(lba)
+      track = @disc&.track_for_lba(lba)
+      return nil if track.nil? || track.audio?
+
+      track
+    end
+
     def sector_payload(whole)
       @whole_sector ? whole : whole.byteslice(12, 2048)
     end
@@ -813,13 +820,21 @@ module PSX
     end
 
     def cmd_seek_l
-      if @want_seek
-        @read_lba = @seek_lba
-        @want_seek = false
-      end
+      target_lba = @want_seek ? @seek_lba : @read_lba
+      @want_seek = false
+      @read_lba = target_lba
       @stat |= SF_SEEKING
       queue_response(0, 3, [@stat])
-      @stat &= ~SF_SEEKING
+
+      if @disc.nil? || data_track_for_lba(target_lba).nil?
+        @stat &= ~SF_SEEKING
+        @stat |= SF_SEEK_ERROR
+        queue_response(CYCLES_PER_RESPONSE * 4, 5, [@stat, 0x04])
+        return
+      end
+
+      read_sector(target_lba)
+      @stat &= ~(SF_SEEKING | SF_SEEK_ERROR)
       queue_response(CYCLES_PER_RESPONSE * 4, 2, [@stat])
     end
 
