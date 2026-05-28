@@ -40,6 +40,7 @@ module PSX
     CYCLES_PER_SECTOR_1X = 33_868_800 / 75
     CYCLES_PER_SECTOR_2X = CYCLES_PER_SECTOR_1X / 2
     CYCLES_PER_RESPONSE  = 20_000
+    CYCLES_MOTOR_ON_RESPONSE = 400_000
     # First sector after a seek arrives quickly — the drive pre-buffers
     # during SeekL, so when ReadN starts streaming the first INT1 lands
     # almost immediately. Subsequent sectors space out at the real cadence.
@@ -718,9 +719,19 @@ module PSX
     end
 
     def cmd_motor_on
-      @stat |= SF_MOTOR_ON
+      if (@stat & SF_MOTOR_ON) != 0
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+        return
+      end
+
+      if @disc.nil?
+        queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_NOT_READY])
+        return
+      end
+
       queue_response(0, 3, [@stat])
-      queue_response(CYCLES_PER_RESPONSE * 2, 2, [@stat])
+      @stat |= SF_MOTOR_ON
+      queue_response(CYCLES_MOTOR_ON_RESPONSE, 2, [@stat])
     end
 
     def cmd_stop

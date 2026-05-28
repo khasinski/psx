@@ -8,6 +8,26 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM MotorOn response alignment:
+
+- Matched DuckStation's `MotorOn` command behavior:
+  - `MotorOn` now returns an INT5 error with reason `0x20` when the motor is
+    already on, instead of ACKing success.
+  - When the motor is off, `MotorOn` now queues its ACK using the pre-spin-up
+    status byte, then sets the motor bit for the delayed completion response.
+  - The delayed completion now uses DuckStation's 400000-cycle motor-on
+    response timing instead of the generic short command-response delay.
+- Added focused CD-ROM regressions for:
+  - `MotorOn` erroring when the motor is already on.
+  - `MotorOn` ACK reporting motor-off status after `Stop`, followed by a
+    delayed INT2 with the motor bit set.
+- Verification:
+  - Focused CD-ROM spec passed: `74 runs, 278 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `447 runs, 1235 assertions, 0 failures`.
+
 2026-05-28 CD-ROM Stop ACK/response cleanup:
 
 - Matched DuckStation's `Stop` command ordering:

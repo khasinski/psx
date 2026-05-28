@@ -706,6 +706,38 @@ class CDROMSpec < Minitest::Test
                  "Stop should leave only its ACK and its own INT2 pending"
   end
 
+  def test_motor_on_errors_when_motor_is_already_on
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x07) # MotorOn
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+  end
+
+  def test_motor_on_ack_reports_status_before_motor_bit_is_set
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+    enable_irqs(0x1F)
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x08) # Stop
+    drain_response
+    assert drive_until_int(2, max_ticks: 20)
+    assert_equal 0, @cdrom.read8(1) & PSX::CDROM::SF_MOTOR_ON
+    ack_response
+
+    @cdrom.write8(1, 0x07) # MotorOn
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal 0, @cdrom.read8(1) & PSX::CDROM::SF_MOTOR_ON
+    ack_response
+
+    assert drive_until_int(2, max_ticks: 40)
+    assert_equal PSX::CDROM::SF_MOTOR_ON, @cdrom.read8(1) & PSX::CDROM::SF_MOTOR_ON
+  end
+
   def test_eject_disc_raises_shell_open_error_interrupt
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
     enable_irqs(0x1F)
