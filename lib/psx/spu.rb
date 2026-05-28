@@ -34,6 +34,8 @@ module PSX
     REVERB_BASE       = 0xDA2
     CD_AUDIO_VOL_LEFT = 0xDB0
     CD_AUDIO_VOL_RIGHT = 0xDB2
+    EXTERNAL_VOL_LEFT = 0xDB4
+    EXTERNAL_VOL_RIGHT = 0xDB6
     CURRENT_MAIN_VOL_LEFT = 0xDB8
     CURRENT_MAIN_VOL_RIGHT = 0xDBA
     CURRENT_VOICE_VOL_BASE = 0xE00
@@ -110,6 +112,8 @@ module PSX
       @reverb_registers = Array.new(32, 0)
       @cd_audio_left_volume = 0
       @cd_audio_right_volume = 0
+      @external_left_volume = 0
+      @external_right_volume = 0
       @cd_audio_fifo = []
       @voices = Array.new(24) do
         VoiceState.new(
@@ -171,6 +175,8 @@ module PSX
       when SPUSTAT           then @stat
       when CD_AUDIO_VOL_LEFT then @cd_audio_left_volume
       when CD_AUDIO_VOL_RIGHT then @cd_audio_right_volume
+      when EXTERNAL_VOL_LEFT then @external_left_volume
+      when EXTERNAL_VOL_RIGHT then @external_right_volume
       when CURRENT_MAIN_VOL_LEFT then @main_left_current_volume & 0xFFFF
       when CURRENT_MAIN_VOL_RIGHT then @main_right_current_volume & 0xFFFF
       else
@@ -274,6 +280,10 @@ module PSX
         @cd_audio_left_volume = v
       when CD_AUDIO_VOL_RIGHT
         @cd_audio_right_volume = v
+      when EXTERNAL_VOL_LEFT
+        @external_left_volume = v
+      when EXTERNAL_VOL_RIGHT
+        @external_right_volume = v
       when CURRENT_MAIN_VOL_LEFT
         @main_left_current_volume = signed16(v)
       when CURRENT_MAIN_VOL_RIGHT

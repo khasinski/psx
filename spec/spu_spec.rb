@@ -239,6 +239,14 @@ class SPUSpec < Minitest::Test
     assert_in_delta(-1000, frames.first[1], 1)
   end
 
+  def test_external_volume_registers_read_back
+    @spu.write16(PSX::SPU::EXTERNAL_VOL_LEFT, 0x1357)
+    @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x2468)
+
+    assert_equal 0x1357, @spu.read16(PSX::SPU::EXTERNAL_VOL_LEFT)
+    assert_equal 0x2468, @spu.read16(PSX::SPU::EXTERNAL_VOL_RIGHT)
+  end
+
   def test_main_volume_scales_final_spu_output
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
@@ -352,6 +360,8 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::REVERB_VOL_RIGHT, 0x2222)
     @spu.write16(PSX::SPU::REVERB_BASE, 0x3333)
     @spu.write16(PSX::SPU::REVERB_REG_BASE + 4, 0x4444)
+    @spu.write16(PSX::SPU::EXTERNAL_VOL_LEFT, 0x5555)
+    @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x6666)
     @spu.instance_variable_set(:@noise_count, 0x1234_5678)
     @spu.instance_variable_set(:@noise_level, 0x0000_4000)
 
@@ -366,6 +376,8 @@ class SPUSpec < Minitest::Test
     assert_equal 0x2222, restored.read16(PSX::SPU::REVERB_VOL_RIGHT)
     assert_equal 0x3333, restored.read16(PSX::SPU::REVERB_BASE)
     assert_equal 0x4444, restored.read16(PSX::SPU::REVERB_REG_BASE + 4)
+    assert_equal 0x5555, restored.read16(PSX::SPU::EXTERNAL_VOL_LEFT)
+    assert_equal 0x6666, restored.read16(PSX::SPU::EXTERNAL_VOL_RIGHT)
     assert_equal 0x1234_5678, restored.instance_variable_get(:@noise_count)
     assert_equal 0x0000_4000, restored.instance_variable_get(:@noise_level)
   end

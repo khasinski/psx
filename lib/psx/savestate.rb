@@ -234,6 +234,8 @@ module PSX
         reverb_registers: (@reverb_registers || Array.new(32, 0)).dup,
         cd_audio_left_volume: @cd_audio_left_volume,
         cd_audio_right_volume: @cd_audio_right_volume,
+        external_left_volume: @external_left_volume || 0,
+        external_right_volume: @external_right_volume || 0,
         cd_audio_fifo: @cd_audio_fifo.dup,
         sample_cycle_accumulator: @sample_cycle_accumulator || 0,
         voices: @voices.map { |v| v.to_h.transform_values { |value| value.is_a?(Array) || value.is_a?(Hash) ? value.dup : value } },
@@ -271,6 +273,8 @@ module PSX
       @reverb_registers = s[:reverb_registers]&.dup || Array.new(32, 0)
       @cd_audio_left_volume = s[:cd_audio_left_volume] || 0
       @cd_audio_right_volume = s[:cd_audio_right_volume] || 0
+      @external_left_volume = s[:external_left_volume] || 0
+      @external_right_volume = s[:external_right_volume] || 0
       @cd_audio_fifo = s[:cd_audio_fifo]&.dup || []
       @sample_cycle_accumulator = s[:sample_cycle_accumulator] || 0
       if s[:voices]
