@@ -90,6 +90,19 @@ Snapshot of where the emulator is and what we just spent time on.
   - `bash -n bin/_ps1tests-baseline` passed.
   - `PSX_TEST_FILTER=cdrom PSX_MAX_CYCLES=1000000 PSX_WALL_TIMEOUT=5 bin/_ps1tests-baseline`
     reports all three CD-ROM tests as skipped and `TOTAL 0  OK 0  FAIL 0`.
+- Added a generic early-stop path to `bin/psx-test` for reference logs with
+  no PASS/FAIL/Done markers. Once the captured output contains every expected
+  reference line, with numeric fields treated fuzzily, the runner stops
+  instead of burning the full cycle quota. This makes structural-output tests
+  like `dma/chain-looping` complete promptly.
+- Verification:
+  - `mise exec -- ruby -c bin/psx-test` passed.
+  - `PSX_TEST_FILTER=dma/chain-looping PSX_MAX_CYCLES=120000000 PSX_WALL_TIMEOUT=45 bin/_ps1tests-baseline`
+    passed: `TOTAL 1  OK 1  FAIL 0`.
+- Remaining default-baseline notes:
+  - `mdec/8bit` still hits a 120s wall timeout even at `350000000` cycles;
+    this is a harness/performance budget issue, not yet treated as an
+    accuracy fix.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware

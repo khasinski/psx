@@ -74,6 +74,27 @@ handle_auto_disc_swap = lambda do
   end
 end
 
+marker_line = lambda do |line|
+  l = line.sub(/^% /, "").rstrip
+  l.match?(/^pass - /) ||
+    l.match?(/^fail - /) ||
+    l.match?(/^Passed tests: \d+/) ||
+    l.match?(/^Failed tests: \d+/) ||
+    l.match?(/^Done\.?$/i) ||
+    l.match?(/^Test passed$/i) ||
+    l.match?(/^Test failed$/i)
+end
+to_pattern = lambda do |line|
+  Regexp.new(Regexp.escape(line).gsub(/\d+/, '\d+'))
+end
+expected_text = expected ? File.read(expected) : nil
+early_expected_patterns = []
+if expected_text && expected_text.lines.none? { |line| marker_line.call(line) }
+  early_expected_patterns = expected_text.lines.map { |l| l.sub(/^% /, "").rstrip.sub("> Disc inserted?", "> Disc detected") }
+                                         .reject { |l| l.empty? }
+                                         .map { |l| to_pattern.call(l) }
+end
+
 emu.cpu.tty_handler = ->(kind, val) do
   case kind
   when :char then captured << val.chr
@@ -104,7 +125,8 @@ while remaining > 0 && !done
                  captured.include?("Test passed") ||
                  captured.include?("Test failed") ||
                  (auto_disc_swap && captured.include?("> Disc detected")) ||
-                 (timing_test && captured.scan(/double-speed timing:/).length >= 5)
+                 (timing_test && captured.scan(/double-speed timing:/).length >= 5) ||
+                 (!early_expected_patterns.empty? && early_expected_patterns.all? { |pat| captured.match?(pat) })
 end
 
 print captured
@@ -130,7 +152,6 @@ if expected
     end
   end
 
-  expected_text = File.read(expected)
   exp_norm = normalize.call(expected_text)
   act_norm = normalize.call(captured)
 
@@ -158,9 +179,6 @@ if expected
   # real hardware and the emulator (DMA contention slows the CPU on real
   # hardware); replace runs of digits with a wildcard so the structural
   # match still passes.
-  to_pattern = lambda do |line|
-    Regexp.new(Regexp.escape(line).gsub(/\d+/, '\d+'))
-  end
   expected_lines = expected_text.lines.map { |l| l.sub(/^% /, "").rstrip.sub("> Disc inserted?", "> Disc detected") }
                                        .reject { |l| l.empty? }
   if expected_lines.all? { |l| captured.match?(to_pattern.call(l)) }
