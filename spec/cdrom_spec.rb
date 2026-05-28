@@ -236,6 +236,36 @@ class CDROMSpec < Minitest::Test
            "new command INT3 should not wait for the older delayed INT2"
   end
 
+  def test_pause_cancels_previous_pending_second_response
+    @cdrom.disc = build_one_sector_disc("PVD!"[0, 4].b + ("\x00" * 2044).b)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x02)
+    drain_response
+    @cdrom.write8(1, 0x06)
+    drain_response
+    @cdrom.write8(1, 0x09)
+    assert drive_until_int(1, max_ticks: 200)
+    ack_response
+    assert drive_until_int(3, max_ticks: 20)
+    ack_response
+
+    old_pause = @cdrom.instance_variable_get(:@pending).find { |entry| entry[3] == 2 }
+    refute_nil old_pause
+    old_pause[0] = 1
+
+    @cdrom.write8(1, 0x09)
+
+    pending = @cdrom.instance_variable_get(:@pending)
+    refute_includes pending, old_pause
+    assert_equal 2, pending.count { |entry| entry[3] == 2 || entry[3] == 3 },
+                 "second Pause should leave only its ACK and its own INT2 pending"
+  end
+
   # whole_sector mode (SetMode bit 5) makes the data FIFO start at offset
   # 12 of the raw 2352-byte sector — header + sub-header + user data +
   # ECC — instead of the 2048-byte user-data slice. Rage Racer's CD-XA

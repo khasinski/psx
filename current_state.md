@@ -8,6 +8,23 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM Pause second-response cancellation:
+
+- Matched DuckStation's `Pause` command second-response lifecycle:
+  - Starting a new `Pause` now cancels stale non-ACK async/second responses
+    before queuing its own delayed INT2.
+  - The existing BIOS-critical `ReadN` plus immediate `Pause` path still
+    delivers one in-flight sector INT1 before the Pause INT3/INT2 sequence.
+- Added a focused CD-ROM regression proving a second `Pause` removes the
+  first Pause's pending delayed INT2 rather than allowing duplicate Pause
+  completions to survive.
+- Verification:
+  - Focused CD-ROM spec passed: `70 runs, 259 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `443 runs, 1216 assertions, 0 failures`.
+
 2026-05-28 CD-ROM Play buffer/async clearing:
 
 - Matched DuckStation `BeginPlaying` cleanup:

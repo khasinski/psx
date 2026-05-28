@@ -744,6 +744,7 @@ module PSX
       # commonly issues ReadN + Pause back-to-back to read a single sector.
       # Once at least one sector has been delivered we leave it alone so
       # we don't double-deliver.
+      clear_async_and_second_responses
       if was_reading && @disc && @sectors_since_read.zero?
         deliver_pending_sector
       end
