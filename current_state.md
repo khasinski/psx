@@ -115,6 +115,23 @@ Snapshot of where the emulator is and what we just spent time on.
     Rage Racer title logo and `PRESS START`.
   - `conformance-shots/rage-eu-current-baseline/ridge-014.png` reaches the
     in-engine attract scene.
+- Added `bin/_ridge-boot` resume/probe support for tighter Rage input
+  experiments:
+  - `PSX_LOAD_STATE` restores an emulator state instead of booting from
+    scratch.
+  - `PSX_BASE_CYCLES` keeps input-script timestamps absolute after resume.
+  - `PSX_SCREENSHOT_EVERY_CHUNKS` controls screenshot cadence.
+- Current title-state probe:
+  - Saved `tmp/rage-eu-2p4b.state` from a 2.4B-cycle Rage Europe run; the
+    paired screenshot shows the title screen.
+  - Resuming from that state with Start taps at `2.45B..2.50B`,
+    `2.60B..2.65B`, and `2.75B..2.80B` updates the direct pad buffer to
+    `00 41 FF F7` during the tap windows, confirming Start reaches Rage's
+    pad buffer in the current tree.
+  - Visual captures under `conformance-shots/rage-eu-title-resume-taps/`
+    still show the flow entering attract/race scenes rather than a captured
+    menu transition, so the exact title Start/menu behavior remains a
+    follow-up target.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
