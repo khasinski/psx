@@ -100,9 +100,13 @@ Snapshot of where the emulator is and what we just spent time on.
   - `PSX_TEST_FILTER=dma/chain-looping PSX_MAX_CYCLES=120000000 PSX_WALL_TIMEOUT=45 bin/_ps1tests-baseline`
     passed: `TOTAL 1  OK 1  FAIL 0`.
 - Remaining default-baseline notes:
-  - `mdec/8bit` still hits a 120s wall timeout even at `350000000` cycles;
-    this is a harness/performance budget issue, not yet treated as an
-    accuracy fix.
+  - Rechecked the slow default-baseline cases sequentially rather than in
+    parallel. `mdec/4bit`, `mdec/8bit`, `mdec/step-by-step-log`, and
+    `gpu/bandwidth` all pass with a 90s wall cap.
+  - Default ps1-tests baseline with CD-ROM tests skipped unless
+    `PSX_TEST_DISC` is set now passes: `TOTAL 18  OK 18  FAIL 0`.
+  - Full CD-ROM baseline with the synthetic disc remains separately covered:
+    `TOTAL 3  OK 3  FAIL 0`.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
