@@ -415,6 +415,62 @@ class CDROMSpec < Minitest::Test
     assert_equal PSX::CDROM::ERROR_REASON_NOT_READY, @cdrom.read8(1)
   end
 
+  def test_readn_skips_audio_sectors_without_latching_seek_error
+    @cdrom.disc = build_data_then_audio_disc
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x02)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 0
+    drain_response
+
+    @cdrom.write8(1, 0x06) # ReadN
+    drain_response
+    assert drive_until_int(1, max_ticks: 40)
+    ack_response
+
+    @cdrom.tick(PSX::CDROM::CYCLES_PER_SECTOR_1X * 2)
+
+    refute @cdrom.instance_variable_get(:@stat) & PSX::CDROM::SF_SEEK_ERROR != 0,
+           "audio sectors reached by a data read should not poison later command status"
+    assert_operator @cdrom.instance_variable_get(:@read_lba), :>=, 2
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0xA0)
+    @cdrom.write8(1, 0x0E) # SetMode
+
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal 0, @cdrom.read8(1) & PSX::CDROM::SF_SEEK_ERROR
+  end
+
+  def test_seek_p_to_audio_track_completes_without_seek_error
+    @cdrom.disc = build_data_then_audio_disc
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x02)
+    @cdrom.write8(2, 0x01)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 1, first audio sector
+    drain_response
+
+    @cdrom.write8(1, 0x16) # SeekP
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEKING, @cdrom.read8(1)
+    ack_response
+
+    assert drive_until_int(2, max_ticks: 40)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.write8(1, 0x11) # GetlocP
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+    assert_equal [0x02, 0x01, 0x00, 0x02, 0x00, 0x00, 0x02, 0x01], bytes
+  end
+
   def test_invalid_command_returns_int5_command_error
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 
@@ -1129,6 +1185,42 @@ class CDROMSpec < Minitest::Test
       disc.define_singleton_method(:track_for_lba) { |lba| lba >= 0 && lba < sectors ? track : nil }
       disc.define_singleton_method(:read_audio_sector) do |lba|
         lba >= 0 && lba < sectors ? ([lba & 0xFF].pack("C") + ("\x00" * 2351)).b : nil
+      end
+    end
+  end
+
+  def build_data_then_audio_disc
+    data_track = Struct.new(:number, :lba_start, :lba_length, keyword_init: true) do
+      def audio? = false
+      def data? = true
+      def lba_end = lba_start + lba_length
+    end.new(number: 1, lba_start: 0, lba_length: 1)
+
+    audio_track = Struct.new(:number, :lba_start, :lba_length, keyword_init: true) do
+      def audio? = true
+      def data? = false
+      def lba_end = lba_start + lba_length
+    end.new(number: 2, lba_start: 1, lba_length: 3)
+
+    data_sector = begin
+      sync = "\x00\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00".b
+      msf = [0x00, 0x02, 0x00].pack("C*")
+      sub = [0x00, 0x00, 0x08, 0x00].pack("C*") * 2
+      sync + msf + "\x02".b + sub + ("DATA" + "\x00" * 2044).b + ("\x00" * 280).b
+    end
+
+    Object.new.tap do |disc|
+      disc.define_singleton_method(:tracks) { [data_track, audio_track] }
+      disc.define_singleton_method(:track_count) { 2 }
+      disc.define_singleton_method(:total_sectors) { 4 }
+      disc.define_singleton_method(:track_for_lba) do |lba|
+        [data_track, audio_track].find { |track| lba >= track.lba_start && lba < track.lba_end }
+      end
+      disc.define_singleton_method(:pregap_lba?) { |_lba| false }
+      disc.define_singleton_method(:read_whole_sector) { |lba| lba.zero? ? data_sector.byteslice(12, 2340) : raise("audio") }
+      disc.define_singleton_method(:read_sector) { |lba| lba.zero? ? data_sector : raise("audio") }
+      disc.define_singleton_method(:read_audio_sector) do |lba|
+        lba >= 1 && lba < 4 ? ("\x00" * 2352).b : nil
       end
     end
   end

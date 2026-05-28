@@ -10,6 +10,31 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Fixed the Rage Racer Grand Prix loading-screen stall after the monologue:
+  - The first bad status transition was a `SeekP` (`0x16`) to LBA `59692`,
+    which is track 2 audio on the Europe disc. The emulator treated all seeks
+    to non-data tracks as failed data seeks, latched `SF_SEEK_ERROR`, and then
+    Rage rejected every later successful `SetMode A0` ACK because the response
+    status was `0x06` (`MOTOR_ON | SEEK_ERROR`).
+  - Matched DuckStation's behavior for this path: physical/logical seeks to
+    audio sectors complete successfully when not tied to a data read, update
+    sub-Q, and clear seeking/seek-error status.
+  - Streaming data reads that run into audio sectors now skip those sectors
+    instead of latching seek-error; lead-out/data-end stops the stream without
+    poisoning later command ACKs.
+  - Added CD-ROM regressions for `SeekP` to an audio track and `ReadN`
+    crossing into audio sectors without latching seek-error.
+- Verification:
+  - Focused CD-ROM specs passed: `61 runs, 219 assertions, 0 failures`.
+  - Full suite passed: `421 runs, 1128 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+  - Rage Europe Grand Prix smoke from `tmp/rage-eu-2p4b.state` with the same
+    scripted Start/Cross sequence now gets past the old `NOW LOADING` loop:
+    `tmp/rage-grandprix-seek-audio/ridge-016.png` shows the car/course
+    selection screen, and `tmp/rage-grandprix-seek-audio/ridge-032.png` shows
+    the race-start menu. The final state has CD status `0x02` with no
+    seek-error latch.
+
 - Fixed the Rage Racer striped FMV regression from GPU DMA busy timing:
   - Bisected the visual regression with 800M-cycle Rage Europe smokes:
     `b6c22cd` and `dc0ed84` produced coherent FMV frames, while `b2b4577`
@@ -35,8 +60,8 @@ later entries have fixed.
     output again; `tmp/rage-fmv-request-immediate/ridge-004.png` shows the
     red car frame without the repeated vertical striping seen in
     `tmp/rage-fmv-striped-check/ridge-004.png`.
-- Remaining next-session regression:
-  - Rage Racer gets stuck on the loading screen after the monologue intro when
+- Previous regression, now fixed:
+  - Rage Racer got stuck on the loading screen after the monologue intro when
     starting a new Grand Prix.
   - Reproduced from `tmp/rage-eu-2p4b.state` with scripted Start/Cross inputs
     through 4.0B absolute cycles. The run reaches the monologue/title flow
@@ -46,10 +71,6 @@ later entries have fixed.
   - The stuck PC samples cluster around Rage stream/loading code:
     `0x8006DD3C`, `0x8006DD54`, `0x8006DD80`, `0x8006B848`,
     `0x8006DEA0`, `0x8006DEB0`, `0x8006DEBC`, and `0x8006DEF0`.
-  - Good next starting point: save a stuck state near 4.0B with the same input
-    script, then instrument CD-ROM/DMA/MDEC callback state around
-    `RAGE_CDROM_DMA_CALLBACK = 0x8006_CE78`, the callback table flag/base, and
-    the stream queue/index addresses in `CPU`.
 
 - Matched DuckStation's GPU save-state GPUREAD latch behavior:
   - GPU save states now preserve `@gpu_info_latch`, matching DuckStation's

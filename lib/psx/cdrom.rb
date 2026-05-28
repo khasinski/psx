@@ -291,13 +291,25 @@ module PSX
 
       lba = @read_lba
       track = @disc.track_for_lba(lba)
-      if track.nil? || track.audio?
-        # Out of range or hit an audio track — terminate the stream with
-        # an INT5 error.
+      if track.nil?
+        # DuckStation stops at lead-out/data-end without latching seek-error.
+        # Seek errors belong to failed seek commands, not a streaming read
+        # naturally running out of readable data.
         @reading = false
         @stat &= ~SF_READING
-        @stat |= SF_SEEK_ERROR
-        queue_response(0, 5, [@stat, 0x04]) # 0x04 = seek error code
+        @stat &= ~SF_SEEKING
+        @stat &= ~SF_SEEK_ERROR
+        queue_response(0, 2, [@stat])
+        return
+      end
+
+      if track.audio?
+        # In data-read mode, audio sectors are not delivered to the CPU.
+        # DuckStation skips them and keeps the read stream alive; Rage Racer
+        # depends on not poisoning later command ACKs with a stale seek-error
+        # bit after crossing into audio data.
+        @read_lba += 1
+        @sector_cycles += next_sector_cycles
         return
       end
 
@@ -892,12 +904,21 @@ module PSX
       @stat |= SF_SEEKING
       queue_response(0, 3, [@stat])
 
-      if @disc.nil? || data_track_for_lba(target_lba).nil?
+      track = @disc&.track_for_lba(target_lba)
+      if @disc.nil? || (data_track_for_lba(target_lba).nil? && !(track&.audio?))
         @stat &= ~SF_SEEKING
         @stat |= SF_SEEK_ERROR
         @last_sector_header_valid = false
         @last_subq_valid = false
         queue_response(CYCLES_PER_RESPONSE * 4, 5, [@stat, 0x04])
+        return
+      end
+
+      if track&.audio?
+        update_last_subq(target_lba)
+        @last_sector_header_valid = false
+        @stat &= ~(SF_SEEKING | SF_SEEK_ERROR)
+        queue_response(CYCLES_PER_RESPONSE * 4, 2, [@stat])
         return
       end
 
