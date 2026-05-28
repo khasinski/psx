@@ -10,6 +10,17 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's SPU key-off and loop-end force-off state:
+  - Key-off now ignores voices that are already off or already in release,
+    matching DuckStation's `Voice::KeyOff`.
+  - Loop-end without repeat now fully forces the voice off when noise is not
+    enabled, clearing ADSR phase and current ADSR volume instead of only
+    clearing Ruby's active-mask bit.
+- Verification:
+  - Focused SPU spec passed: `61 runs, 156 assertions, 0 failures`.
+  - Full suite passed: `396 runs, 1047 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's zero-pitch SPU voice sampling order:
   - Voices now compute `last_volume` and tick ADSR before applying the pitch
     step, so pitch `0` does not leave stale voice volume behind.

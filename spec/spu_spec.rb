@@ -22,6 +22,13 @@ class SPUSpec < Minitest::Test
     assert_equal :release, @spu.instance_variable_get(:@voices)[0].adsr_phase
   end
 
+  def test_key_off_ignores_voice_that_is_already_off
+    @spu.write16(PSX::SPU::KEY_OFF_LOW, 0x0001)
+
+    assert_equal :off, @spu.instance_variable_get(:@voices)[0].adsr_phase
+    assert_equal 0, @spu.instance_variable_get(:@voice_active)
+  end
+
   def test_key_on_and_key_off_registers_clear_after_sample_tick
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
     @spu.write16(PSX::SPU::KEY_OFF_LOW, 0x0001)
@@ -119,6 +126,8 @@ class SPUSpec < Minitest::Test
 
     assert_equal 0x0001, @spu.read16(PSX::SPU::ENDX_LOW)
     assert_equal 0, @spu.instance_variable_get(:@voice_active) & 0x0001
+    assert_equal :off, @spu.instance_variable_get(:@voices)[0].adsr_phase
+    assert_equal 0, @spu.read16(0xC00 + 0x0C)
   end
 
   def test_voice_tick_loops_to_repeat_address_when_loop_repeat_is_set

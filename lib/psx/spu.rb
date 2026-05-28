@@ -449,6 +449,8 @@ module PSX
       24.times do |voice|
         next if (mask & (1 << voice)).zero?
 
+        next if @voices[voice].adsr_phase == :off || @voices[voice].adsr_phase == :release
+
         @voices[voice].adsr_phase = :release
         update_adsr_envelope(voice)
       end
@@ -627,7 +629,14 @@ module PSX
       if (voice.current_block_flags & 0x01) != 0
         @endx |= mask
         voice.current_address = voice.repeat_address & ~1
-        @voice_active &= ~mask if (voice.current_block_flags & 0x02).zero? && !noise_enabled?(voice_index)
+        if (voice.current_block_flags & 0x02).zero? && !noise_enabled?(voice_index)
+          @voice_active &= ~mask
+          voice.adsr_phase = :off
+          voice.adsr_volume = 0
+          adsr_offset = voice_index * 0x10 + 0x0C
+          @regs.setbyte(adsr_offset, 0)
+          @regs.setbyte(adsr_offset + 1, 0)
+        end
       end
 
       if (@voice_active & mask) != 0
