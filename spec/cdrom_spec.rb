@@ -303,6 +303,18 @@ class CDROMSpec < Minitest::Test
     assert drive_until_int(5, max_ticks: 40)
     assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEK_ERROR, @cdrom.read8(1)
     assert_equal 0x04, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.write8(1, 0x10) # GetlocL
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEK_ERROR, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_NOT_READY, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.write8(1, 0x11) # GetlocP
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEK_ERROR, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_NOT_READY, @cdrom.read8(1)
   end
 
   def test_invalid_command_returns_int5_command_error

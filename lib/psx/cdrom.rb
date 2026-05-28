@@ -746,7 +746,7 @@ module PSX
     end
 
     def cmd_getloc_p
-      update_last_subq(@read_lba) if @disc && !@last_subq_valid
+      update_last_subq(@read_lba) if @disc && !@last_subq_valid && data_track_for_lba(@read_lba)
       if @disc && @last_subq_valid
         queue_response(0, 3, @last_subq)
       else
@@ -829,6 +829,8 @@ module PSX
       if @disc.nil? || data_track_for_lba(target_lba).nil?
         @stat &= ~SF_SEEKING
         @stat |= SF_SEEK_ERROR
+        @last_sector_header_valid = false
+        @last_subq_valid = false
         queue_response(CYCLES_PER_RESPONSE * 4, 5, [@stat, 0x04])
         return
       end

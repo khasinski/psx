@@ -12,12 +12,14 @@ Snapshot of where the emulator is and what we just spent time on.
   target data sector during successful SeekL completion, updates the cached
   header/subheader/SubQ state, clears stale seek errors, and returns an INT5
   seek error for targets outside a data track instead of reporting a false
-  completion.
+  completion. Failed seeks also invalidate the cached GetlocL/GetlocP state,
+  matching ps1-tests' expectation that location queries fail after a seek
+  error.
 - Added CD-ROM regression specs for GetlocL immediately after SeekL and for
-  out-of-range SeekL failure.
+  out-of-range SeekL failure, including the follow-up GetlocL/GetlocP errors.
 - Verification:
-  - Focused CD-ROM spec passed: `52 runs, 164 assertions, 0 failures`.
-  - Full suite passed: `350 runs, 894 assertions, 0 failures`.
+  - Focused CD-ROM spec passed: `52 runs, 170 assertions, 0 failures`.
+  - Full suite passed: `350 runs, 900 assertions, 0 failures`.
   - ps1-tests `cdrom/getloc` with a synthetic disc now gets past the
     data-track SeekL/GetlocL mismatch. It exposes a separate remaining pregap
     edge: `SetLoc 00:00:30` maps to negative LBA `-120` and real hardware
