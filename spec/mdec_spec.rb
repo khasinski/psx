@@ -11,18 +11,21 @@ class MDECSpec < Minitest::Test
     assert_equal 0xFFFF_FFFF, @mdec.read32_data
   end
 
-  def test_dma_in_request_follows_dma_in_enable_even_when_idle
+  def test_dma_in_request_requires_pending_input_words
     refute (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
 
     @mdec.write32_control(PSX::MDEC::CTRL_ENABLE_DMA_IN)
+    refute (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
 
+    @mdec.write32_data((PSX::MDEC::CMD_DECODE << 29) | (1 << 27) | 1)
     assert (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
   end
 
   def test_control_reset_write_still_applies_dma_enable_bits
     @mdec.write32_control(PSX::MDEC::CTRL_RESET | PSX::MDEC::CTRL_ENABLE_DMA_IN)
 
-    assert (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
+    assert @mdec.instance_variable_get(:@dma_in_enabled)
+    refute (@mdec.read32_status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
   end
 
   def test_status_reports_duckstation_current_block_encoding
@@ -41,6 +44,20 @@ class MDECSpec < Minitest::Test
 
     refute @mdec.data_out_available?
     assert (@mdec.read32_status & PSX::MDEC::STAT_OUTPUT_FIFO_EMPTY) != 0
+  end
+
+  def test_decode_stays_busy_while_output_fifo_is_queued
+    load_flat_identity_tables
+    @mdec.write32_control(PSX::MDEC::CTRL_ENABLE_DMA_IN | PSX::MDEC::CTRL_ENABLE_DMA_OUT)
+
+    @mdec.write32_data((PSX::MDEC::CMD_DECODE << 29) | (1 << 27) | 2)
+    @mdec.write32_data(0xFE00_0000)
+    @mdec.write32_data(0x0000_FE00)
+
+    status = @mdec.read32_status
+    assert (@mdec.data_out_available?)
+    assert (status & PSX::MDEC::STAT_COMMAND_BUSY) != 0
+    refute (status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
   end
 
   def test_unknown_command_consumes_declared_parameter_words

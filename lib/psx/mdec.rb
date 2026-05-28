@@ -112,11 +112,8 @@ module PSX
       status = 0
       status |= STAT_OUTPUT_FIFO_EMPTY if @output_words_remaining.zero?
       # STAT_INPUT_FIFO_FULL stays 0 in the stub — we consume writes immediately.
-      status |= STAT_COMMAND_BUSY if @params_remaining.positive?
-      # DuckStation keeps DMA0 requested whenever input DMA is enabled and
-      # there is room in the input FIFO. We consume writes immediately, so
-      # input space is always available in this model.
-      status |= STAT_DATA_IN_REQ  if @dma_in_enabled
+      status |= STAT_COMMAND_BUSY if @params_remaining.positive? || @output_words_remaining.positive?
+      status |= STAT_DATA_IN_REQ  if @dma_in_enabled && @params_remaining.positive?
       # DMA1 (out) when DMA1 is enabled AND there's output left to drain.
       status |= STAT_DATA_OUT_REQ if @dma_out_enabled && @output_words_remaining.positive?
       status |= (@output_depth & 0x3) << 25

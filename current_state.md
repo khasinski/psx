@@ -10,6 +10,25 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Fixed MDEC status bits during queued decode output:
+  - The ps1-tests `mdec/step-by-step-log` case exposed that after command
+    input is complete but decoded output remains queued, hardware still
+    reports `cmdBusy=1` while `dataInReq=0`. The Ruby model had been doing
+    the inverse (`cmdBusy=0`, `dataInReq=1`) because DMA-in enable was treated
+    as an unconditional request and command busy only tracked pending input.
+  - MDEC status now keeps `STAT_COMMAND_BUSY` set while decoded output remains
+    available, and `STAT_DATA_IN_REQ` only asserts when DMA-in is enabled and
+    the active command still needs input words.
+  - Added focused MDEC status regressions for the pending-input request and
+    queued-output busy behavior.
+- Verification:
+  - Focused MDEC specs passed: `14 runs, 42 assertions, 0 failures`.
+  - Filtered MDEC ps1-tests baseline passed:
+    `mdec/4bit`, `mdec/8bit`, `mdec/step-by-step-log`;
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+  - Full suite passed: `422 runs, 1133 assertions, 0 failures`.
+
 - Follow-up audit after the Rage Grand Prix fix:
   - Re-ran the separately documented CD-ROM ps1-tests baseline with
     `PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue`; it still passes
