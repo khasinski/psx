@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's pending-key repeat-address write behavior:
+  - A voice repeat-address write between KEY_ON and the next SPU sample now
+    keeps the voice in its first-block loop-start window, instead of treating
+    the deferred voice as fully off and suppressing the first loop-start flag.
+  - Added a regression for the pending KON repeat-write path.
+- Verification:
+  - Focused SPU spec passed: `69 runs, 187 assertions, 0 failures`.
+  - Full suite passed: `404 runs, 1078 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's pending SPU KON/KOFF application timing:
   - KEY_ON/KEY_OFF writes now update the readable latches first and apply
     voice start/release after the next generated SPU sample, matching

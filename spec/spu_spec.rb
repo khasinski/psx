@@ -218,6 +218,24 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0004, voice.repeat_address
   end
 
+  def test_repeat_address_write_during_pending_key_on_allows_first_loop_start_flag
+    @spu.write16(0xC00 + 0x06, 0x0200)
+    write_adpcm_block(0x0200, flags: 0x00)
+    write_adpcm_block(0x0202, flags: 0x04)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+
+    @spu.write16(0xC00 + 0x0E, 0x0204)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    voice = @spu.instance_variable_get(:@voices)[0]
+    assert_equal 0x0204, voice.repeat_address
+
+    voice.current_address = 0x0202
+    @spu.send(:decode_voice_block, 0)
+
+    assert_equal 0x0202, voice.repeat_address
+  end
+
   def test_repeat_address_write_after_first_block_ignores_later_loop_start_flag
     @spu.write16(0xC00 + 0x06, 0x0000)
     write_adpcm_block(0, flags: 0x00)

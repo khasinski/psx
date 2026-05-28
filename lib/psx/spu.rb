@@ -553,7 +553,8 @@ module PSX
         voice.adsr_volume = signed16(value)
       when 0x0E
         voice.repeat_address = value & ~1
-        ignore_loop_address = voice.adsr_phase == :off || !voice.is_first_block
+        pending_key_on = (@key_on & (1 << voice_index)) != 0
+        ignore_loop_address = (voice.adsr_phase == :off && !pending_key_on) || !voice.is_first_block
         voice.ignore_loop_address ||= ignore_loop_address
       end
     end
