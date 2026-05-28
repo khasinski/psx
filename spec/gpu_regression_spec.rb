@@ -239,6 +239,37 @@ class GPURegressionSpec < Minitest::Test
     assert_equal 0, @gpu.vram[1], "high width bits must not stretch the rectangle"
   end
 
+  def test_vram_copy_uses_reverse_order_for_overlapping_rows
+    @gpu.vram[0] = 0x001F
+    @gpu.vram[1] = 0x03E0
+    @gpu.vram[2] = 0x7C00
+
+    @gpu.gp0(0x80_00_00_00)
+    @gpu.gp0(0x0000_0000) # src x=0, y=0
+    @gpu.gp0(0x0000_0001) # dst x=1, y=0
+    @gpu.gp0(0x0001_0003) # width=3, height=1
+
+    assert_equal 0x001F, @gpu.vram[1]
+    assert_equal 0x03E0, @gpu.vram[2]
+    assert_equal 0x7C00, @gpu.vram[3], "overlapping copies should read the original source pixels"
+  end
+
+  def test_vram_copy_honors_mask_bits
+    @gpu.vram[0] = 0x001F
+    @gpu.vram[1] = 0x03E0
+    @gpu.vram[10] = 0x8001
+    @gpu.vram[11] = 0x0002
+    @gpu.gp0(0xE6_00_00_03) # set mask bit and skip masked destination pixels
+
+    @gpu.gp0(0x80_00_00_00)
+    @gpu.gp0(0x0000_0000)
+    @gpu.gp0(0x0000_000A)
+    @gpu.gp0(0x0001_0002)
+
+    assert_equal 0x8001, @gpu.vram[10], "masked destination pixel should be preserved"
+    assert_equal 0x83E0, @gpu.vram[11], "copied pixels should receive the draw mask bit"
+  end
+
   def test_8bit_clut_lookup_wraps_at_vram_row_end
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_01_01)

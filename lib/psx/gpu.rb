@@ -672,13 +672,39 @@ module PSX
       w = (((size & 0x3FF) - 1) & 0x3FF) + 1
       h = ((((size >> 16) & 0x1FF) - 1) & 0x1FF) + 1
 
+      return if src_x == dst_x && src_y == dst_y && !@set_mask_bit
+
+      horizontal_wrap = src_x + w > VRAM_WIDTH || dst_x + w > VRAM_WIDTH
+      same_row_overlap = !horizontal_wrap && src_y == dst_y && src_x < dst_x && dst_x < src_x + w
+
+      if !@set_mask_bit && !@check_mask_bit && !same_row_overlap
+        h.times do |dy|
+          w.times do |dx|
+            sx = (src_x + dx) % VRAM_WIDTH
+            sy = (src_y + dy) % VRAM_HEIGHT
+            dx2 = (dst_x + dx) % VRAM_WIDTH
+            dy2 = (dst_y + dy) % VRAM_HEIGHT
+            @vram[dy2 * VRAM_WIDTH + dx2] = @vram[sy * VRAM_WIDTH + sx]
+          end
+        end
+        return
+      end
+
       h.times do |dy|
-        w.times do |dx|
+        sy = (src_y + dy) % VRAM_HEIGHT
+        dy2 = (dst_y + dy) % VRAM_HEIGHT
+        copy_reverse = sy == dy2 &&
+                       (src_x < dst_x || ((src_x + w - 1) % VRAM_WIDTH) < ((dst_x + w - 1) % VRAM_WIDTH))
+        dx = copy_reverse ? w - 1 : 0
+        while copy_reverse ? dx >= 0 : dx < w
           sx = (src_x + dx) % VRAM_WIDTH
-          sy = (src_y + dy) % VRAM_HEIGHT
           dx2 = (dst_x + dx) % VRAM_WIDTH
-          dy2 = (dst_y + dy) % VRAM_HEIGHT
-          @vram[dy2 * VRAM_WIDTH + dx2] = @vram[sy * VRAM_WIDTH + sx]
+          dst_idx = dy2 * VRAM_WIDTH + dx2
+          if !@check_mask_bit || (@vram[dst_idx] & 0x8000) == 0
+            pixel = @vram[sy * VRAM_WIDTH + sx]
+            @vram[dst_idx] = pixel | (@set_mask_bit ? 0x8000 : 0)
+          end
+          dx += copy_reverse ? -1 : 1
         end
       end
     end

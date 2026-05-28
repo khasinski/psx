@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's VRAM-to-VRAM copy edge behavior:
+  - VRAM copies now skip true no-op self-copies unless the draw mask bit must
+    be set, matching DuckStation's copy command guard.
+  - Same-row overlapping copies now copy right-to-left when the destination is
+    after the source, so the original source pixels are preserved.
+  - VRAM copies now honor draw mask set/check bits, preserving masked
+    destination pixels and setting bit 15 on copied pixels when requested.
+- Verification:
+  - Focused GPU regression spec passed: `19 runs, 49 assertions, 0 failures`.
+  - Focused ps1-tests `gpu/bandwidth` passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full suite passed: `407 runs, 1084 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's reserved direct texture mode:
   - GPU texture mode `3` now aliases direct 15/16-bit texture sampling instead
     of returning transparent texels, matching DuckStation's
