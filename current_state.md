@@ -10,6 +10,25 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added full active-region coverage for the ps1-tests 24-bit MDEC frame path:
+  - `spec/mdec_spec.rb` now decodes `.tests/mdec/frame/sunset.mdec` in 24-bit
+    mode, packs the byte stream through the same 24-halfword-wide stripe
+    layout used by the test helper, and compares the full 480x240 active VRAM
+    halfword region against `.tests/mdec/frame/vram-24bit.png`.
+  - The PNG visualizes 16-bit VRAM words as 15-bit RGB, so bit 15 is invisible
+    and byte values crossing `0x7F/0x80` can look like large colour changes.
+    The regression reconstructs the rendered low 15 bits, chooses the bit-15
+    variant closest to the decoded word, and asserts the low/high bytes are
+    within the measured tolerance.
+  - This closes the earlier "24-bit layout looks mismatched" investigation as
+    coverage: the remaining rendered PNG differences were mostly a raw-VRAM
+    visualization artifact, not stripe/order failure.
+- Verification:
+  - Focused MDEC spec passed: `18 runs, 49 assertions, 0 failures`.
+  - Focused MDEC executable spec passed: `2 runs, 10 assertions, 0 failures`.
+  - Filtered MDEC ps1-tests baseline passed: `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `430 runs, 1163 assertions, 0 failures`.
+
 - Matched DuckStation's integer MDEC YCbCr conversion path:
   - DuckStation applies integer BT.601 coefficients, rounds with `+0x80`,
     sign-extends each 9-bit channel sum, then clamps/biases to the requested

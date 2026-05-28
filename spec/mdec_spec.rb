@@ -209,6 +209,30 @@ class MDECSpec < Minitest::Test
     assert_empty mismatches
   end
 
+  def test_ps1tests_frame_24bit_active_vram_matches_reference_bytes
+    skip "ImageMagick not available" unless system("which magick >/dev/null 2>&1")
+
+    decoded = decode_mdec_frame_fixture(depth: 2)
+    vram = swizzled_24bit_frame_vram(decoded)
+    reference = png_rgb_bytes(File.expand_path("../.tests/mdec/frame/vram-24bit.png", __dir__))
+
+    mismatches = []
+    240.times do |y|
+      480.times do |x|
+        rendered = reference[(y * 1024 + x) * 3, 3]
+        expected = closest_vram_word(rgb888_to_rgb555_floor(rendered), vram[y * 1024 + x])
+        actual = vram[y * 1024 + x]
+        next if word_bytes_close?(expected, actual, 4)
+
+        mismatches << [x, y, expected, actual]
+        break if mismatches.length >= 10
+      end
+      break if mismatches.length >= 10
+    end
+
+    assert_empty mismatches
+  end
+
   private
 
   def load_flat_identity_tables
@@ -284,8 +308,43 @@ class MDECSpec < Minitest::Test
     vram
   end
 
+  def swizzled_24bit_frame_vram(decoded)
+    vram = Array.new(1024 * 512, 0)
+    offset = 0
+
+    20.times do |stripe|
+      240.times do |y|
+        24.times do |x|
+          vram[y * 1024 + stripe * 24 + x] =
+            decoded.getbyte(offset).to_i | (decoded.getbyte(offset + 1).to_i << 8)
+          offset += 2
+        end
+      end
+    end
+
+    vram
+  end
+
   def rgb555_to_rgb888(pixel)
     [(pixel & 0x001F) << 3, (pixel & 0x03E0) >> 2, (pixel & 0x7C00) >> 7]
+  end
+
+  def rgb888_to_rgb555_floor(rgb)
+    (rgb[0] >> 3) | ((rgb[1] >> 3) << 5) | ((rgb[2] >> 3) << 10)
+  end
+
+  def closest_vram_word(rendered_low15, actual)
+    [rendered_low15, rendered_low15 | 0x8000].min_by do |candidate|
+      [
+        ((candidate & 0xFF) - (actual & 0xFF)).abs,
+        ((candidate >> 8) - (actual >> 8)).abs,
+      ].max
+    end
+  end
+
+  def word_bytes_close?(expected, actual, tolerance)
+    ((expected & 0xFF) - (actual & 0xFF)).abs <= tolerance &&
+      ((expected >> 8) - (actual >> 8)).abs <= tolerance
   end
 
   def assert_rgb_close(expected, actual, message)
