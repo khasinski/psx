@@ -21,6 +21,7 @@ later entries have fixed.
 - Verification:
   - Focused SPU spec passed: `30 runs, 64 assertions, 0 failures`.
   - Full suite passed: `363 runs, 948 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
 
 - Added runnable regression coverage for the latest Rage title/input and GPU
   texture investigations:
