@@ -527,15 +527,30 @@ module PSX
       total = size * count
       addr  = channel.base_addr
       step  = channel.step
+      transferred = 0
 
-      total.times do
+      while transferred < total && @mdec&.data_out_available?
         word = @mdec ? @mdec.read32_data : 0
         memory.write32(addr & 0x1F_FFFC, word)
         addr = (addr + step) & 0xFFFF_FFFF
+        transferred += 1
+      end
+
+      remaining = total - transferred
+      if remaining.positive?
+        channel.base_addr = addr & 0x00FF_FFFC
+        if remaining <= size
+          channel.block_ctrl = (1 << 16) | remaining
+        else
+          remaining_blocks = (remaining + size - 1) / size
+          channel.block_ctrl = (remaining_blocks << 16) | size
+        end
+        return true
       end
 
       channel.finish!
       set_irq_flag(MDEC_OUT)
+      true
     end
 
     # Mark a channel as still busy for `cycles` more CPU cycles, so callers

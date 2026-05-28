@@ -10,6 +10,31 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Tightened MDEC-out DMA so it pauses when decoded output runs dry mid-block:
+  - Channel 1 now mirrors the existing CD-ROM partial-DMA behavior: it copies
+    only the words currently available from the MDEC output FIFO, advances the
+    destination address and remaining block count, and leaves BUSY set until
+    `tick_cycles` sees more decoded output.
+  - This prevents a request-mode MDEC-out transfer from synthesizing zero
+    words after a short FIFO drain, which is a plausible source of intermittent
+    striped FMV frames.
+  - Added a focused DMA regression for a three-word MDEC-out block that only
+    has one word available initially, then completes after the remaining two
+    words arrive.
+- Fresh Rage Europe smoke evidence:
+  - 800M-cycle fast-boot FMV smoke after the change remained coherent:
+    `tmp/rage-current-fmv-after-mdecout-pause/ridge-004.png` shows the red car
+    intro frame without visible vertical striping.
+  - Title-state Grand Prix smoke with Start-toggle plus Cross taps reached the
+    race and pause menu rather than staying on the old `NOW LOADING` loop:
+    `tmp/rage-current-grandprix-repro2/ridge-040.png`.
+- Verification:
+  - Focused DMA spec passed: `20 runs, 59 assertions, 0 failures`.
+  - Focused MDEC specs passed: `15 runs, 44 assertions, 0 failures`.
+  - Filtered ps1-tests baselines passed: `mdec` `TOTAL 3  OK 3  FAIL 0`;
+    `dma` `TOTAL 4  OK 4  FAIL 0`.
+  - Full suite passed: `426 runs, 1153 assertions, 0 failures`.
+
 - Added executable-level regression coverage for the MDEC frame path:
   - `spec/mdec_executable_spec.rb` now boots the ps1-tests
     `.tests/mdec/frame/frame-15bit.exe` and `frame-24bit.exe` binaries through
