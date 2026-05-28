@@ -18,6 +18,7 @@ later entries have fixed.
 - Verification:
   - Focused SPU spec passed: `34 runs, 72 assertions, 0 failures`.
   - Full suite passed: `369 runs, 963 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
 
 - Added DuckStation-style GPU block DMA completion timing:
   - GPU block DMA now transfers data immediately but keeps CHCR busy until a
