@@ -10,6 +10,15 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU key latch clearing:
+  - KON/KOFF registers still start/release voices immediately in Ruby, but
+    their readable latch values now clear on the next generated SPU sample,
+    matching DuckStation's pending-register lifecycle more closely.
+- Verification:
+  - Focused SPU spec passed: `43 runs, 101 assertions, 0 failures`.
+  - Full suite passed: `378 runs, 992 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Added DuckStation-backed SPU external volume registers:
   - External input volumes (`0xDB4/0xDB6`) are now explicit stateful
     read/write registers and are preserved by save states.

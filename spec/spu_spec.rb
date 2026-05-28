@@ -22,6 +22,18 @@ class SPUSpec < Minitest::Test
     assert_equal :release, @spu.instance_variable_get(:@voices)[0].adsr_phase
   end
 
+  def test_key_on_and_key_off_registers_clear_after_sample_tick
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::KEY_OFF_LOW, 0x0001)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 0, @spu.read16(PSX::SPU::KEY_ON_LOW)
+    assert_equal 0, @spu.read16(PSX::SPU::KEY_ON_HIGH)
+    assert_equal 0, @spu.read16(PSX::SPU::KEY_OFF_LOW)
+    assert_equal 0, @spu.read16(PSX::SPU::KEY_OFF_HIGH)
+  end
+
   def test_key_on_clears_endx_for_started_voices
     @spu.instance_variable_set(:@endx, 0x00FF_FFFF)
 

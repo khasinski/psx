@@ -480,6 +480,8 @@ module PSX
     def tick_sample
       left_sum = 0
       right_sum = 0
+      @key_on = 0
+      @key_off = 0
       update_noise
 
       24.times do |voice_index|
