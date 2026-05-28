@@ -19,7 +19,7 @@ class EmulatorSpec < Minitest::Test
 
     emu.send(:refresh_bios_pad_buffers)
 
-    assert_equal [0x00, 0x41, 0xF7, 0xFF], bytes_at(emu, 0x8010_0000, 4)
+    assert_equal [0x00, 0x41, 0xFF, 0xF7], bytes_at(emu, 0x8010_0000, 4)
     assert_equal [0xFF, 0x00, 0x00, 0x00], bytes_at(emu, 0x8010_0040, 4)
   end
 

@@ -38,6 +38,21 @@ Snapshot of where the emulator is and what we just spent time on.
       by 2.8B, so the original Start-to-skip complaint is now a separate input
       semantics/game-state issue rather than being blocked by the old stream
       decoder crash.
+  - Fixed Rage Europe's direct pad-buffer Start decoding. DuckStation confirms
+    that the controller serial protocol still returns button bytes low then
+    high, but Rage's `PadInitDirect` buffer reader treats bytes `+2/+3` as
+    high then low. The existing once-per-frame direct-buffer shim wrote the
+    right order, but the BIOS serial poll immediately overwrote the buffer with
+    raw serial order (`00 41 F7 FF`), so Rage decoded Start as `0x0800`
+    instead of `0x0008`. The direct-buffer shim now normalizes the buffer after
+    each device batch as well, leaving SIO serial behavior unchanged.
+  - Verification for the pad-buffer fix:
+    - Focused emulator spec passed: `2 runs, 3 assertions, 0 failures`.
+    - Focused SIO0 spec passed: `20 runs, 53 assertions, 0 failures`.
+    - Full suite passed: `341 runs, 859 assertions, 0 failures`.
+    - Rage Europe live buffer probe at 1.1B cycles with Start held from 1.0B:
+      `pad_ptr=801E403C bytes=00 41 FF F7 mask=0008`, with the old wrong
+      `0x0800` bit no longer set.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.

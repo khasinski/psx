@@ -189,11 +189,11 @@ module PSX
         cdrom.tick(batch_cycles)
         spu.tick(batch_cycles)
         cpu.check_interrupts
+        refresh_bios_pad_buffers
 
         if cycle_count >= CYCLES_PER_FRAME
           cycle_count = 0
           frame_count += 1
-          refresh_bios_pad_buffers
           interrupts.request(Interrupts::IRQ_VBLANK)
           gpu.vblank
         end
@@ -482,8 +482,8 @@ module PSX
       state = @controller_state_proc.call & 0xFFFF
       @memory.write8(addr, 0x00)
       @memory.write8(addr + 1, SIO0::DIGITAL_PAD_IDHI)
-      @memory.write8(addr + 2, state & 0xFF)
-      @memory.write8(addr + 3, (state >> 8) & 0xFF)
+      @memory.write8(addr + 2, (state >> 8) & 0xFF)
+      @memory.write8(addr + 3, state & 0xFF)
     rescue StandardError
       # Treat host input failures as no pad state change.
     end
@@ -522,10 +522,10 @@ module PSX
       if @cycle_count >= CYCLES_PER_FRAME
         @cycle_count = 0
         @frame_count += 1
-        refresh_bios_pad_buffers
         @interrupts.request(Interrupts::IRQ_VBLANK)
         @gpu.vblank  # Toggle interlace field
       end
+      refresh_bios_pad_buffers
     end
   end
 end
