@@ -43,6 +43,12 @@ module PSX
     REVERB_REG_END    = 0xE00
     CAPTURE_BUFFER_SIZE_PER_CHANNEL = 0x400
     CYCLES_PER_SAMPLE = 768
+    REVERB_RESAMPLE_COEFF = [
+      -0x0001, 0x0002, -0x000A, 0x0023, -0x0067,
+      0x010A, -0x0268, 0x0534, -0x0B90, 0x2806,
+      0x2806, -0x0B90, 0x0534, -0x0268, 0x010A,
+      -0x0067, 0x0023, -0x000A, 0x0002, -0x0001
+    ].freeze
 
     # SPUCNT bits 4-5 = transfer mode
     MODE_STOP   = 0
@@ -113,6 +119,8 @@ module PSX
       @reverb_base = 0
       @reverb_current_address = 0
       @reverb_resample_position = 0
+      @reverb_downsample_buffer = [Array.new(128, 0), Array.new(128, 0)]
+      @reverb_upsample_buffer = [Array.new(64, 0), Array.new(64, 0)]
       @last_reverb_input = [0, 0]
       @last_reverb_output = [0, 0]
       @reverb_registers = Array.new(32, 0)
@@ -641,24 +649,106 @@ module PSX
 
     def process_reverb(left_in, right_in)
       @last_reverb_input = [left_in, right_in]
-      addr = reverb_memory_address(0)
-      delayed_left = read_ram_s16(addr)
-      delayed_right = read_ram_s16(addr + 2)
+      @reverb_downsample_buffer[0][@reverb_resample_position] = left_in
+      @reverb_downsample_buffer[0][@reverb_resample_position | 0x40] = left_in
+      @reverb_downsample_buffer[1][@reverb_resample_position] = right_in
+      @reverb_downsample_buffer[1][@reverb_resample_position | 0x40] = right_in
 
-      if reverb_master_enabled?
-        write_ram_s16(addr, left_in)
-        write_ram_s16(addr + 2, right_in)
-      end
+      out = [0, 0]
 
       if @reverb_resample_position.odd?
+        downsampled = 2.times.map { |channel| reverb_downsample(channel) }
+        2.times do |channel|
+          process_reverb_channel(channel, downsampled[channel])
+          src = @reverb_upsample_buffer[channel]
+          base = (((@reverb_resample_position >> 1) - 19) & 0x1F)
+          out[channel] = clamp16(REVERB_RESAMPLE_COEFF.each_with_index.sum { |coef, i| coef * src[base + i] } >> 14)
+        end
+
         @reverb_current_address = (@reverb_current_address + 1) & ((RAM_SIZE - 1) / 2)
         @reverb_current_address = reverb_base_address if @reverb_current_address.zero?
+      else
+        index = (((@reverb_resample_position >> 1) - 19) & 0x1F) + 9
+        out = [@reverb_upsample_buffer[0][index], @reverb_upsample_buffer[1][index]]
       end
       @reverb_resample_position = (@reverb_resample_position + 1) & 0x3F
       @last_reverb_output = [
-        apply_volume(delayed_left, signed16(@reverb_left_volume)),
-        apply_volume(delayed_right, signed16(@reverb_right_volume)),
+        apply_volume(out[0], signed16(@reverb_left_volume)),
+        apply_volume(out[1], signed16(@reverb_right_volume)),
       ]
+    end
+
+    def reverb_downsample(channel)
+      src = @reverb_downsample_buffer[channel]
+      base = (@reverb_resample_position - 38) & 0x3F
+      sum = REVERB_RESAMPLE_COEFF.each_with_index.sum { |coef, i| coef * src[base + i] }
+      clamp16((sum + (0x4000 * src[base + 19])) >> 15)
+    end
+
+    def process_reverb_channel(channel, downsampled)
+      if reverb_master_enabled?
+        iir_input_a = clamp16((((reverb_read(reverb_reg(16 + channel)) * reverb_reg_s(7)) >> 14) +
+                              ((downsampled * reverb_reg_s(30 + channel)) >> 14)) >> 1)
+        iir_input_b = clamp16((((reverb_read(reverb_reg(24 + (channel ^ 1))) * reverb_reg_s(7)) >> 14) +
+                              ((downsampled * reverb_reg_s(30 + channel)) >> 14)) >> 1)
+        iir_a = clamp16((((iir_input_a * reverb_reg_s(2)) >> 14) +
+                         (reverb_iir_alpha_complement(reverb_read(reverb_reg(10 + channel), -1)) >> 14)) >> 1)
+        iir_b = clamp16((((iir_input_b * reverb_reg_s(2)) >> 14) +
+                         (reverb_iir_alpha_complement(reverb_read(reverb_reg(18 + channel), -1)) >> 14)) >> 1)
+
+        reverb_write(reverb_reg(10 + channel), iir_a)
+        reverb_write(reverb_reg(18 + channel), iir_b)
+      end
+
+      acc =
+        ((reverb_read(reverb_reg(12 + channel)) * reverb_reg_s(3)) >> 14) +
+        ((reverb_read(reverb_reg(14 + channel)) * reverb_reg_s(4)) >> 14) +
+        ((reverb_read(reverb_reg(20 + channel)) * reverb_reg_s(5)) >> 14) +
+        ((reverb_read(reverb_reg(22 + channel)) * reverb_reg_s(6)) >> 14)
+      fb_a = reverb_read((reverb_reg(26 + channel) - reverb_reg(0)) & 0xFFFF)
+      fb_b = reverb_read((reverb_reg(28 + channel) - reverb_reg(1)) & 0xFFFF)
+      mda = clamp16((acc + ((fb_a * reverb_neg(reverb_reg_s(8))) >> 14)) >> 1)
+      mdb = clamp16(fb_a + ((((mda * reverb_reg_s(8)) >> 14) +
+                             ((fb_b * reverb_neg(reverb_reg_s(9))) >> 14)) >> 1))
+
+      sample = clamp16(fb_b + ((mdb * reverb_reg_s(9)) >> 15))
+      index = @reverb_resample_position >> 1
+      @reverb_upsample_buffer[channel][index] = sample
+      @reverb_upsample_buffer[channel][index | 0x20] = sample
+
+      if reverb_master_enabled?
+        reverb_write(reverb_reg(26 + channel), mda)
+        reverb_write(reverb_reg(28 + channel), mdb)
+      end
+    end
+
+    def reverb_iir_alpha_complement(sample)
+      alpha = reverb_reg_s(2)
+      if alpha == -32_768
+        sample == -32_768 ? 0 : sample * -65_536
+      else
+        sample * (32_768 - alpha)
+      end
+    end
+
+    def reverb_neg(sample)
+      sample == -32_768 ? 0x7FFF : -sample
+    end
+
+    def reverb_reg(index)
+      @reverb_registers[index] & 0xFFFF
+    end
+
+    def reverb_reg_s(index)
+      signed16(reverb_reg(index))
+    end
+
+    def reverb_read(address, offset = 0)
+      read_ram_s16(reverb_memory_address(((address & 0xFFFF) << 2) + offset))
+    end
+
+    def reverb_write(address, value)
+      write_ram_s16(reverb_memory_address((address & 0xFFFF) << 2), clamp16(value))
     end
 
     def reverb_memory_address(offset)

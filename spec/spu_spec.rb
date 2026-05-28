@@ -446,24 +446,41 @@ class SPUSpec < Minitest::Test
     assert_equal 0x5555, @spu.read16(PSX::SPU::REVERB_REG_END - 2)
   end
 
-  def test_reverb_output_tap_mixes_from_spu_ram
+  def test_reverb_input_is_buffered_before_resampled_output
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
     @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x3FFF)
     @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x3FFF)
     @spu.write16(PSX::SPU::REVERB_VOL_LEFT, 0x3FFF)
     @spu.write16(PSX::SPU::REVERB_VOL_RIGHT, 0x2000)
-    @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
-    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
-    @spu.dma_write_word((4000 << 16) | 4000)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x7FFF)
+    @spu.queue_cd_audio([4000, -4000].pack("s<*"))
 
-    @spu.write16(PSX::SPU::SPUCNT, (1 << 14) | (1 << 7))
+    @spu.write16(PSX::SPU::SPUCNT, (1 << 14) | (1 << 7) | (1 << 2) | 1)
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
-    assert_in_delta 2000, @spu.instance_variable_get(:@last_reverb_output)[0], 1
-    assert_in_delta 1000, @spu.instance_variable_get(:@last_reverb_output)[1], 1
-    assert_in_delta 2000, frames.first[0], 2
-    assert_in_delta 1000, frames.first[1], 2
+    downsample = @spu.instance_variable_get(:@reverb_downsample_buffer)
+    assert_in_delta 4000, downsample[0][0], 1
+    assert_in_delta(-4000, downsample[1][0], 1)
+    assert_equal [0, 0], @spu.instance_variable_get(:@last_reverb_output)
+    assert_in_delta 4000, frames.first[0], 2
+    assert_in_delta(-4000, frames.first[1], 2)
+  end
+
+  def test_reverb_odd_phase_runs_comb_filter_into_upsample_buffer
+    @spu.write16(PSX::SPU::REVERB_BASE, 0x0100)
+    @spu.write16(PSX::SPU::REVERB_VOL_LEFT, 0x3FFF)
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x02, 0x0004) # FB_SRC_B
+    @spu.write16(PSX::SPU::REVERB_REG_BASE + 0x38, 0x0008) # MIX_DEST_B left
+    @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0104)
+    @spu.dma_write_word(3000)
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 2)
+
+    upsample = @spu.instance_variable_get(:@reverb_upsample_buffer)
+    assert_equal 3000, upsample[0][0]
+    assert_equal 3000, upsample[0][0x20]
   end
 
   def test_reverb_enabled_voice_sends_to_reverb_input
@@ -519,6 +536,14 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::EXTERNAL_VOL_RIGHT, 0x6666)
     @spu.instance_variable_set(:@reverb_current_address, 0x7778)
     @spu.instance_variable_set(:@reverb_resample_position, 0x12)
+    downsample = [Array.new(128, 0), Array.new(128, 0)]
+    upsample = [Array.new(64, 0), Array.new(64, 0)]
+    downsample[0][0x12] = 123
+    downsample[1][0x52] = -456
+    upsample[0][0x09] = 789
+    upsample[1][0x29] = -987
+    @spu.instance_variable_set(:@reverb_downsample_buffer, downsample)
+    @spu.instance_variable_set(:@reverb_upsample_buffer, upsample)
     @spu.instance_variable_set(:@last_reverb_input, [111, 222])
     @spu.instance_variable_set(:@last_reverb_output, [333, 444])
     @spu.instance_variable_set(:@capture_buffer_position, 0x222)
@@ -540,6 +565,10 @@ class SPUSpec < Minitest::Test
     assert_equal 0x6666, restored.read16(PSX::SPU::EXTERNAL_VOL_RIGHT)
     assert_equal 0x7778, restored.instance_variable_get(:@reverb_current_address)
     assert_equal 0x12, restored.instance_variable_get(:@reverb_resample_position)
+    assert_equal 123, restored.instance_variable_get(:@reverb_downsample_buffer)[0][0x12]
+    assert_equal(-456, restored.instance_variable_get(:@reverb_downsample_buffer)[1][0x52])
+    assert_equal 789, restored.instance_variable_get(:@reverb_upsample_buffer)[0][0x09]
+    assert_equal(-987, restored.instance_variable_get(:@reverb_upsample_buffer)[1][0x29])
     assert_equal [111, 222], restored.instance_variable_get(:@last_reverb_input)
     assert_equal [333, 444], restored.instance_variable_get(:@last_reverb_output)
     assert_equal 0x222, restored.instance_variable_get(:@capture_buffer_position)

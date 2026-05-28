@@ -10,6 +10,22 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Replaced the simple SPU reverb delay tap with a scalar DuckStation-backed
+  work-buffer path:
+  - Reverb input is now written through the 64-step downsample history buffer
+    and processed on odd resample phases.
+  - The reverb parameter block now drives IIR, comb, all-pass, mix-destination,
+    and upsample-buffer stages instead of reading only the current work-area
+    address as a delay line.
+  - Save states preserve the downsample and upsample history buffers.
+  - This is a major step toward DuckStation/Mednafen reverb behavior, but the
+    SPU audio path still needs broader conformance testing before calling it
+    hardware-complete.
+- Verification:
+  - Focused SPU spec passed: `55 runs, 143 assertions, 0 failures`.
+  - Full suite passed: `390 runs, 1034 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Extended SPU late RAM IRQ coverage:
   - Added the companion regression for writing `SPU_IRQ_ADDR` while IRQ9 is
     already enabled and an active decoded voice overlaps the requested IRQ
