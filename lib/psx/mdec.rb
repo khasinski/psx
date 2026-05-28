@@ -431,7 +431,7 @@ module PSX
       end
     end
 
-    # 24-bit RGB output: 3 bytes per pixel, B G R order. Same 16x16
+    # 24-bit RGB output: 3 bytes per pixel, R G B order. Same 16x16
     # macroblock structure as 15-bit.
     def pack_24bit_into(output_bytes, blocks)
       cr, cb, y0, y1, y2, y3 = blocks
@@ -443,7 +443,7 @@ module PSX
           cv = cb[(y >> 1) * 8 + (x >> 1)]
           rv = cr[(y >> 1) * 8 + (x >> 1)]
           r, g, b = ycbcr_to_rgb(yv, cv, rv)
-          output_bytes << b << g << r
+          output_bytes << r << g << b
         end
       end
     end

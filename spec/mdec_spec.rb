@@ -104,6 +104,23 @@ class MDECSpec < Minitest::Test
     assert_equal 0x00_00_00_00, signed_word
   end
 
+  def test_24bit_colour_output_packs_rgb_byte_order
+    blocks = [
+      Array.new(64, 32),  # Cr: raises red
+      Array.new(64, 0),   # Cb
+      Array.new(64, 0),
+      Array.new(64, 0),
+      Array.new(64, 0),
+      Array.new(64, 0)
+    ]
+    output_bytes = []
+
+    @mdec.send(:pack_24bit_into, output_bytes, blocks)
+
+    assert output_bytes[0] > output_bytes[2], "first byte should be red, not blue"
+    assert_equal [173, 105, 128], output_bytes[0, 3]
+  end
+
   def test_15bit_colour_output_rounds_8bit_channels_to_5bit
     assert_equal 0x4631, @mdec.send(:rgb888_to_rgb555, 132, 132, 132)
   end

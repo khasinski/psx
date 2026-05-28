@@ -74,6 +74,17 @@ Snapshot of where the emulator is and what we just spent time on.
   - Rage Europe smoke to 2.4B cycles with Start held from 1.0B reached the
     same 15-bit title path; `conformance-shots/rage-eu-gpu-vertex-coords/ridge-012.png`
     shows the full Rage Racer logo and `PRESS START`.
+- Fixed MDEC 24-bit output byte order against DuckStation's `CopyOutBlock`.
+  DuckStation's MDEC `block_rgb` stores R/G/B in low-to-high bytes and the
+  24-bit FIFO copy-out emits RGB byte order; the Ruby packer was emitting
+  BGR, which a gray-only test did not catch.
+- Added an MDEC spec with a non-gray chroma block so channel swaps are visible.
+- Verification for the MDEC 24-bit byte-order fix:
+  - Focused MDEC spec passed: `11 runs, 21 assertions, 0 failures`.
+  - Full suite passed: `346 runs, 867 assertions, 0 failures`.
+  - Rage Europe smoke to 1.6B cycles remained stable in the 24-bit FMV path;
+    `conformance-shots/rage-eu-mdec-rgb-order/ridge-008.png` shows a visible
+    decoded frame.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.
