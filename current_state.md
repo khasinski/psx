@@ -38,6 +38,18 @@ later entries have fixed.
 - Remaining next-session regression:
   - Rage Racer gets stuck on the loading screen after the monologue intro when
     starting a new Grand Prix.
+  - Reproduced from `tmp/rage-eu-2p4b.state` with scripted Start/Cross inputs
+    through 4.0B absolute cycles. The run reaches the monologue/title flow
+    around 3.0B, switches to a 320x480 `NOW LOADING` screen by
+    `tmp/rage-grandprix-repro/ridge-016.png`, and is still on the same loading
+    screen at `tmp/rage-grandprix-repro/ridge-032.png`.
+  - The stuck PC samples cluster around Rage stream/loading code:
+    `0x8006DD3C`, `0x8006DD54`, `0x8006DD80`, `0x8006B848`,
+    `0x8006DEA0`, `0x8006DEB0`, `0x8006DEBC`, and `0x8006DEF0`.
+  - Good next starting point: save a stuck state near 4.0B with the same input
+    script, then instrument CD-ROM/DMA/MDEC callback state around
+    `RAGE_CDROM_DMA_CALLBACK = 0x8006_CE78`, the callback table flag/base, and
+    the stream queue/index addresses in `CPU`.
 
 - Matched DuckStation's GPU save-state GPUREAD latch behavior:
   - GPU save states now preserve `@gpu_info_latch`, matching DuckStation's
