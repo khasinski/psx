@@ -44,6 +44,19 @@ Snapshot of where the emulator is and what we just spent time on.
   - `bash -n bin/_ps1tests-baseline` passed.
   - `PSX_TEST_FILTER=cpu/cop PSX_MAX_CYCLES=100000000 bin/_ps1tests-baseline`
     passed: `TOTAL 1  OK 1  FAIL 0`.
+- Fixed the remaining `cdrom/getloc` execution blockers against ps1-tests:
+  - `bin/psx-test` now stops and normalizes on `Test passed` / `Test failed`
+    markers, which these ps1-tests use instead of `Done.`.
+  - `CdlInit` preserves the last valid GetlocL/GetlocP cache instead of
+    treating it like first power-on.
+  - Far `SetLoc` + `ReadN` keeps the drive status at `SEEKING|MOTOR_ON`
+    until the first sector arrives, including the psn00bsdk pattern that
+    issues `Pause` before that first sector is ready.
+- Verification for `cdrom/getloc`:
+  - Focused CD-ROM spec passed: `56 runs, 193 assertions, 0 failures`.
+  - `PSX_TEST_FILTER=cdrom/getloc PSX_TEST_DISC=tmp/ps1tests-cdrom-disc/long-mode2.cue PSX_MAX_CYCLES=250000000 PSX_WALL_TIMEOUT=45 bin/_ps1tests-baseline`
+    passed: `TOTAL 1  OK 1  FAIL 0`.
+  - Full suite passed: `354 runs, 923 assertions, 0 failures`.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware

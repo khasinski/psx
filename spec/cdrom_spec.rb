@@ -310,6 +310,78 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x00, 0x00, 0x29, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
   end
 
+  def test_init_preserves_last_valid_getloc_l_header
+    @cdrom.disc = build_one_sector_disc("LOC!" + ("\x00" * 2044).b)
+
+    deliver_first_sector
+    @cdrom.write8(1, 0x0A) # Init
+    drain_response
+    assert drive_until_int(2, max_ticks: 40)
+    ack_response
+
+    @cdrom.write8(1, 0x10) # GetlocL
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+
+    assert_equal [0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
+  end
+
+  def test_far_read_reports_seeking_until_first_sector_arrives
+    @cdrom.disc = build_disc(Array.new(200) { "\x00".b * 2048 })
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x03)
+    @cdrom.write8(2, 0x30)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 75
+    drain_response
+
+    @cdrom.write8(1, 0x06) # ReadN
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEKING, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.tick(1_000_000)
+    @cdrom.write8(1, 0x01) # GetStat
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEKING, @cdrom.read8(1)
+    ack_response
+
+    assert drive_until_int(1, max_ticks: 500)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_READING, @cdrom.read8(1)
+  end
+
+  def test_pause_during_far_read_keeps_seek_active_until_sector_arrives
+    @cdrom.disc = build_disc(Array.new(200) { "\x00".b * 2048 })
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(2, 0x03)
+    @cdrom.write8(2, 0x30)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 105
+    drain_response
+    @cdrom.write8(1, 0x06) # ReadN
+    drain_response
+
+    @cdrom.write8(1, 0x09) # Pause before first sector is ready
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEKING, @cdrom.read8(1)
+    ack_response
+
+    @cdrom.tick(1_000_000)
+    @cdrom.write8(1, 0x01) # GetStat
+    assert drive_until_int(3, max_ticks: 20)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC | PSX::CDROM::SF_SEEKING, @cdrom.read8(1)
+    ack_response
+
+    assert drive_until_int(1, max_ticks: 500)
+    ack_response
+    assert drive_until_int(2, max_ticks: 40)
+    assert_equal PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+  end
+
   def test_seek_l_out_of_range_finishes_with_seek_error
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

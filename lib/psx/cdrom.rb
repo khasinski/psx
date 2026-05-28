@@ -44,6 +44,7 @@ module PSX
     # during SeekL, so when ReadN starts streaming the first INT1 lands
     # almost immediately. Subsequent sectors space out at the real cadence.
     CYCLES_FIRST_SECTOR  = 30_000
+    CYCLES_FAR_READ_SEEK = 8_000_000
     WHOLE_SECTOR_FILTER_PREFIX_BYTES = 44
 
     DEFAULT_STAT_DISC    = SF_MOTOR_ON
@@ -127,6 +128,8 @@ module PSX
       @reading = false
       @sector_cycles = 0
       @sectors_since_read = 0  # how many INT1s have fired since the last ReadN
+      @read_pending_seek = false
+      @pause_after_first_sector = false
       @bfrd_active = false
       @want_seek = false
       @last_sector_lba = 0
@@ -276,6 +279,11 @@ module PSX
       end
 
       whole = read_sector(lba)
+      if @read_pending_seek
+        @read_pending_seek = false
+        @stat &= ~SF_SEEKING
+        @stat |= SF_READING
+      end
       if xa_audio_sector?(whole)
         process_xa_audio_sector(whole)
         @read_lba += 1
@@ -293,6 +301,13 @@ module PSX
       @response.push(@stat)
       @irq_flags = 1
       @interrupts&.request(Interrupts::IRQ_CDROM) if (@irq_enable & @irq_flags) != 0
+
+      if @pause_after_first_sector
+        @pause_after_first_sector = false
+        @reading = false
+        @stat &= ~(SF_READING | SF_SEEKING)
+        queue_response(CYCLES_PER_SECTOR_1X, 2, [@stat])
+      end
     end
 
     # Advance CDDA playback by `cycles` CPU cycles. Reads one audio sector
@@ -569,14 +584,21 @@ module PSX
         return
       end
       @read_lba = @want_seek ? @seek_lba : @read_lba
+      read_distance = @want_seek ? (@read_lba - @last_sector_lba).abs : 0
       @want_seek = false
       @reading = true
       @sectors_since_read = 0
-      @stat |= SF_READING
-      @stat &= ~SF_SEEKING
-      # First sector lands quickly — see CYCLES_FIRST_SECTOR. After it the
-      # cadence falls back to the full 1×/2× period.
-      @sector_cycles = CYCLES_FIRST_SECTOR
+      @read_pending_seek = read_distance > Disc::FRAMES_PER_SEC
+      if @read_pending_seek
+        @stat |= SF_SEEKING
+        @stat &= ~SF_READING
+      else
+        @stat |= SF_READING
+        @stat &= ~SF_SEEKING
+      end
+      # First sector lands quickly after a buffered/near read, but a far
+      # SetLoc+ReadN keeps the drive visibly seeking for a short period.
+      @sector_cycles = @read_pending_seek ? CYCLES_FAR_READ_SEEK : CYCLES_FIRST_SECTOR
       queue_response(0, 3, [@stat])
     end
 
@@ -644,6 +666,12 @@ module PSX
 
     def cmd_pause
       was_reading = @reading
+      if was_reading && @read_pending_seek
+        @pause_after_first_sector = true
+        queue_response(0, 3, [@stat])
+        return
+      end
+
       # If we were streaming and the BIOS hadn't yet received ANY sector
       # for this ReadN, force one delivery before stopping — the BIOS
       # commonly issues ReadN + Pause back-to-back to read a single sector.
@@ -692,8 +720,20 @@ module PSX
       # license-init poll on [0x800091C4] never sees its callback. Save and
       # restore.
       saved_enable = @irq_enable
+      saved_last_sector_lba = @last_sector_lba
+      saved_last_sector_header = @last_sector_header
+      saved_last_sector_subheader = @last_sector_subheader
+      saved_last_sector_header_valid = @last_sector_header_valid
+      saved_last_subq = @last_subq
+      saved_last_subq_valid = @last_subq_valid
       reset
       @irq_enable = saved_enable
+      @last_sector_lba = saved_last_sector_lba
+      @last_sector_header = saved_last_sector_header
+      @last_sector_subheader = saved_last_sector_subheader
+      @last_sector_header_valid = saved_last_sector_header_valid
+      @last_subq = saved_last_subq
+      @last_subq_valid = saved_last_subq_valid
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
       queue_response(0, 3, [@stat])
       queue_response(CYCLES_PER_RESPONSE * 4, 2, [@stat])

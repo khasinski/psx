@@ -71,7 +71,7 @@ warn format("[psx-test] loaded %s at 0x%08X (size=%d, entry=0x%08X)",
             exe_path, info[:dest], info[:size], info[:entry])
 
 # Run the program. Stop early if we see a recognised end marker so tests
-# that print "Done." then loop forever don't burn the whole quota.
+# that print a final result then loop forever don't burn the whole quota.
 chunk = 200_000
 done = false
 remaining = max_cycles
@@ -84,7 +84,9 @@ while remaining > 0 && !done
     break
   end
   remaining -= step
-  done = true if captured.include?("Done.")
+  done = true if captured.include?("Done.") ||
+                 captured.include?("Test passed") ||
+                 captured.include?("Test failed")
 end
 
 print captured
@@ -104,6 +106,8 @@ if expected
       when /^Passed tests: (\d+)/  then "PASSED:#{Regexp.last_match(1)}"
       when /^Failed tests: (\d+)/  then "FAILED:#{Regexp.last_match(1)}"
       when /^Done\.?$/i            then "DONE"
+      when /^Test passed$/i         then "DONE"
+      when /^Test failed$/i         then "FAIL"
       end
     end
   end
