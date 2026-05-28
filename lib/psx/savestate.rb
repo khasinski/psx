@@ -182,7 +182,7 @@ module PSX
       vram_transfer_x vram_transfer_y vram_transfer_start_x
       vram_transfer_width vram_transfer_height vram_transfer_count
       vram_transfer_pixels_remaining vram_transfer_mode
-      dma_direction odd_field
+      dma_direction odd_field gpu_info_latch
     ].freeze
 
     def state_snapshot

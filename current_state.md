@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's GPU save-state GPUREAD latch behavior:
+  - GPU save states now preserve `@gpu_info_latch`, matching DuckStation's
+    serialized `GPUREAD_latch`.
+  - Added a regression that restores a GPU after a GP1 info read and verifies
+    `read_data` still returns the latched value.
+- Verification:
+  - Focused GPU regression spec passed: `28 runs, 72 assertions, 0 failures`.
+  - Full suite passed: `417 runs, 1109 assertions, 0 failures`.
+- Next-session regressions to investigate:
+  - FMV playback is striped.
+  - Rage Racer gets stuck on the loading screen after the monologue intro when
+    starting a new Grand Prix.
+
 - Matched DuckStation's odd-width VRAM-to-CPU readback packing:
   - GP0 C0 readbacks now stream pixels across row boundaries before packing
     two 16-bit pixels into each GPUREAD word, instead of rounding each row up

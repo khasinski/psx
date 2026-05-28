@@ -253,6 +253,17 @@ class GPURegressionSpec < Minitest::Test
     assert_nil @gpu.instance_variable_get(:@vram_transfer_mode)
   end
 
+  def test_gpu_state_preserves_gpuread_latch
+    @gpu.gp0(0xE2_00_8C_43)
+    @gpu.gp1(0x10_00_00_02)
+    assert_equal 0x08C43, @gpu.read_data
+
+    restored = PSX::GPU.new
+    restored.restore_state(@gpu.state_snapshot)
+
+    assert_equal 0x08C43, restored.read_data, "DuckStation saves the GPUREAD latch in GPU save states"
+  end
+
   def test_textured_polygon_tpage_updates_following_rectangle_texture_page
     @gpu.gp0(0xE3_00_00_00)
     @gpu.gp0(0xE4_00_40_40)
