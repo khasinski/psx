@@ -83,6 +83,13 @@ Snapshot of where the emulator is and what we just spent time on.
   - Full CD-ROM baseline with the synthetic disc passed:
     `TOTAL 3  OK 3  FAIL 0`.
   - Full suite passed: `357 runs, 937 assertions, 0 failures`.
+- Adjusted `bin/_ps1tests-baseline` so default runs skip `cdrom/*` when
+  `PSX_TEST_DISC` is not set. Those tests require a mounted disc image, and
+  treating no-media runs as emulator failures made the broad baseline noisy.
+- Verification:
+  - `bash -n bin/_ps1tests-baseline` passed.
+  - `PSX_TEST_FILTER=cdrom PSX_MAX_CYCLES=1000000 PSX_WALL_TIMEOUT=5 bin/_ps1tests-baseline`
+    reports all three CD-ROM tests as skipped and `TOTAL 0  OK 0  FAIL 0`.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware

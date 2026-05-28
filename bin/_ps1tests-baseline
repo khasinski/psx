@@ -39,6 +39,10 @@ while IFS= read -r logpath; do
     printf "%-40s\tNO_EXE\n" "$name"
     continue
   fi
+  if [[ -z ${PSX_TEST_DISC:-} && $name == cdrom/* ]]; then
+    printf "%-40s\tSKIP\t(set PSX_TEST_DISC for cdrom tests)\n" "$name"
+    continue
+  fi
   exe=${exes[0]}
   total=$((total + 1))
   # 90s wall-clock cap per test so an infinite-loop emulator bug can't
