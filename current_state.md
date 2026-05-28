@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched DuckStation's deferred SPU next-block decode timing:
+  - Advancing past the end of an ADPCM block now clears the current decoded
+    block and leaves the next block to be decoded on the next SPU sample,
+    matching DuckStation's `has_samples = false` transition.
+  - Gaussian interpolation history still keeps the previous block tail for the
+    next decode.
+  - Late RAM IRQ checks now skip a just-advanced voice until that next block
+    has actually been sampled.
+- Verification:
+  - Focused SPU spec passed: `65 runs, 165 assertions, 0 failures`.
+  - Full suite passed: `400 runs, 1056 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's deferred SPU key-on ADPCM decode timing:
   - Key-on now resets voice sample state and marks the voice ready to start,
     but the first ADPCM block is decoded on the next SPU sample rather than

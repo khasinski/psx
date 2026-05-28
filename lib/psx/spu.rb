@@ -724,11 +724,7 @@ module PSX
         end
       end
 
-      if (@voice_active & mask) != 0
-        decode_voice_block(voice_index)
-      else
-        voice.decoded_samples = []
-      end
+      voice.decoded_samples = []
     end
 
     def noise_enabled?(voice_index)

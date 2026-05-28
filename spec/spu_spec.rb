@@ -169,6 +169,10 @@ class SPUSpec < Minitest::Test
     assert_equal 0x0001, @spu.read16(PSX::SPU::ENDX_LOW)
     assert_equal 0x0001, @spu.instance_variable_get(:@voice_active) & 0x0001
     assert_equal 0x0204, voice.current_address
+    assert_empty voice.decoded_samples
+
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
     assert_equal 4096, voice.decoded_samples[0]
   end
 
@@ -855,6 +859,27 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0200)
 
     @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert (@interrupts.stat & PSX::Interrupts::IRQ_SPU) != 0
+  end
+
+  def test_late_irq9_skips_advanced_voice_until_next_block_is_sampled
+    @interrupts.write_mask(PSX::Interrupts::IRQ_SPU)
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    @spu.write16(0xC00 + 0x06, 0x0200)
+    write_adpcm_block(0x0200, flags: 0x00)
+    write_adpcm_block(0x0202, flags: 0x00)
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 28)
+    @spu.write16(PSX::SPU::SPU_IRQ_ADDR, 0x0202)
+
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 6)
+
+    assert_equal 0, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
+    assert_equal 0, @interrupts.stat & PSX::Interrupts::IRQ_SPU
+
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
     assert_equal 1 << 6, @spu.read16(PSX::SPU::SPUSTAT) & (1 << 6)
