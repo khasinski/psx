@@ -453,6 +453,18 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00], bytes
   end
 
+  def test_getloc_p_returns_audio_track_subq_before_first_read
+    @cdrom.disc = build_audio_disc(sectors: 4)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x11) # GetlocP
+
+    assert drive_until_int(3, max_ticks: 20)
+    bytes = 8.times.map { @cdrom.read8(1) }
+    assert_equal [0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00], bytes
+  end
+
   def test_seek_l_updates_getloc_l_from_target_sector
     @cdrom.disc = build_disc([
       ("ZERO" + "\x00" * 2044).b,

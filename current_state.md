@@ -8,6 +8,23 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM GetlocP audio sub-Q:
+
+- Matched DuckStation's `GetlocP` behavior for audio tracks:
+  - `GetlocP` can now synthesize/report sub-Q for the current LBA when it is
+    on an audio track, not only when it is on a data track.
+  - Ruby previously returned a not-ready error before the first read if the
+    current LBA belonged to an audio track.
+- Added a focused CD-ROM regression for `GetlocP` on an audio-only disc
+  before any read/play command.
+- Verification:
+  - Focused CD-ROM spec passed: `83 runs, 302 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed using the
+    larger wall cap required by DuckStation-sized `Init` timing:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `456 runs, 1259 assertions, 0 failures`.
+
 2026-05-28 CD-ROM Init reset delay:
 
 - Matched DuckStation's minimum `Init`/soft-reset completion delay:

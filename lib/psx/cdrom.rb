@@ -925,7 +925,7 @@ module PSX
     end
 
     def cmd_getloc_p
-      update_last_subq(@read_lba) if @disc && !@last_subq_valid && data_track_for_lba(@read_lba)
+      update_last_subq(@read_lba) if @disc&.track_for_lba(@read_lba) && !@last_subq_valid
       if @disc && @last_subq_valid
         queue_response(0, 3, @last_subq)
       else
