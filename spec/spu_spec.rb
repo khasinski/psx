@@ -184,12 +184,59 @@ class SPUSpec < Minitest::Test
     frames = []
     @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
 
+    @spu.write16(PSX::SPU::SPUCNT, 1 << 14)
     @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE * 2)
 
     assert_equal [0, 0], frames[0], "first sample uses the reset ADSR level"
     assert_operator frames[1][0], :>, 0
     assert_in_delta frames[1][0] / 2.0, frames[1][1], 2
+  end
+
+  def test_spucnt_mute_bit_silences_voice_mix
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x3FFF)
+    @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x3FFF)
+    @spu.write16(0xC00 + 0x00, 0x3FFF)
+    @spu.write16(0xC00 + 0x02, 0x3FFF)
+    @spu.write16(0xC00 + 0x04, 0x1000)
+    @spu.write16(0xC00 + 0x0C, 0x7FFF)
+    write_adpcm_block(0x0200, flags: 0x00, first_data_byte: 0x11)
+    @spu.write16(0xC00 + 0x06, 0x0200)
+
+    @spu.write16(PSX::SPU::KEY_ON_LOW, 0x0001)
+    @spu.write16(0xC00 + 0x0C, 0x7FFF)
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_equal [0, 0], frames.first
+  end
+
+  def test_spucnt_mute_bit_clears_voice_reverb_input_but_keeps_cd_audio
+    frames = []
+    @spu.pcm_sink = ->(bytes) { frames << bytes.unpack("s<*") }
+    voices = @spu.instance_variable_get(:@voices)
+    voices[0].adsr_volume = 0x7FFF
+    voices[0].adsr_phase = :sustain
+    voices[0].decoded_samples = Array.new(28, 4000)
+    @spu.instance_variable_set(:@voice_active, 0x0001)
+    @spu.write16(0xC00 + 0x00, 0x3FFF)
+    @spu.write16(0xC00 + 0x02, 0x3FFF)
+    @spu.write16(0xC00 + 0x04, 0x0001)
+    @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x0001)
+    @spu.write16(PSX::SPU::MAIN_VOL_LEFT, 0x3FFF)
+    @spu.write16(PSX::SPU::MAIN_VOL_RIGHT, 0x3FFF)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_LEFT, 0x7FFF)
+    @spu.write16(PSX::SPU::CD_AUDIO_VOL_RIGHT, 0x7FFF)
+    @spu.queue_cd_audio([3000, -3000].pack("s<*"))
+
+    @spu.write16(PSX::SPU::SPUCNT, 0x0001 | (1 << 2))
+    @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
+
+    assert_in_delta 3000, frames.first[0], 2
+    assert_in_delta(-3000, frames.first[1], 2)
+    assert_in_delta 3000, @spu.instance_variable_get(:@last_reverb_input)[0], 2
+    assert_in_delta(-3000, @spu.instance_variable_get(:@last_reverb_input)[1], 2)
   end
 
   def test_tick_advances_basic_adsr_current_volume
@@ -399,7 +446,7 @@ class SPUSpec < Minitest::Test
     @spu.write16(PSX::SPU::SPU_TRANSFER_ADDR, 0x0100)
     @spu.dma_write_word((4000 << 16) | 4000)
 
-    @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
+    @spu.write16(PSX::SPU::SPUCNT, (1 << 14) | (1 << 7))
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 
     assert_in_delta 2000, @spu.instance_variable_get(:@last_reverb_output)[0], 1
@@ -419,7 +466,7 @@ class SPUSpec < Minitest::Test
     @spu.write16(0xC00 + 0x02, 0x2000)
     @spu.write16(0xC00 + 0x04, 0x0001)
     @spu.write16(PSX::SPU::REVERB_ON_LOW, 0x0001)
-    @spu.write16(PSX::SPU::SPUCNT, 1 << 7)
+    @spu.write16(PSX::SPU::SPUCNT, (1 << 14) | (1 << 7))
 
     @spu.tick(PSX::SPU::CYCLES_PER_SAMPLE)
 

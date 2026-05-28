@@ -528,6 +528,13 @@ module PSX
         end
       end
 
+      unless mute_enabled?
+        left_sum = 0
+        right_sum = 0
+        reverb_in_left = 0
+        reverb_in_right = 0
+      end
+
       if (@cnt & 0x0001) != 0
         cd_left = @cd_audio_fifo.shift || 0
         cd_right = @cd_audio_fifo.shift || 0
@@ -605,6 +612,10 @@ module PSX
 
     def cd_audio_reverb_enabled?
       (@cnt & (1 << 2)) != 0
+    end
+
+    def mute_enabled?
+      (@cnt & (1 << 14)) != 0
     end
 
     def reverb_base_address

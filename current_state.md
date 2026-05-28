@@ -10,6 +10,16 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Matched SPUCNT mute behavior against DuckStation:
+  - When SPUCNT bit 14 (`mute_n`) is clear, voice mix and voice reverb input
+    are muted before CD audio is mixed.
+  - CD audio still follows its own enable/reverb bits after the mute gate,
+    matching DuckStation's mixer ordering.
+- Verification:
+  - Focused SPU spec passed: `51 runs, 130 assertions, 0 failures`.
+  - Full suite passed: `386 runs, 1021 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched SPU reverb work-area addressing against DuckStation:
   - Reverb current/base addresses are now treated as halfword-address units,
     with byte conversion at RAM access time.
