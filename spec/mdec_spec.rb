@@ -60,6 +60,22 @@ class MDECSpec < Minitest::Test
     refute (status & PSX::MDEC::STAT_DATA_IN_REQ) != 0
   end
 
+  def test_output_empty_status_settles_after_last_read
+    load_flat_identity_tables
+
+    @mdec.write32_data((PSX::MDEC::CMD_DECODE << 29) | (1 << 27) | 2)
+    @mdec.write32_data(0xFE00_0000)
+    @mdec.write32_data(0x0000_FE00)
+
+    @mdec.read32_data while @mdec.data_out_available?
+
+    refute (@mdec.read32_status & PSX::MDEC::STAT_OUTPUT_FIFO_EMPTY) != 0
+
+    @mdec.tick(PSX::MDEC::OUTPUT_EMPTY_STATUS_DELAY_CYCLES)
+
+    assert (@mdec.read32_status & PSX::MDEC::STAT_OUTPUT_FIFO_EMPTY) != 0
+  end
+
   def test_unknown_command_consumes_declared_parameter_words
     @mdec.write32_data((7 << 29) | 2)
 

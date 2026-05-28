@@ -187,6 +187,7 @@ module PSX
         sio0.tick(batch_cycles)
         dma.tick_cycles(batch_cycles)
         cdrom.tick(batch_cycles)
+        mdec.tick(batch_cycles)
         spu.tick(batch_cycles)
         cpu.check_interrupts
         refresh_bios_pad_buffers
@@ -515,6 +516,7 @@ module PSX
         @sio0.tick(64)
         @dma.tick_cycles(64)
         @cdrom.tick(64)
+        @mdec.tick(64)
         @spu.tick(64)
       end
 

@@ -32,6 +32,7 @@ module PSX
     CTRL_RESET             = 1 << 31  # 1 = reset entire decoder
     CTRL_ENABLE_DMA_IN     = 1 << 30  # 1 = enable DMA0 transfer requests
     CTRL_ENABLE_DMA_OUT    = 1 << 29  # 1 = enable DMA1 transfer requests
+    OUTPUT_EMPTY_STATUS_DELAY_CYCLES = 4_096
 
     # Command IDs (high nibble of MDEC0 command word)
     CMD_NOP                = 0
@@ -73,6 +74,7 @@ module PSX
       # When we actually decode, the output FIFO will hold pixel data; for the
       # phase-1 stub it stays empty so the game sees "FIFO empty" on reads.
       @output_fifo      = []
+      @output_empty_status_delay_cycles = 0
       # Quant tables (luma + chroma) and IDCT scale table. Stored when the
       # game loads them; consumed by the decoder in phase 3.
       @quant_luma       = Array.new(64, 0)
@@ -101,7 +103,11 @@ module PSX
     def read32_data
       if @output_words_remaining.positive?
         @output_words_remaining -= 1
-        @output_fifo.shift || 0
+        word = @output_fifo.shift || 0
+        if @output_words_remaining.zero?
+          @output_empty_status_delay_cycles = OUTPUT_EMPTY_STATUS_DELAY_CYCLES
+        end
+        word
       else
         0xFFFF_FFFF
       end
@@ -110,7 +116,8 @@ module PSX
     # Read MDEC1: the live status word.
     def read32_status
       status = 0
-      status |= STAT_OUTPUT_FIFO_EMPTY if @output_words_remaining.zero?
+      output_empty = @output_words_remaining.zero? && @output_empty_status_delay_cycles <= 0
+      status |= STAT_OUTPUT_FIFO_EMPTY if output_empty
       # STAT_INPUT_FIFO_FULL stays 0 in the stub — we consume writes immediately.
       status |= STAT_COMMAND_BUSY if @params_remaining.positive? || @output_words_remaining.positive?
       status |= STAT_DATA_IN_REQ  if @dma_in_enabled && @params_remaining.positive?
@@ -130,6 +137,12 @@ module PSX
 
     def data_out_available?
       @output_words_remaining.positive?
+    end
+
+    def tick(cycles)
+      return if @output_empty_status_delay_cycles <= 0
+      @output_empty_status_delay_cycles -= cycles
+      @output_empty_status_delay_cycles = 0 if @output_empty_status_delay_cycles < 0
     end
 
     # Write MDEC0: command word OR parameter / RLE data word.
@@ -160,6 +173,7 @@ module PSX
       @command = (word >> 29) & 0x7
       @output_fifo.clear
       @output_words_remaining = 0
+      @output_empty_status_delay_cycles = 0
       @output_depth  = (word >> 27) & 0x3
       @output_signed = ((word >> 26) & 1) != 0
       @output_bit15  = ((word >> 25) & 1) != 0
@@ -282,6 +296,7 @@ module PSX
         i += 4
       end
       @output_words_remaining = @output_fifo.size
+      @output_empty_status_delay_cycles = 0
     end
 
     # Decode a single 8x8 block. Returns [pixel_block_64ints, new_pos] or

@@ -10,6 +10,31 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Fixed the ps1-tests MDEC frame helper hang on the final software read:
+  - The actual `.tests/mdec/frame/frame-15bit.exe` executable completed 19
+    stripes and then stuck inside the 20th `mdec_readDecoded(...)` call. Its
+    helper polls `dataOutFifoEmpty` after every word, including the final word
+    of the final stripe.
+  - The Ruby MDEC model made `STAT_OUTPUT_FIFO_EMPTY` true immediately when the
+    last output FIFO word was read. Hardware leaves a short status-settling
+    window where an immediate post-read poll still sees the output FIFO as
+    non-empty; the ps1-tests helper relies on that and exits the loop before
+    the bit settles.
+  - MDEC now keeps only the status empty bit delayed for a small cycle window
+    after the last output word. `data_out_available?` still becomes false
+    immediately, so DMA does not fabricate an extra word.
+  - Added a focused MDEC regression for the delayed empty-status transition.
+  - Confirmed `.tests/mdec/frame/frame-15bit.exe` now reaches `Done` after all
+    20 software-read stripes. `.tests/mdec/frame/frame-24bit.exe` also reaches
+    `Done`.
+- Verification:
+  - Focused MDEC specs passed: `15 runs, 44 assertions, 0 failures`.
+  - Filtered MDEC ps1-tests baseline passed:
+    `mdec/4bit`, `mdec/8bit`, `mdec/step-by-step-log`;
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+  - Full suite passed: `423 runs, 1135 assertions, 0 failures`.
+
 - Fixed MDEC status bits during queued decode output:
   - The ps1-tests `mdec/step-by-step-log` case exposed that after command
     input is complete but decoded output remains queued, hardware still
