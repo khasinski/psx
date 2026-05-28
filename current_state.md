@@ -10,6 +10,19 @@ later entries have fixed.
 
 2026-05-28 latest continuation:
 
+- Added DuckStation-backed SPU Gaussian voice interpolation:
+  - Voices now keep the previous three decoded samples as interpolation
+    history.
+  - Sample output now uses DuckStation's 512-entry Gaussian table and
+    `sample_counter` interpolation index instead of reading the raw decoded
+    sample.
+  - Save states preserve interpolation history for each voice, with
+    backward-compatible restore from decoded samples.
+- Verification:
+  - Focused SPU spec passed: `63 runs, 155 assertions, 0 failures`.
+  - Full suite passed: `398 runs, 1046 assertions, 0 failures`.
+  - Default ps1-tests baseline passed: `TOTAL 18  OK 18  FAIL 0`.
+
 - Matched DuckStation's SPU key-off and loop-end force-off state:
   - Key-off now ignores voices that are already off or already in release,
     matching DuckStation's `Voice::KeyOff`.

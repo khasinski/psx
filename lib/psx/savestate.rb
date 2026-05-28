@@ -301,6 +301,7 @@ module PSX
             adsr_target: voice[:adsr_target] || 0,
             adsr_envelope: (voice[:adsr_envelope] || reset_volume_envelope(0, 0, false, false, false)).dup,
             last_samples: (voice[:last_samples] || [0, 0]).dup,
+            interpolation_samples: (voice[:interpolation_samples] || ([0, 0, 0] + (voice[:decoded_samples] || []))).dup,
             decoded_samples: (voice[:decoded_samples] || []).dup,
             current_block_flags: voice[:current_block_flags] || 0,
             sample_index: voice[:sample_index] || 0,

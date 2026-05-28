@@ -116,6 +116,27 @@ class SPUSpec < Minitest::Test
     assert_equal(-4096, voice.decoded_samples[1])
   end
 
+  def test_voice_interpolation_uses_gaussian_history_samples
+    voice = @spu.instance_variable_get(:@voices)[0]
+    voice.interpolation_samples = [1000, 2000, 3000, 4000] + Array.new(27, 0)
+    voice.sample_index = 0
+    voice.sample_counter = 0x0800
+
+    assert_equal 2492, @spu.send(:interpolate_voice_sample, voice)
+  end
+
+  def test_decoded_block_preserves_previous_tail_for_interpolation
+    voice = @spu.instance_variable_get(:@voices)[0]
+    voice.interpolation_samples = [0, 0, 0] + Array.new(25, 0) + [111, 222, 333]
+    write_adpcm_block(2, flags: 0x00, first_data_byte: 0x01)
+    voice.current_address = 2
+
+    @spu.send(:decode_voice_block, 0)
+
+    assert_equal [111, 222, 333], voice.interpolation_samples[0, 3]
+    assert_equal 4096, voice.interpolation_samples[3]
+  end
+
   def test_voice_tick_sets_endx_and_stops_on_loop_end_without_repeat
     @spu.write16(0xC00 + 0x04, 0x1000) # voice 0 pitch: one decoded sample per SPU tick
     @spu.write16(0xC00 + 0x06, 0)
@@ -311,10 +332,12 @@ class SPUSpec < Minitest::Test
     voices = @spu.instance_variable_get(:@voices)
     voices[1].adsr_volume = 0x7FFF
     voices[1].adsr_phase = :sustain
-    voices[1].decoded_samples = Array.new(28, 1112)
+    voices[1].decoded_samples = Array.new(28, 0)
+    voices[1].interpolation_samples = [0, 0, 7481, 0] + Array.new(27, 0)
     voices[3].adsr_volume = 0x7FFF
     voices[3].adsr_phase = :sustain
-    voices[3].decoded_samples = Array.new(28, -2222)
+    voices[3].decoded_samples = Array.new(28, 0)
+    voices[3].interpolation_samples = [0, 0, -14944, 0] + Array.new(27, 0)
     @spu.instance_variable_set(:@voice_active, (1 << 1) | (1 << 3))
     @spu.write16(0xC00 + 0x10 + 0x04, 0x0001)
     @spu.write16(0xC00 + 0x30 + 0x04, 0x0001)
@@ -560,7 +583,8 @@ class SPUSpec < Minitest::Test
     voice = voices[0]
     voice.adsr_volume = 0x7FFF
     voice.adsr_phase = :sustain
-    voice.decoded_samples = Array.new(28, 4000)
+    voice.decoded_samples = Array.new(28, 0)
+    voice.interpolation_samples = [0, 0, 26_900, 0] + Array.new(27, 0)
     @spu.instance_variable_set(:@voice_active, 0x0001)
     @spu.write16(0xC00 + 0x00, 0x3FFF)
     @spu.write16(0xC00 + 0x02, 0x2000)
@@ -693,7 +717,10 @@ class SPUSpec < Minitest::Test
     voices = @spu.instance_variable_get(:@voices)
     voices[0].adsr_volume = 0x7FFF
     voices[0].adsr_phase = :sustain
-    voices[0].decoded_samples = Array.new(28, 0x7FFF)
+    voices[0].decoded_samples = Array.new(28, 0)
+    voices[0].interpolation_samples = [0, 0, 0x7FFF, 0] + Array.new(27, 0)
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x0001)
+    @spu.instance_variable_set(:@noise_level, 0x7FFF)
     voices[1].decoded_samples = Array.new(28, 0)
     @spu.instance_variable_set(:@voice_active, 0x0003)
     @spu.write16(0xC00 + 0x04, 0x0001)
@@ -710,7 +737,9 @@ class SPUSpec < Minitest::Test
     voices = @spu.instance_variable_get(:@voices)
     voices[0].adsr_volume = 0x7FFF
     voices[0].adsr_phase = :sustain
-    voices[0].decoded_samples = Array.new(28, -0x4000)
+    @spu.write16(PSX::SPU::NOISE_MODE_LOW, 0x0001)
+    @spu.instance_variable_set(:@noise_level, -0x4000 & 0xFFFF)
+    voices[0].decoded_samples = Array.new(28, 0)
     voices[1].decoded_samples = Array.new(28, 0)
     @spu.instance_variable_set(:@voice_active, 0x0003)
     @spu.write16(0xC00 + 0x04, 0x0001)
