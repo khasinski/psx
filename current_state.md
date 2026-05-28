@@ -8,6 +8,31 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 MDEC status request/busy alignment:
+
+- Matched two DuckStation MDEC status semantics:
+  - Data-in request (`STAT_DATA_IN_REQ`) now asserts whenever DMA-in is
+    enabled and the input FIFO has room. The Ruby model consumes input
+    immediately, so the FIFO is never full; the old code only asserted DRQ
+    while a command was already waiting for parameter words.
+  - Command-busy now tracks pending command/input processing, not decoded
+    output waiting in the output FIFO. DuckStation clears command-busy after
+    block copy-out has filled the output FIFO and the command state returns
+    idle.
+- Updated focused MDEC specs for the DuckStation-backed DRQ and busy-bit
+  behavior.
+- Verification:
+  - Focused MDEC spec passed: `18 runs, 49 assertions, 0 failures`.
+  - Filtered MDEC ps1-tests baseline passed: `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `432 runs, 1170 assertions, 0 failures`.
+- Rage smoke note:
+  - Re-ran the saved race-start state on the current tree:
+    `tmp/rage-grandprix-seek-audio-4b.state` plus Cross/Start input reaches
+    gameplay/pause again at `tmp/rage-racestart-mdecout-underread/ridge-020.png`.
+    This proves the post-menu race-start transition still works in the
+    headless path, but it does not reproduce the full title-to-Grand-Prix
+    loading-stall report.
+
 2026-05-28 MDEC-out DMA DuckStation alignment:
 
 - Corrected the previous MDEC-out "pause mid-block" model:

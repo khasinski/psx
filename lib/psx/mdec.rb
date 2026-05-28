@@ -119,8 +119,11 @@ module PSX
       output_empty = @output_words_remaining.zero? && @output_empty_status_delay_cycles <= 0
       status |= STAT_OUTPUT_FIFO_EMPTY if output_empty
       # STAT_INPUT_FIFO_FULL stays 0 in the stub — we consume writes immediately.
-      status |= STAT_COMMAND_BUSY if @params_remaining.positive? || @output_words_remaining.positive?
-      status |= STAT_DATA_IN_REQ  if @dma_in_enabled && @params_remaining.positive?
+      status |= STAT_COMMAND_BUSY if @params_remaining.positive?
+      # DuckStation asserts MDEC-in DRQ whenever DMA-in is enabled and the
+      # input FIFO has room. This model consumes input immediately, so it is
+      # never full.
+      status |= STAT_DATA_IN_REQ  if @dma_in_enabled
       # DMA1 (out) when DMA1 is enabled AND there's output left to drain.
       status |= STAT_DATA_OUT_REQ if @dma_out_enabled && @output_words_remaining.positive?
       status |= (@output_depth & 0x3) << 25
