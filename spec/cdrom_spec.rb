@@ -370,6 +370,58 @@ class CDROMSpec < Minitest::Test
     assert_equal [0x00, 0x02, 0x01, 0x02, 0x00, 0x00, 0x08, 0x00], bytes
   end
 
+  def test_seek_l_clears_open_sector_buffer
+    @cdrom.disc = build_disc([
+      ("OLD!" + "\x00" * 2044).b,
+      ("NEW!" + "\x00" * 2044).b,
+    ])
+    deliver_first_sector
+
+    @cdrom.write8(0, 0)
+    @cdrom.write8(3, 0x80)
+    assert @cdrom.dma_data_ready?, "first read leaves an open sector buffer"
+
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 1)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 1
+    drain_response
+    @cdrom.write8(1, 0x15) # SeekL clears buffers when seeking begins.
+    drain_response
+
+    refute @cdrom.data_fifo_has_data?
+    refute @cdrom.dma_data_ready?
+    assert_equal 0, @cdrom.read8(0) & PSX::CDROM::STAT_DATA_FIFO_NOT_EMPTY
+  end
+
+  def test_seek_l_cancels_pending_pause_second_response
+    @cdrom.disc = build_disc([
+      ("ONE!" + "\x00" * 2044).b,
+      ("TWO!" + "\x00" * 2044).b,
+    ])
+    deliver_first_sector
+
+    @cdrom.write8(1, 0x09) # Pause queues a delayed INT2.
+    drain_response
+
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 1)
+    @cdrom.write8(1, 0x02) # SetLoc LBA 1
+    drain_response
+
+    pending_pause = @cdrom.instance_variable_get(:@pending).find { |entry| entry[3] == 2 }
+    refute_nil pending_pause
+    pending_pause[0] = 1
+
+    @cdrom.write8(1, 0x15) # SeekL clears old async/second response.
+    drain_response
+
+    @cdrom.tick(1)
+    assert_equal 0, @cdrom.instance_variable_get(:@irq_flags),
+                 "old Pause INT2 should not survive into the seek"
+  end
+
   def test_seek_l_accepts_implicit_track_one_pregap
     @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
 

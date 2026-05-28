@@ -8,6 +8,25 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM seek buffer/async clearing:
+
+- Matched DuckStation `BeginSeeking` cleanup:
+  - `SeekL`/`SeekP` now clear the active sector buffer, read position, and
+    BFRD request bit when a seek begins.
+  - Starting a seek also cancels pending non-ACK async/second responses, so
+    stale delayed responses such as an old `Pause` INT2 cannot survive into
+    the seek window.
+- Added focused CD-ROM regressions for:
+  - `SeekL` clearing an open sector buffer that had BFRD armed.
+  - `SeekL` cancelling an aged pending `Pause` second response before it can
+    fire inside the seek.
+- Verification:
+  - Focused CD-ROM spec passed: `67 runs, 245 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `440 runs, 1202 assertions, 0 failures`.
+
 2026-05-28 CD-ROM new-read async cancellation:
 
 - Matched another DuckStation `BeginReading` behavior:

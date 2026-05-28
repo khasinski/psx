@@ -931,6 +931,8 @@ module PSX
       @read_lba = target_lba
       @stat |= SF_SEEKING
       queue_response(0, 3, [@stat])
+      clear_async_and_second_responses
+      clear_sector_buffer
 
       track = @disc&.track_for_lba(target_lba)
       if @disc.nil? || (data_track_for_lba(target_lba).nil? && !(track&.audio?))
