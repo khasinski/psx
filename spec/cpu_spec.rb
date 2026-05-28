@@ -31,6 +31,25 @@ class CPUSpec < Minitest::Test
     @cpu.instance_variable_get(:@regs)[reg]
   end
 
+  def setup_rage_intro_cdrom_stream
+    cdrom = PSX::CDROM.new(interrupts: @env[:interrupts])
+    cdrom.instance_variable_set(:@whole_sector, true)
+    cdrom.instance_variable_set(:@reading, true)
+    cdrom.instance_variable_set(:@seek_lba, 304)
+    @memory.cdrom = cdrom
+  end
+
+  def setup_rage_stream_queue(entries)
+    queue = 0x800F_F2E0
+    @memory.write32(PSX::CPU::RAGE_STREAM_QUEUE_BASE_PTR, queue)
+    @memory.write32(PSX::CPU::RAGE_STREAM_DMA_INDEX, 0)
+    entries.each_with_index do |(state, sector_info), i|
+      entry = queue + i * PSX::CPU::RAGE_STREAM_QUEUE_ENTRY_SIZE
+      @memory.write16(entry, state)
+      @memory.write32(entry + 4, sector_info)
+    end
+  end
+
   # === ALU Instructions ===
 
   def test_add_instruction
@@ -198,6 +217,32 @@ class CPUSpec < Minitest::Test
     @cpu.step
 
     assert_equal 0x4433_2211, get_reg(9)
+  end
+
+  def test_rage_cdrom_dma_callback_is_skipped_until_sector_group_is_complete
+    setup_rage_intro_cdrom_stream
+    setup_rage_stream_queue([[3, 0x0006_0000]])
+    set_reg(31, 0x8000_1234)
+
+    @memory.write32(PSX::CPU::RAGE_CDROM_DMA_CALLBACK, 0x2402_0007) # addiu $v0, $zero, 7
+    @cpu.pc = PSX::CPU::RAGE_CDROM_DMA_CALLBACK
+    @cpu.step
+
+    assert_equal 0x8000_1234, @cpu.pc
+    assert_equal 0, get_reg(2), "incomplete group must not run Rage's DMA callback"
+  end
+
+  def test_rage_cdrom_dma_callback_runs_after_sector_group_is_complete
+    setup_rage_intro_cdrom_stream
+    setup_rage_stream_queue((0...6).map { |i| [3, 0x0006_0000 | i] })
+    set_reg(31, 0x8000_1234)
+
+    @memory.write32(PSX::CPU::RAGE_CDROM_DMA_CALLBACK, 0x2402_0007) # addiu $v0, $zero, 7
+    @cpu.pc = PSX::CPU::RAGE_CDROM_DMA_CALLBACK
+    @cpu.step
+
+    assert_equal 0x8006_CE7C, @cpu.pc
+    assert_equal 7, get_reg(2)
   end
 
   def test_sw_instruction

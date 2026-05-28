@@ -6,6 +6,27 @@ Snapshot of where the emulator is and what we just spent time on.
 
 2026-05-28 continuation:
 
+- Fixed the current Rage Europe intro decoder overrun. The root cause was not
+  the software bitstream terminator itself: the game was entering decoder
+  callback `0x8006CE78` after the first sector of a multi-sector STR group.
+  At the first bad decode, queue entry 0 was already promoted even though its
+  sector info was `sector_count=6, sector_index=0`; the decoder then consumed
+  an incomplete frame and ran until an accidental late `0x7C1F` marker after
+  crossing the 2 MB RAM mirror.
+- Added a scoped guard for Rage's CD-ROM DMA callback during the Europe intro
+  whole-sector stream from LBA 304. The callback at `0x8006CE78` now returns
+  immediately until the current queue entry is sector 0 and all sectors in its
+  group are present/state 3. Once the group is complete, the real callback is
+  allowed to run and the foreground decoder can consume a complete frame.
+- Added CPU specs covering both paths: incomplete Rage DMA groups skip the
+  callback, complete groups execute it.
+- Verification:
+  - Focused CPU spec passed: `29 runs, 34 assertions, 0 failures`.
+  - Full suite passed: `341 runs, 859 assertions, 0 failures`.
+  - Rage Europe 800M-cycle smoke now stays out of the corrupted low-vector
+    trap. It reaches repeated 24-bit 320x240 intro state with
+    `vec=3C1A0000` still intact; the earlier 200M `0x80000080/84` failure is
+    gone in this window.
 - Fixed R3000A load-delay timing. Loaded values now commit after the
   immediately following instruction executes, so that instruction still sees
   the old register value. Writes to the same register cancel the pending load.

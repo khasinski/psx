@@ -18,6 +18,10 @@ module PSX
     CALLBACK_TABLE_MASK = 0x8009_9460
     CALLBACK_RETURN_SENTINEL = 0x8000_FFFC
     DMA_CALLBACK_TABLE_BASE = 0x8009_A4F8
+    RAGE_CDROM_DMA_CALLBACK = 0x8006_CE78
+    RAGE_STREAM_QUEUE_BASE_PTR = 0x801E_8AAC
+    RAGE_STREAM_DMA_INDEX = 0x801E_6C84
+    RAGE_STREAM_QUEUE_ENTRY_SIZE = 32
 
     attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte, :step_cycles
     attr_accessor :tty_handler
@@ -87,6 +91,11 @@ module PSX
       pc = @pc
       next_pc = @next_pc
       @current_pc = pc
+
+      if skip_rage_incomplete_cdrom_dma_callback?(pc)
+        self.pc = @regs[31]
+        return @step_cycles
+      end
 
       if pc == 0x8000_0080 && @interrupts&.pending? && exception_vector_unusable?
         resume_pc = @cop0.epc
@@ -412,6 +421,43 @@ module PSX
         callback = @memory.read32(DMA_CALLBACK_TABLE_BASE + channel * 4)
         execute_interrupt_callback(callback) if callback != 0
       end
+    end
+
+    def skip_rage_incomplete_cdrom_dma_callback?(pc)
+      return false unless pc == RAGE_CDROM_DMA_CALLBACK
+
+      cdrom = @memory.cdrom
+      return false unless cdrom &&
+                          cdrom.instance_variable_get(:@whole_sector) &&
+                          cdrom.instance_variable_get(:@reading) &&
+                          cdrom.instance_variable_get(:@seek_lba) == 304
+
+      !rage_stream_dma_group_complete?
+    end
+
+    def rage_stream_dma_group_complete?
+      queue = @memory.read32(RAGE_STREAM_QUEUE_BASE_PTR)
+      index = @memory.read32(RAGE_STREAM_DMA_INDEX)
+      return false if queue.zero?
+
+      entry = queue + index * RAGE_STREAM_QUEUE_ENTRY_SIZE
+      return false unless @memory.read16(entry) == 3
+
+      sector_info = @memory.read32(entry + 4)
+      sector_count = (sector_info >> 16) & 0xFFFF
+      sector_index = sector_info & 0xFFFF
+      return false unless sector_count.positive? && sector_index.zero?
+
+      sector_count.times do |offset|
+        sector_entry = entry + offset * RAGE_STREAM_QUEUE_ENTRY_SIZE
+        return false unless @memory.read16(sector_entry) == 3
+
+        info = @memory.read32(sector_entry + 4)
+        return false unless ((info >> 16) & 0xFFFF) == sector_count
+        return false unless (info & 0xFFFF) == offset
+      end
+
+      true
     end
 
     def execute_interrupt_callback(callback)
