@@ -26,6 +26,27 @@ later entries have fixed.
     `TOTAL 3  OK 3  FAIL 0`.
   - Full suite passed: `457 runs, 1262 assertions, 0 failures`.
 
+2026-05-28 Rage smoke after CDDA stride fix:
+
+- Fresh Rage Europe fast-boot smoke on the current tree did not reach the
+  previously useful FMV comparison window:
+  - Command used the Europe cue from `~/Downloads/Rage Racer (Europe)/...`,
+    `--fast-boot`, 900M cycles, and screenshots every 50M cycles into
+    `tmp/rage-current-fmv-after-cdda-stride/`.
+  - At `ridge-018.png` / 900M cycles it was still showing the PlayStation
+    license screen. A boundary probe showed `fast_boot_from_disc` returning at
+    PC `0x800630B4`, then execution quickly cycling through low BIOS/exception
+    addresses. Treat the current fast-boot harness as suspect for FMV
+    reproduction until this is explained.
+- The saved post-loading race-start path still works after the CDDA stride
+  change:
+  - Loading `tmp/rage-grandprix-seek-audio-4b.state`, pressing Cross, then
+    pressing Start reached gameplay/pause at
+    `tmp/rage-racestart-after-cdda-stride/ridge-020.png`.
+  - This does not disprove the user's manual Grand Prix loading-screen hang;
+    it only proves the saved post-loading checkpoint still reaches gameplay on
+    the current tree.
+
 2026-05-28 CD-ROM GetlocP audio sub-Q:
 
 - Matched DuckStation's `GetlocP` behavior for audio tracks:
