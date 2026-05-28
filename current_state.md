@@ -8,6 +8,28 @@ later entries have fixed.
 
 ## Latest continuation
 
+2026-05-28 CD-ROM pending command cancellation:
+
+- Matched DuckStation's pending-command heuristic for lower-parameter command
+  writes:
+  - If a command with more required parameters is still waiting for its ACK
+    and a lower-parameter command is written, the new command is ignored, the
+    old command's parameter FIFO is effectively emptied, and the old command
+    completes with an incorrect-parameter INT5.
+  - This specifically covers the DuckStation-documented `SetLoc` followed by
+    immediate `ReadN` case, where Ruby had already applied `SetLoc` and then
+    started reading before the SetLoc ACK had delivered.
+  - Added a small pending-command state snapshot so cancelled commands restore
+    pre-command side effects instead of leaving partially-applied state.
+- Added a focused CD-ROM regression for `SetLoc` immediately followed by
+  `ReadN`: it must produce INT5 reason `0x20` and must not start reading.
+- Verification:
+  - Focused CD-ROM spec passed: `79 runs, 293 assertions, 0 failures`.
+  - Focused DMA spec passed: `22 runs, 68 assertions, 0 failures`.
+  - Full CD-ROM ps1-tests baseline with synthetic disc passed:
+    `TOTAL 3  OK 3  FAIL 0`.
+  - Full suite passed: `452 runs, 1250 assertions, 0 failures`.
+
 2026-05-28 CD-ROM command BUSY status:
 
 - Matched DuckStation's CD-ROM status BUSYSTS bit for command ACK delivery:

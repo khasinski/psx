@@ -285,6 +285,23 @@ class CDROMSpec < Minitest::Test
            "new command INT3 should not wait for the older delayed INT2"
   end
 
+  def test_lower_parameter_command_during_pending_setloc_errors_old_command
+    @cdrom.disc = build_one_sector_disc("PVD!"[0, 4].b + ("\x00" * 2044).b)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(2, 0)
+    @cdrom.write8(2, 2)
+    @cdrom.write8(2, 0x00)
+    @cdrom.write8(1, 0x02) # SetLoc command ACK is still pending.
+    @cdrom.write8(1, 0x06) # ReadN has fewer params; DuckStation leaves SetLoc to error.
+
+    assert drive_until_int(5, max_ticks: 20)
+    assert_equal PSX::CDROM::SF_ERROR | PSX::CDROM::DEFAULT_STAT_DISC, @cdrom.read8(1)
+    assert_equal PSX::CDROM::ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS, @cdrom.read8(1)
+    refute @cdrom.instance_variable_get(:@reading), "ReadN should not start over the pending SetLoc"
+  end
+
   def test_pause_cancels_previous_pending_second_response
     @cdrom.disc = build_one_sector_disc("PVD!"[0, 4].b + ("\x00" * 2044).b)
 

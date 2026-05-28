@@ -136,6 +136,8 @@ module PSX
       @pending_seq = 0
       @pending_group = 0
       @current_response_group = 0
+      @pending_command_code = nil
+      @pending_command_snapshot = nil
       @data_buffer = nil     # binary string with current sector's user data
       @data_pos = 0
       @seek_lba = 0
@@ -275,7 +277,11 @@ module PSX
         end
 
         if ready_index
-          _, _, _, int_type, data = @pending.delete_at(ready_index)
+          _, _, _, int_type, data, command_busy = @pending.delete_at(ready_index)
+          if command_busy
+            @pending_command_code = nil
+            @pending_command_snapshot = nil
+          end
           @response.clear
           @response.concat(data)
           @irq_flags = int_type & 0x07
@@ -417,6 +423,31 @@ module PSX
       @pending.reject! { |entry| entry[3] != 3 }
     end
 
+    def command_min_params(cmd)
+      range = COMMAND_PARAMETER_COUNTS[cmd]
+      range ? range.begin : 0
+    end
+
+    def snapshot_command_state
+      {
+        seek_lba: @seek_lba,
+        read_lba: @read_lba,
+        want_seek: @want_seek,
+        reading: @reading,
+        read_pending_seek: @read_pending_seek,
+        pause_after_first_sector: @pause_after_first_sector,
+        stat: @stat,
+        sector_cycles: @sector_cycles,
+        sectors_since_read: @sectors_since_read,
+      }
+    end
+
+    def restore_command_state(snapshot)
+      return unless snapshot
+
+      snapshot.each { |name, value| instance_variable_set(:"@#{name}", value) }
+    end
+
     def unread_sector_blocks_stream?
       return false unless @data_buffer && @data_pos < @data_buffer.bytesize
       return false unless @bfrd_active
@@ -555,8 +586,22 @@ module PSX
     end
 
     def execute_command(cmd)
+      if @pending_command_code && @pending.any? { |entry| entry[5] }
+        if command_min_params(@pending_command_code) > command_min_params(cmd)
+          restore_command_state(@pending_command_snapshot)
+          @pending.reject! { |entry| entry[5] }
+          @pending_command_code = nil
+          @pending_command_snapshot = nil
+          @parameters.clear
+          queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INCORRECT_NUMBER_OF_PARAMETERS])
+          return
+        end
+      end
+
       params = @parameters.dup
       @parameters.clear
+      @pending_command_code = cmd
+      @pending_command_snapshot = snapshot_command_state
 
       if ENV["PSX_TRACE_CDROM"]
         $stderr.puts format("[cdrom] cmd=%02X params=[%s] stat=%02X",
