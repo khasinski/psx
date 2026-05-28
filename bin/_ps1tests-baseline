@@ -8,13 +8,32 @@ shopt -s nullglob
 cd "$(dirname "$0")/.." || exit 1
 
 bios=${PSX_BIOS:-SCPH1001.BIN}
+max_cycles=${PSX_MAX_CYCLES:-100000000}
+wall_timeout=${PSX_WALL_TIMEOUT:-90}
+filter=${PSX_TEST_FILTER:-}
 total=0
 ok=0
 fail=0
 
+if [[ -n ${PSX_TEST_RUNNER:-} ]]; then
+  read -r -a runner <<< "$PSX_TEST_RUNNER"
+elif command -v mise >/dev/null 2>&1; then
+  runner=(mise exec -- ruby)
+else
+  runner=(ruby)
+fi
+
+timeout_cmd=()
+if command -v timeout >/dev/null 2>&1; then
+  timeout_cmd=(timeout "$wall_timeout")
+fi
+
 while IFS= read -r logpath; do
   dir=${logpath%/psx.log}
   name=${dir#.tests/}
+  if [[ -n $filter && $name != *"$filter"* ]]; then
+    continue
+  fi
   exes=("$dir"/*.exe)
   if (( ${#exes[@]} == 0 )); then
     printf "%-40s\tNO_EXE\n" "$name"
@@ -24,7 +43,11 @@ while IFS= read -r logpath; do
   total=$((total + 1))
   # 90s wall-clock cap per test so an infinite-loop emulator bug can't
   # eat the whole night. 100M cycles at ~2.3 MHz is ~43s; 90s is ~2x.
-  out=$(timeout 90 bundle exec bin/psx-test -b "$bios" -e "$logpath" --max-cycles 100000000 "$exe" 2>&1 >/dev/null)
+  args=(bin/psx-test -b "$bios" -e "$logpath" --max-cycles "$max_cycles")
+  if [[ -n ${PSX_TEST_DISC:-} && $name == cdrom/* ]]; then
+    args+=(-d "$PSX_TEST_DISC")
+  fi
+  out=$("${timeout_cmd[@]}" "${runner[@]}" "${args[@]}" "$exe" 2>&1 >/dev/null)
   rc=$?
   if [[ $out == *"OK --"* ]]; then
     summary=$(echo "$out" | grep -m1 "psx-test\] OK")

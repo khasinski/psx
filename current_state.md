@@ -35,6 +35,15 @@ Snapshot of where the emulator is and what we just spent time on.
   - A live `cdrom/getloc` probe with the synthetic disc timed out before
     emitting comparable test output, so this path is covered by regression
     specs but not yet by a full ps1-tests pass.
+- Fixed `bin/_ps1tests-baseline` so it no longer hardcodes system
+  `bundle exec`. It now defaults to `mise exec -- ruby` when mise is
+  available, supports `PSX_TEST_RUNNER`, `PSX_MAX_CYCLES`,
+  `PSX_WALL_TIMEOUT`, `PSX_TEST_FILTER`, and `PSX_TEST_DISC`, and can attach
+  a disc image for `cdrom/*` tests.
+- Verification for the runner fix:
+  - `bash -n bin/_ps1tests-baseline` passed.
+  - `PSX_TEST_FILTER=cpu/cop PSX_MAX_CYCLES=100000000 bin/_ps1tests-baseline`
+    passed: `TOTAL 1  OK 1  FAIL 0`.
 
 - Removed the earlier rectangle texture-flip behavior. That code was based on
   a Rage-title hypothesis; DuckStation's current software and hardware
