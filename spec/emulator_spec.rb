@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require "tmpdir"
 
 class EmulatorSpec < Minitest::Test
   BIOS = File.expand_path("../SCPH1001.BIN", __dir__)
@@ -82,6 +83,21 @@ class EmulatorSpec < Minitest::Test
     emu.cdrom.disc = disc_with_region(:ntsc_u)
 
     assert emu.send(:retail_bios_boot_possible?)
+  end
+
+  def test_save_debug_snapshot_writes_state_and_screenshot
+    emu = PSX::Emulator.new(BIOS)
+    emu.gpu.vram[0] = 0x001F
+
+    Dir.mktmpdir do |dir|
+      paths = emu.save_debug_snapshot(File.join(dir, "rage-loading"))
+
+      assert File.exist?(paths[:state]), "debug snapshot should write a save state"
+      assert File.exist?(paths[:screenshot]), "debug snapshot should write a screenshot"
+      assert_equal File.join(dir, "rage-loading.psxstate"), paths[:state]
+      assert_equal File.join(dir, "rage-loading.ppm"), paths[:screenshot]
+      assert_equal "P6", File.open(paths[:screenshot], &:readline).strip
+    end
   end
 
   private

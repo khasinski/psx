@@ -33,6 +33,9 @@ def usage
       Space         Select
       Q / W         L1 / R1
       E / R         L2 / R2
+      F5            Save state (PSX_QUICKSAVE, default tmp/quicksave.psxstate)
+      F6            Save debug state+screenshot (PSX_DEBUG_SNAPSHOT prefix)
+      F8            Load state (PSX_QUICKSAVE)
       Escape        Quit
 
     A BIOS ROM (e.g. SCPH1001.BIN, 512 KB) is required and must be provided

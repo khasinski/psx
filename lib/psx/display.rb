@@ -30,6 +30,7 @@ module PSX
       # the snapshot is taken between CPU steps).
       @save_state_requested = false
       @load_state_requested = false
+      @debug_snapshot_requested = false
 
       # Performance tracking
       @frame_count = 0
@@ -152,6 +153,12 @@ module PSX
       r
     end
 
+    def take_debug_snapshot_request!
+      r = @debug_snapshot_requested
+      @debug_snapshot_requested = false
+      r
+    end
+
     # Show a transient banner in the window title for save/load feedback.
     # Stays for ~2s before the FPS counter overwrites it again.
     def flash_status(msg)
@@ -213,11 +220,14 @@ module PSX
         return
       end
 
-      # F5 = save state, F8 = load state. Set on key-down only; the
+      # F5 = save state, F6 = state+screenshot, F8 = load state. Set on key-down only; the
       # emulator loop reads + clears the flag once per frame.
       if pressed
         if scancode == SDL2::Key::Scan::F5
           @save_state_requested = true
+          return
+        elsif scancode == SDL2::Key::Scan::F6
+          @debug_snapshot_requested = true
           return
         elsif scancode == SDL2::Key::Scan::F8
           @load_state_requested = true

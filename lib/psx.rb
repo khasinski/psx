@@ -261,7 +261,8 @@ module PSX
       puts "Note: BIOS takes ~40 seconds to show Sony logo"
       puts "Controls: Arrow keys=D-pad, Z=Cross, X=Circle, A=Square, S=Triangle"
       puts "          Enter=Start, Space=Select, Q/W=L1/R1, Escape=Quit"
-      puts "          F5=quicksave, F8=quickload (PSX_QUICKSAVE env var = path)"
+      puts "          F5=quicksave, F6=state+screenshot, F8=quickload"
+      puts "          PSX_QUICKSAVE / PSX_DEBUG_SNAPSHOT env vars control output paths"
       puts ""
 
       # Shared state
@@ -295,8 +296,10 @@ module PSX
       last_status = Time.now
       last_status_cycles = 0
       quicksave_path = ENV["PSX_QUICKSAVE"] || "tmp/quicksave.psxstate"
+      debug_snapshot_prefix = ENV["PSX_DEBUG_SNAPSHOT"] || "tmp/debug-snapshot"
       require "fileutils"
       FileUtils.mkdir_p(File.dirname(quicksave_path))
+      FileUtils.mkdir_p(File.dirname(debug_snapshot_prefix))
 
       loop do
         # Poll SDL events (must be on main thread on macOS)
@@ -325,6 +328,14 @@ module PSX
           else
             display.flash_status("No save at #{quicksave_path}")
             puts "[savestate] no file at #{quicksave_path}"
+          end
+        end
+        if display.take_debug_snapshot_request!
+          @emu_mutex.synchronize do
+            paths = save_debug_snapshot(debug_snapshot_prefix)
+            display.flash_status("Snapshot -> #{paths[:state]}")
+            puts "[snapshot] saved state=#{paths[:state]} screenshot=#{paths[:screenshot]} " \
+                 "(PC=#{format('0x%08X', @cpu.pc)})"
           end
         end
 
@@ -372,6 +383,19 @@ module PSX
 
       display.close
       puts "\nEmulation ended after #{@frame_count} frames (#{@total_cycles} cycles)"
+    end
+
+    def save_debug_snapshot(prefix)
+      require "fileutils"
+      dir = File.dirname(prefix)
+      FileUtils.mkdir_p(dir) unless dir == "."
+      state_path = "#{prefix}.psxstate"
+      screenshot_path = "#{prefix}.ppm"
+
+      save_state(state_path)
+      save_screenshot(screenshot_path)
+
+      { state: state_path, screenshot: screenshot_path }
     end
 
     # Load a PS-EXE executable into RAM and prepare the CPU to run it.
