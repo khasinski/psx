@@ -42,6 +42,41 @@ class CDROMSpec < Minitest::Test
     assert_equal 2, @cdrom.instance_variable_get(:@irq_flags)
   end
 
+  # The retail BIOS license-check polls [0x800091C4] with a ~420K-cycle
+  # timeout and just re-issues Init on timeout. Without this guard, every
+  # re-issue would call reset() and re-queue a fresh 4M-cycle INT2,
+  # canceling the one the BIOS is actually waiting for. Match DuckStation:
+  # an Init while one is already in flight is a no-op (no new ACK, no
+  # reset, no re-queue).
+  def test_init_while_init_pending_is_noop
+    @cdrom.disc = build_one_sector_disc("\x00".b * 2048)
+
+    enable_irqs(0x1F)
+    @cdrom.write8(0, 0)
+    @cdrom.write8(1, 0x0A) # Init #1
+    drain_response
+
+    # Halfway through the INT2 delay, the BIOS retries Init.
+    half = PSX::CDROM::CYCLES_INIT_RESPONSE / 2
+    @cdrom.tick(half)
+    assert_equal 0, @cdrom.instance_variable_get(:@irq_flags),
+                 "INT2 should not have fired yet at the half-way mark"
+    pending_before = @cdrom.instance_variable_get(:@pending).map(&:dup)
+
+    @cdrom.write8(1, 0x0A) # Init #2 (the spam)
+    pending_after = @cdrom.instance_variable_get(:@pending)
+    assert_equal pending_before.size, pending_after.size,
+                 "spammed Init must not add new pending entries"
+    assert_equal pending_before.first[1], pending_after.first[1],
+                 "spammed Init must not replace the in-flight INT2 (sequence changed)"
+
+    # Tick the remaining half-window: the ORIGINAL INT2 must fire on
+    # schedule — if the spam had reset the timer, this would still be 0.
+    @cdrom.tick(PSX::CDROM::CYCLES_INIT_RESPONSE - half)
+    assert_equal 2, @cdrom.instance_variable_get(:@irq_flags),
+                 "original Init INT2 must complete on its original schedule"
+  end
+
   # OpenBIOS's initiateDMA writes CDROM_REG3 = 0 then = 0x80 to gate the
   # data FIFO before kicking off DMA. If clearing BFRD wipes the sector
   # data, the subsequent DMA reads zeros and the BIOS' filesystem can't

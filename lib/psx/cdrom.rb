@@ -135,7 +135,7 @@ module PSX
       @response = []
       @irq_enable = 0
       @irq_flags = 0
-      @pending = []          # [[delay_cycles, sequence, group, int_type, [bytes...], command_busy], ...]
+      @pending = []          # [[delay_cycles, sequence, group, int_type, [bytes...], command_busy, tag], ...]
       @pending_seq = 0
       @pending_group = 0
       @current_response_group = 0
@@ -415,7 +415,7 @@ module PSX
       s
     end
 
-    def queue_response(delay_cycles, int_type, data)
+    def queue_response(delay_cycles, int_type, data, tag: nil)
       command_busy = delay_cycles.zero?
       @pending_seq += 1
       @pending << [
@@ -424,8 +424,13 @@ module PSX
         @current_response_group,
         int_type,
         data.dup,
-        command_busy
+        command_busy,
+        tag
       ]
+    end
+
+    def init_second_response_pending?
+      @pending.any? { |entry| entry[6] == :init_second }
     end
 
     def clear_sector_buffer
@@ -857,6 +862,14 @@ module PSX
     end
 
     def cmd_init
+      # The retail BIOS license-check spams Init: its poll loop times out
+      # after ~420K cycles and just re-issues the command, while INT2 takes
+      # 4M cycles. Without this guard, each retry's reset() wipes the
+      # in-flight INT2, so it never completes and the BIOS hangs on the
+      # SCEE/SCEA license screen. DuckStation does the same early-return
+      # (see Command::Init handler).
+      return if init_second_response_pending?
+
       # Init resets the drive's FIFOs, mode, and current operation, but
       # NOT the IRQ-enable mask. Real hardware preserves @irq_enable across
       # Init — a full reset(){@irq_enable=0} after BIOS init means subsequent
@@ -880,7 +893,7 @@ module PSX
       @last_subq_valid = saved_last_subq_valid
       @stat = @disc ? DEFAULT_STAT_DISC : DEFAULT_STAT_NO_DISC
       queue_response(0, 3, [@stat])
-      queue_response(CYCLES_INIT_RESPONSE, 2, [@stat])
+      queue_response(CYCLES_INIT_RESPONSE, 2, [@stat], tag: :init_second)
     end
 
     def cmd_mute
