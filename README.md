@@ -22,7 +22,7 @@ every disc to play yet. Think of it as an executable spec for the PS1.
 [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests) cases
 with a `psx.log` reference and the CD-ROM ps1-tests baseline at 3/3.
 
-![Memory Card menu rendered by the BIOS](docs/shell_menu.png)
+![Rage Racer in-engine race, running in PSX-Ruby](docs/rage-racer.png)
 
 ## Install
 
