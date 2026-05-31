@@ -65,16 +65,60 @@ Run `psx --help` for the option list. Keyboard controls (slot 1 digital pad):
 | Space          | Select   |
 | Q / W          | L1 / R1  |
 | E / R          | L2 / R2  |
+| Tab            | Open the in-window settings overlay |
 | F5             | Quicksave to `tmp/quicksave.psxstate` |
 | F6             | Debug snapshot: state + screenshot (`PSX_DEBUG_SNAPSHOT` prefix) |
 | F8             | Quickload from `tmp/quicksave.psxstate` |
-| Escape         | Quit     |
+| Escape         | Quit (or cancel a rebind / close the overlay) |
 
 The BIOS shell idles on the Sony logo until you press Triangle, which opens
-the Memory Card / CD-ROM menu. Set `PSX_QUICKSAVE=path.psxstate` to point
-F5 / F8 elsewhere. `PSX_DEBUG_SNAPSHOT=prefix` controls F6's output
-(defaults to `tmp/debug-snapshot`); each press writes `prefix.psxstate`
-and `prefix.ppm`.
+the Memory Card / CD-ROM menu.
+
+## Configuration
+
+Settings live at `~/.config/psx/config.yml` (override with `PSX_CONFIG=path`
+or `XDG_CONFIG_HOME=...`). A first run with no file uses built-in defaults;
+the file is created on the first rebind in the overlay.
+
+```yaml
+# ~/.config/psx/config.yml
+target_fps: 60
+frameskip: true
+quicksave_path: tmp/quicksave.psxstate
+debug_snapshot_prefix: tmp/debug-snapshot
+keys:
+  cross:    Z
+  circle:   X
+  square:   A
+  triangle: S
+  start:    Return
+  select:   Space
+  l1:       Q
+  r1:       W
+  l2:       E
+  r2:       R
+  up:       Up
+  down:     Down
+  left:     Left
+  right:    Right
+```
+
+Key names are SDL scancode constants — letters `A`..`Z`, `0`..`9`, `Up` /
+`Down` / `Left` / `Right`, `Return`, `Space`, `Tab`, `LShift`, `LCtrl`,
+function keys `F1`..`F12`, etc. `Tab`, `Escape`, and the F5 / F6 / F8
+slots are reserved for the front-end.
+
+The in-window overlay (press **Tab**) shows every binding and current
+path. Use ↑ / ↓ to highlight a button, **Enter** to start a rebind, then
+press the new key — it writes back to the config file immediately and
+takes effect on the next keystroke. **Esc** cancels a rebind or closes
+the overlay. The text overlay needs `sdl2_ttf` and a system monospace
+font; without those, a dimmed banner appears and the rebind machinery
+still works, but the per-row list isn't drawn. On macOS, `brew install
+sdl2_ttf` is enough. Override the font with `PSX_FONT=/path/to/font.ttf`.
+
+`PSX_QUICKSAVE` and `PSX_DEBUG_SNAPSHOT` env vars still override the
+config's path defaults for F5 / F6 / F8 in a single run.
 
 ## Programmatic use
 

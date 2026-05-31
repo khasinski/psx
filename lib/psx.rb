@@ -20,6 +20,7 @@ require_relative "psx/disasm"
 require_relative "psx/display"
 require_relative "psx/audio"
 require_relative "psx/savestate"
+require_relative "psx/config"
 
 module PSX
   class Emulator
@@ -244,8 +245,9 @@ module PSX
     end
 
     # Run with graphical display (threaded: emulation in background)
-    def run_with_display(target_fps: 60, frameskip: true)
-      display = Display.new(title: "PSX-Ruby - Loading BIOS...")
+    def run_with_display(target_fps: 60, frameskip: true, config: nil)
+      config ||= Config.load
+      display = Display.new(title: "PSX-Ruby - Loading BIOS...", config: config)
       @controller_state_proc = -> { display.controller_state }
       render_interval = 1.0 / target_fps
 
@@ -259,10 +261,9 @@ module PSX
 
       puts "Starting emulation with display (threaded)..."
       puts "Note: BIOS takes ~40 seconds to show Sony logo"
-      puts "Controls: Arrow keys=D-pad, Z=Cross, X=Circle, A=Square, S=Triangle"
-      puts "          Enter=Start, Space=Select, Q/W=L1/R1, Escape=Quit"
+      puts "Controls: edit ~/.config/psx/config.yml or press Tab in the window"
       puts "          F5=quicksave, F6=state+screenshot, F8=quickload"
-      puts "          PSX_QUICKSAVE / PSX_DEBUG_SNAPSHOT env vars control output paths"
+      puts "          PSX_QUICKSAVE / PSX_DEBUG_SNAPSHOT env vars override config paths"
       puts ""
 
       # Shared state
@@ -295,8 +296,8 @@ module PSX
       last_render = Time.now
       last_status = Time.now
       last_status_cycles = 0
-      quicksave_path = ENV["PSX_QUICKSAVE"] || "tmp/quicksave.psxstate"
-      debug_snapshot_prefix = ENV["PSX_DEBUG_SNAPSHOT"] || "tmp/debug-snapshot"
+      quicksave_path = ENV["PSX_QUICKSAVE"] || config.quicksave_path
+      debug_snapshot_prefix = ENV["PSX_DEBUG_SNAPSHOT"] || config.debug_snapshot_prefix
       require "fileutils"
       FileUtils.mkdir_p(File.dirname(quicksave_path))
       FileUtils.mkdir_p(File.dirname(debug_snapshot_prefix))

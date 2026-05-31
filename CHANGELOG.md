@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Front-end
+
+- Persistent user config at `~/.config/psx/config.yml` (override via
+  `PSX_CONFIG` / `XDG_CONFIG_HOME`). Covers target FPS, frame skip,
+  quicksave + debug-snapshot paths, and all 14 digital-pad button
+  bindings.
+- In-window settings overlay opened with Tab. Up/Down to navigate the
+  binding list, Enter to start a rebind, the next non-reserved key
+  becomes the new binding and is written back to the config file
+  immediately. Esc cancels a rebind or closes the overlay. Falls back
+  to a dimmed banner when `sdl2_ttf` or a system monospace font isn't
+  available.
+- `PSX_QUICKSAVE` and `PSX_DEBUG_SNAPSHOT` env vars continue to
+  override the config's path defaults for a single run.
+
 ## 0.2.0 — 2026-05-31
 
 ### Game compatibility

@@ -23,19 +23,21 @@ def usage
       -v, --version       Print version and exit
       -h, --help          Show this help
 
-    Controls (keyboard, slot 1 digital pad):
+    Defaults (FPS, frame skip, paths, key bindings) come from
+    ~/.config/psx/config.yml (override with $PSX_CONFIG). Open the
+    in-window settings overlay with Tab.
+
+    Default keyboard mapping (slot 1 digital pad):
       Arrow keys    D-pad
-      Z             Cross (confirm)
-      X             Circle (cancel)
-      A             Square
-      S             Triangle
-      Enter         Start
-      Space         Select
+      Z / X         Cross / Circle
+      A / S         Square / Triangle
+      Enter / Space Start / Select
       Q / W         L1 / R1
       E / R         L2 / R2
-      F5            Save state (PSX_QUICKSAVE, default tmp/quicksave.psxstate)
-      F6            Save debug state+screenshot (PSX_DEBUG_SNAPSHOT prefix)
-      F8            Load state (PSX_QUICKSAVE)
+      Tab           Open settings overlay (rebind keys)
+      F5            Quicksave (PSX_QUICKSAVE overrides)
+      F6            State+screenshot (PSX_DEBUG_SNAPSHOT overrides)
+      F8            Quickload
       Escape        Quit
 
     A BIOS ROM (e.g. SCPH1001.BIN, 512 KB) is required and must be provided
@@ -44,8 +46,9 @@ def usage
   exit 1
 end
 
-target_fps = 60
-frameskip = true
+config = PSX::Config.load
+target_fps = config.target_fps
+frameskip = config.frameskip
 fast_boot = false
 positional = []
 
@@ -87,6 +90,7 @@ puts "Loading BIOS: #{bios_path}"
 puts "Disc: #{disc_path || '(none — shell only)'}"
 puts "Target FPS: #{target_fps}"
 puts "Frame skip: #{frameskip ? 'enabled' : 'disabled'}"
+puts "Config: #{config.path}"
 puts "YJIT: #{defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? 'enabled' : 'disabled'}"
 puts ""
 
@@ -97,7 +101,7 @@ begin
     boot = emu.fast_boot_from_disc
     puts "Fast-boot: loaded #{boot} from #{disc_path}"
   end
-  emu.run_with_display(target_fps: target_fps, frameskip: frameskip)
+  emu.run_with_display(target_fps: target_fps, frameskip: frameskip, config: config)
 rescue Interrupt
   puts "\nInterrupted by user"
 rescue => e
