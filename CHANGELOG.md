@@ -2,11 +2,21 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-05-31
+
 ### Game compatibility
 
-- Boots Rage Racer through the menu and into FMV.
+- Rage Racer (Europe and NTSC) boots through the SCEE/SCEA license
+  screen, the intro FMV, the title screen, and into the in-engine
+  attract / race scene.
+- Ridge Racer (Europe) boots through the BIOS license check to the
+  bootstrap loader and Ridge Racer's own kernel (`CD_init`,
+  `ResetGraph`, `tim_load`).
 - Fix BFRD-toggle bug so the BIOS shell boots discs end-to-end on both
   SCPH1001 and SCPH7502 with no patches.
+- Skip CD-ROM Init when one is already in flight, so the BIOS retail
+  license check's Init spam can't cancel its own pending INT2 (matches
+  DuckStation's `Command::Init` early-return).
 
 ### Disc / CD-ROM
 
@@ -30,11 +40,26 @@
 
 - New MDEC implementation: register surface, quant/IDCT tables, DMA0/1
   ingress + egress, full RLC + dequant + IDCT + YCbCr decoder.
+- DMA1 completion IRQ wired. CD-XA sectors decode and feed the SPU
+  CD-audio path. 24-bit frame VRAM packed as RGB.
+
+### SPU
+
+- ADPCM block decode with Gaussian voice interpolation.
+- Basic voice stepping, key on/off latching, ADSR live registers.
+- Pitch modulation, noise voices, mute control, capture buffers.
+- Fixed/current volume registers and basic volume sweep.
+- DuckStation/Mednafen-style reverb work-buffer processing.
+- CDDA / CD-XA queue mixing into stereo PCM output.
 
 ### Save states
 
-- F5 / F8 save and load from the SDL window, plus a bench harness and a
+- F5 / F8 save and load from the SDL window: full machine round-trip
+  via `Marshal` (CPU + GTE + COP0 + RAM + GPU VRAM + SPU + MDEC +
+  CD-ROM + timers + interrupts), plus a bench harness and a
   round-trip test.
+- F6 captures a save state and a PPM screenshot together under a
+  single `PSX_DEBUG_SNAPSHOT` prefix for bug repro.
 
 ### GPU
 
@@ -81,6 +106,8 @@
 - BIOS shell past the license check and onto the bootstrap loader.
 - Format BIOS printf args in the TTY intercept.
 - Scaffolding for fast-boot patches (no useful patches found yet).
+- `fast_boot_from_disc` skips the BIOS retail boot wait when the
+  cartridge BIOS region and disc region are known and differ.
 
 ### Conformance and tooling
 
@@ -91,6 +118,23 @@
 - Dev scripts: `_psx-bootmap`, `_psx-exe-display`, `_psx-makestate`,
   `ridge-boot` with optional CD-ROM command trace and
   `PSX_START_AT_CYCLES` tap.
+- ps1-tests baseline: `TOTAL 18  OK 18` non-CD-ROM, `TOTAL 3  OK 3`
+  CD-ROM. 462 unit tests, all passing.
+
+### Accuracy pass (CD-ROM, GPU, SPU, MDEC)
+
+A large run matching individual command/timing details against
+DuckStation, including but not limited to: CDROM parameter FIFO
+overflow, command-busy status, pending-command cancellation,
+SetMode speed-change delay, Init reset delay, motor-on response
+timing, GetlocP audio sub-Q, audio-track seeks, ReadT/scan commands,
+CDDA 2x sample stride; GPU 11-bit primitive coordinates, GP0
+rectangle direction, texture modulation rounding, textured-rectangle
+mirroring, flat-primitive dithering, CLUT row wrap, semi-transparent
+line blend, GPUREAD latch preservation across state changes; MDEC
+IDCT precision, RLC end-of-block, 24-bit RGB packing, signed colour
+output; SPU IRQ9 late-check timing, transfer IRQ timing, voice
+force-off, repeat-address write semantics.
 
 ## 0.1.0 — 2026-05-15
 

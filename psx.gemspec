@@ -12,10 +12,13 @@ Gem::Specification.new do |spec|
   spec.description   = <<~DESC
     A work-in-progress PlayStation 1 emulator written entirely in Ruby.
     Implements the MIPS R3000A CPU, GTE, GPU (software rasteriser), DMA,
-    interrupts, timers, CD-ROM stub, SIO0 controller, and a minimal SPU —
-    enough to boot the SCPH1001 BIOS into the Memory Card / CD-ROM shell.
-    Ships an SDL2-backed front-end via the `psx` command. A BIOS image is
-    not included and must be supplied by the user.
+    interrupts, timers, a CD-ROM controller backed by .bin/.cue images,
+    SIO0 controller, MDEC, and an SPU with ADPCM voices plus CDDA/CD-XA
+    mixing. Boots the SCPH1001 BIOS through the PlayStation license
+    screen into real retail discs without patching (Rage Racer, Ridge
+    Racer). Quicksave / quickload + debug snapshot via F5 / F6 / F8.
+    Ships an SDL2-backed front-end via the `psx` command. A BIOS image
+    is not included and must be supplied by the user.
   DESC
   spec.homepage      = "https://github.com/khasinski/psx"
   spec.license       = "MIT"

@@ -5,17 +5,22 @@
 
 A work-in-progress PlayStation 1 emulator written in pure Ruby.
 
-It boots the SCPH1001 BIOS into the **Memory Card / CD-ROM shell**, reads
-`.bin`/`.cue` disc images, and runs real retail discs end-to-end through
-the BIOS license check (no patching). MDEC is wired up through Phase 3
-(RLC + dequant + IDCT + YCbCr). Save states (F5/F8 in the SDL window)
-round-trip the full machine state. SPU audio is still early but now mixes
-basic ADPCM voices plus CDDA/CD-XA through the SPU path. There is no PGXP,
-and many retail games still hit content-specific blockers (FMV codec init,
-timing-sensitive CD paths), so don't expect to play full games yet.
-Think of it as an executable spec for the PS1. 460/460 unit tests,
-18/21 of the [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests)
-cases that have a `psx.log` reference.
+It boots the SCPH1001 BIOS through the **PlayStation license screen**
+into real retail games. **Rage Racer** loads through its intro FMV and
+title screen into the in-engine attract / race scene; **Ridge Racer**
+hands off from the BIOS to its own kernel. `.bin`/`.cue` discs are read
+through a real CD-ROM state machine — no patching. MDEC decodes through
+Phase 3 (RLC + dequant + IDCT + YCbCr). Save states (F5/F6/F8 in the
+SDL window) round-trip the full machine state. SPU audio mixes ADPCM
+voices plus CDDA/CD-XA through the SPU path with basic reverb.
+
+There's no PGXP, ADSR isn't conformance-grade, DMA timing is still
+approximate in places, and many retail games hit content-specific
+blockers (FMV codec init, timing-sensitive CD paths), so don't expect
+every disc to play yet. Think of it as an executable spec for the PS1.
+462/462 unit tests pass, plus 18/21 of the
+[JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests) cases
+with a `psx.log` reference and the CD-ROM ps1-tests baseline at 3/3.
 
 ![Memory Card menu rendered by the BIOS](docs/shell_menu.png)
 
@@ -61,12 +66,15 @@ Run `psx --help` for the option list. Keyboard controls (slot 1 digital pad):
 | Q / W          | L1 / R1  |
 | E / R          | L2 / R2  |
 | F5             | Quicksave to `tmp/quicksave.psxstate` |
+| F6             | Debug snapshot: state + screenshot (`PSX_DEBUG_SNAPSHOT` prefix) |
 | F8             | Quickload from `tmp/quicksave.psxstate` |
 | Escape         | Quit     |
 
 The BIOS shell idles on the Sony logo until you press Triangle, which opens
 the Memory Card / CD-ROM menu. Set `PSX_QUICKSAVE=path.psxstate` to point
-F5 / F8 elsewhere.
+F5 / F8 elsewhere. `PSX_DEBUG_SNAPSHOT=prefix` controls F6's output
+(defaults to `tmp/debug-snapshot`); each press writes `prefix.psxstate`
+and `prefix.ppm`.
 
 ## Programmatic use
 
@@ -206,22 +214,25 @@ What works:
   ingress / egress (Phase 2), real RLC + dequant + IDCT + YCbCr → RGB
   decoder (Phase 3). DMA1 completion IRQ wired. CD-XA sectors decode
   and feed the SPU CD-audio path.
-- Save states: F5 / F8 in the SDL window quicksave / quickload, full
-  machine round-trip via `Marshal` (CPU + GTE + COP0 + RAM + GPU VRAM +
+- Save states: F5 / F8 in the SDL window quicksave / quickload, F6
+  debug snapshot (state + screenshot together), full machine
+  round-trip via `Marshal` (CPU + GTE + COP0 + RAM + GPU VRAM +
   SPU + MDEC + CD-ROM + timers + interrupts).
 - Symmetric upper-RAM mirror (matches real hardware — writes to
   `0x80200000+` alias back to the populated 2 MB chip).
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 460/460 unit tests pass.
+- 462/462 unit tests pass.
 - JaCzekanski/ps1-tests baseline passes for the checked non-CD-ROM
   cases (`TOTAL 18  OK 18  FAIL 0`). CD-ROM ps1-tests are run
   separately with a disc image via `PSX_TEST_DISC` and currently pass
   (`TOTAL 3  OK 3  FAIL 0`).
-- Rage Racer Europe boots through the intro FMV to the title screen,
-  accepts a Start edge on the title screen, and reaches the in-engine
-  attract/race scene in the current smoke tests.
+- Game compatibility: Rage Racer (Europe and NTSC) boots through the
+  intro FMV and title screen into the in-engine attract / race scene
+  in the SDL front-end. Ridge Racer (Europe) hands off from the BIOS
+  bootstrap loader to its own kernel (`CD_init`, `ResetGraph`,
+  `tim_load`).
 
 What doesn't:
 
