@@ -44,13 +44,13 @@ does not ship one — BIOS images are copyrighted.
 ```sh
 psx path/to/SCPH1001.BIN                          # BIOS shell only
 psx path/to/SCPH1001.BIN game.cue                 # with a disc inserted
-psx --fast-boot path/to/SCPH1001.BIN homebrew.bin # skip license check
+psx --fast-boot path/to/SCPH1001.BIN homebrew.cue # boot the disc's PS-EXE directly
 ```
 
-`--fast-boot` skips the BIOS shell and license screen, reads `SYSTEM.CNF`
-+ the PS-EXE straight out of the disc's ISO9660 filesystem, and jumps to
-the EXE's entry point after the BIOS kernel has finished init. Required
-for synthetic / homebrew discs that don't carry a Sony license image.
+`--fast-boot` skips the BIOS shell UI and reads `SYSTEM.CNF` from the
+disc's ISO9660 filesystem. Retail discs still use the BIOS bootstrap path
+when the license check can complete; synthetic / homebrew discs fall back
+to loading the listed PS-EXE after BIOS kernel init.
 
 Run `psx --help` for the option list. Keyboard controls (slot 1 digital pad):
 
@@ -256,8 +256,8 @@ What works:
   INT1 sector delivery
 - ISO9660 reader for SYSTEM.CNF + PS-EXE extraction
 - BIOS shell boots real retail discs end-to-end via the license check,
-  no patching required (`--fast-boot` is still available for synthetic
-  / homebrew discs)
+  no patching required (`--fast-boot` is still available to jump straight
+  to the disc's PS-EXE)
 - SIO0 digital pad (slot 1)
 - SPU: register window read-back, RAM DMA/FIFO transfers, IRQ9 RAM checks,
   ADPCM block decode, Gaussian voice interpolation, basic voice stepping/ADSR,

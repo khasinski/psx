@@ -17,9 +17,9 @@ def usage
     Options:
       -f, --fps N         Target FPS (default: 60)
       -n, --no-frameskip  Disable frame skipping
-          --fast-boot     Skip the BIOS shell + license check; load the
-                          disc's PSX.EXE directly. Required for synthetic
-                          test discs without a valid license image.
+          --fast-boot     Skip the BIOS shell UI and boot the disc's PS-EXE
+                          from SYSTEM.CNF. Retail discs still use the BIOS
+                          bootstrap when the license check can complete.
       -v, --version       Print version and exit
       -h, --help          Show this help
 
