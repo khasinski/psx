@@ -147,6 +147,7 @@ module PSX
       @tracks = tracks
       @total_sectors = tracks.map(&:lba_end).max
       @region_code = nil
+      @file_positions = {}
     end
 
     def region_code
@@ -177,9 +178,7 @@ module PSX
       raise "LBA #{lba} is on audio track #{track.number}" if track.audio?
 
       file_lba = track.file_lba_start + (lba - track.lba_start)
-      offset = file_lba * track.sector_size
-      track.file.seek(offset)
-      data = track.file.read(track.sector_size)
+      data = read_track_sector(track, file_lba)
       raise "short sector at LBA #{lba}" unless data && data.bytesize == track.sector_size
       data
     end
@@ -204,9 +203,7 @@ module PSX
       return nil unless track.audio?
 
       file_lba = track.file_lba_start + (lba - track.lba_start)
-      offset = file_lba * track.sector_size
-      track.file.seek(offset)
-      data = track.file.read(track.sector_size)
+      data = read_track_sector(track, file_lba)
       return nil unless data && data.bytesize == track.sector_size
       data
     end
@@ -291,6 +288,17 @@ module PSX
     end
 
     private
+
+    def read_track_sector(track, file_lba)
+      offset = file_lba * track.sector_size
+      io = track.file
+      if @file_positions[io] != offset
+        io.seek(offset)
+      end
+      data = io.read(track.sector_size)
+      @file_positions[io] = offset + track.sector_size if data
+      data
+    end
 
     def detect_region_code
       region_from_system_area || region_from_boot_serial || :ntsc_u
