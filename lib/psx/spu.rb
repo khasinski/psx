@@ -765,35 +765,44 @@ module PSX
       @reverb_downsample_buffer[1][@reverb_resample_position] = right_in
       @reverb_downsample_buffer[1][@reverb_resample_position | 0x40] = right_in
 
-      out = [0, 0]
-
       if @reverb_resample_position.odd?
-        downsampled = 2.times.map { |channel| reverb_downsample(channel) }
-        2.times do |channel|
-          process_reverb_channel(channel, downsampled[channel])
-          src = @reverb_upsample_buffer[channel]
-          base = (((@reverb_resample_position >> 1) - 19) & 0x1F)
-          out[channel] = clamp16(REVERB_RESAMPLE_COEFF.each_with_index.sum { |coef, i| coef * src[base + i] } >> 14)
-        end
+        downsampled_left = reverb_downsample(0)
+        downsampled_right = reverb_downsample(1)
+        process_reverb_channel(0, downsampled_left)
+        process_reverb_channel(1, downsampled_right)
+        base = (((@reverb_resample_position >> 1) - 19) & 0x1F)
+        out_left = clamp16(reverb_resample_sum(@reverb_upsample_buffer[0], base) >> 14)
+        out_right = clamp16(reverb_resample_sum(@reverb_upsample_buffer[1], base) >> 14)
 
         @reverb_current_address = (@reverb_current_address + 1) & ((RAM_SIZE - 1) / 2)
         @reverb_current_address = reverb_base_address if @reverb_current_address.zero?
       else
         index = (((@reverb_resample_position >> 1) - 19) & 0x1F) + 9
-        out = [@reverb_upsample_buffer[0][index], @reverb_upsample_buffer[1][index]]
+        out_left = @reverb_upsample_buffer[0][index]
+        out_right = @reverb_upsample_buffer[1][index]
       end
       @reverb_resample_position = (@reverb_resample_position + 1) & 0x3F
       @last_reverb_output = [
-        apply_volume(out[0], signed16(@reverb_left_volume)),
-        apply_volume(out[1], signed16(@reverb_right_volume)),
+        apply_volume(out_left, signed16(@reverb_left_volume)),
+        apply_volume(out_right, signed16(@reverb_right_volume)),
       ]
     end
 
     def reverb_downsample(channel)
       src = @reverb_downsample_buffer[channel]
       base = (@reverb_resample_position - 38) & 0x3F
-      sum = REVERB_RESAMPLE_COEFF.each_with_index.sum { |coef, i| coef * src[base + i] }
+      sum = reverb_resample_sum(src, base)
       clamp16((sum + (0x4000 * src[base + 19])) >> 15)
+    end
+
+    def reverb_resample_sum(src, base)
+      coeff = REVERB_RESAMPLE_COEFF
+      sum = 0
+      i = -1
+      while (i += 1) < 20
+        sum += coeff[i] * src[base + i]
+      end
+      sum
     end
 
     def process_reverb_channel(channel, downsampled)
