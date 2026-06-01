@@ -53,6 +53,19 @@ module PSX
       [3, -1, 2, -2]
     ].freeze
     DITHER_OFFSETS = DITHER_MATRIX.flatten.freeze
+    DITHER_128_TO_5BIT = begin
+      table = Array.new(16 * 32)
+      DITHER_OFFSETS.each_with_index do |offset, dither_idx|
+        base = dither_idx << 5
+        32.times do |channel|
+          value = ((channel << 3) + offset) >> 3
+          value = 0 if value < 0
+          value = 0x1F if value > 0x1F
+          table[base | channel] = value
+        end
+      end
+      table.freeze
+    end.freeze
 
     attr_reader :vram
 
@@ -1569,6 +1582,20 @@ module PSX
       clut_y = (clut >> 6) & 0x1FF
       clut_cache = texture_clut_cache(clut_x, clut_y, tex_depth)
 
+      if tex_depth == 0 && !raw_texture && !semi &&
+         !@check_mask_bit && !@set_mask_bit && (@status & STAT_DITHER) != 0 &&
+         c0r == 128 && c0g == 128 && c0b == 128 &&
+         c1r == 128 && c1g == 128 && c1b == 128 &&
+         c2r == 128 && c2g == 128 && c2b == 128
+        draw_textured_triangle_4bit_128_dithered(
+          x0, y0, u0, v0_tex,
+          x1, y1, u1, v1_tex_in,
+          x2, y2, u2, v2_tex_in,
+          clut_cache, tex_page_x, tex_page_y
+        )
+        return
+      end
+
       if y0 > y1
         x0, x1 = x1, x0; y0, y1 = y1, y0
         u0, u1 = u1, u0; v0_tex, v1_tex_in = v1_tex_in, v0_tex
@@ -1676,62 +1703,195 @@ module PSX
         step_b = (db * inv_span * 65_536).to_i
 
         x = x_start - 1
+        if tex_depth == 0 && !raw_texture && !cmb && !smb && stp_mode < 0
+          dither_offsets = DITHER_OFFSETS
+          while (x += 1) <= x_end
+            u = (((cur_u >> 16) & 0xFF) & tex_u_mask) | tex_u_offset
+            v_coord = (((cur_v >> 16) & 0xFF) & tex_v_mask) | tex_v_offset
+            word = vram[(tex_page_y + v_coord) * VRAM_WIDTH + tex_page_x + (u >> 2)]
+            texel = clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
+
+            if texel != 0
+              br = cur_r >> 16; br = 0 if br < 0; br = 255 if br > 255
+              bg_c = cur_g >> 16; bg_c = 0 if bg_c < 0; bg_c = 255 if bg_c > 255
+              bb = cur_b >> 16; bb = 0 if bb < 0; bb = 255 if bb > 255
+              tr = texel & 0x001F
+              tg = (texel & 0x03E0) >> 5
+              tb = (texel & 0x7C00) >> 10
+              offset = use_dither ? dither_offsets[dither_y | (x & 3)] : 0
+              fr5 = (((tr * br) >> 4) + offset) >> 3
+              fg5 = (((tg * bg_c) >> 4) + offset) >> 3
+              fb5 = (((tb * bb) >> 4) + offset) >> 3
+              fr5 = 0 if fr5 < 0; fr5 = 0x1F if fr5 > 0x1F
+              fg5 = 0 if fg5 < 0; fg5 = 0x1F if fg5 > 0x1F
+              fb5 = 0 if fb5 < 0; fb5 = 0x1F if fb5 > 0x1F
+              vram[row + x] = fr5 | (fg5 << 5) | (fb5 << 10) | (texel & 0x8000)
+            end
+
+            cur_u += step_u
+            cur_v += step_v
+            cur_r += step_r
+            cur_g += step_g
+            cur_b += step_b
+          end
+        else
+          while (x += 1) <= x_end
+            u = (((cur_u >> 16) & 0xFF) & tex_u_mask) | tex_u_offset
+            v_coord = (((cur_v >> 16) & 0xFF) & tex_v_mask) | tex_v_offset
+
+            texel = case tex_depth
+                    when 0
+                      word = vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + (u >> 2)) % VRAM_WIDTH)] || 0
+                      clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
+                    when 1
+                      word = vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + (u >> 1)) % VRAM_WIDTH)] || 0
+                      clut_cache[(word >> ((u & 1) << 3)) & 0xFF]
+                    else
+                      vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + u) % VRAM_WIDTH)] || 0
+                    end
+
+            if texel != 0
+              idx = row + x
+              bg = vram[idx]
+
+              unless cmb && (bg & 0x8000) != 0
+                if raw_texture
+                  fr5 = texel & 0x1F
+                  fg5 = (texel >> 5) & 0x1F
+                  fb5 = (texel >> 10) & 0x1F
+                else
+                  br = cur_r >> 16; br = 0 if br < 0; br = 255 if br > 255
+                  bg_c = cur_g >> 16; bg_c = 0 if bg_c < 0; bg_c = 255 if bg_c > 255
+                  bb = cur_b >> 16; bb = 0 if bb < 0; bb = 255 if bb > 255
+                  tr = (texel & 0x001F)
+                  tg = (texel & 0x03E0) >> 5
+                  tb = (texel & 0x7C00) >> 10
+                  offset = use_dither ? DITHER_OFFSETS[dither_y | (x & 3)] : 0
+                  fr5 = (((tr * br) >> 4) + offset) >> 3
+                  fg5 = (((tg * bg_c) >> 4) + offset) >> 3
+                  fb5 = (((tb * bb) >> 4) + offset) >> 3
+                  fr5 = 0 if fr5 < 0; fr5 = 0x1F if fr5 > 0x1F
+                  fg5 = 0 if fg5 < 0; fg5 = 0x1F if fg5 > 0x1F
+                  fb5 = 0 if fb5 < 0; fb5 = 0x1F if fb5 > 0x1F
+                end
+
+                if stp_mode >= 0 && (texel & 0x8000) != 0
+                  fr5, fg5, fb5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
+                end
+
+                out = fr5 | (fg5 << 5) | (fb5 << 10)
+                out |= texel & 0x8000
+                out |= 0x8000 if smb
+                vram[idx] = out
+              end
+            end
+
+            cur_u += step_u
+            cur_v += step_v
+            cur_r += step_r
+            cur_g += step_g
+            cur_b += step_b
+          end
+        end
+      end
+    end
+
+    def draw_textured_triangle_4bit_128_dithered(x0, y0, u0, v0_tex,
+                                                 x1, y1, u1, v1_tex_in,
+                                                 x2, y2, u2, v2_tex_in,
+                                                 clut_cache, tex_page_x, tex_page_y)
+      if y0 > y1
+        x0, x1 = x1, x0; y0, y1 = y1, y0
+        u0, u1 = u1, u0; v0_tex, v1_tex_in = v1_tex_in, v0_tex
+      end
+      if y1 > y2
+        x1, x2 = x2, x1; y1, y2 = y2, y1
+        u1, u2 = u2, u1; v1_tex_in, v2_tex_in = v2_tex_in, v1_tex_in
+      end
+      if y0 > y1
+        x0, x1 = x1, x0; y0, y1 = y1, y0
+        u0, u1 = u1, u0; v0_tex, v1_tex_in = v1_tex_in, v0_tex
+      end
+
+      return if y2 == y0
+
+      vx0 = x0; vy0 = y0; vu0 = u0; vv0 = v0_tex
+      vx1 = x1; vy1 = y1; vu1 = u1; vv1 = v1_tex_in
+      vx2 = x2; vy2 = y2; vu2 = u2; vv2 = v2_tex_in
+
+      y_lo = vy0.to_i
+      y_hi = vy2.to_i
+      y_lo = @draw_area_top    if y_lo < @draw_area_top
+      y_hi = @draw_area_bottom if y_hi > @draw_area_bottom
+      y_lo = 0                 if y_lo < 0
+      y_hi = VRAM_HEIGHT - 1   if y_hi > VRAM_HEIGHT - 1
+
+      vram = @vram
+      dither_table = DITHER_128_TO_5BIT
+      tex_u_mask = ~(@texture_window_mask_x * 8)
+      tex_v_mask = ~(@texture_window_mask_y * 8)
+      tex_u_offset = (@texture_window_offset_x & @texture_window_mask_x) * 8
+      tex_v_offset = (@texture_window_offset_y & @texture_window_mask_y) * 8
+
+      y = y_lo - 1
+      while (y += 1) <= y_hi
+        if y < vy1
+          next if vy1 == vy0
+          t1_interp = (y - vy0).to_f / (vy1 - vy0)
+          sx1 = vx0 + (vx1 - vx0) * t1_interp
+          su1 = vu0 + (vu1 - vu0) * t1_interp
+          sv1 = vv0 + (vv1 - vv0) * t1_interp
+        else
+          next if vy2 == vy1
+          t1_interp = (y - vy1).to_f / (vy2 - vy1)
+          sx1 = vx1 + (vx2 - vx1) * t1_interp
+          su1 = vu1 + (vu2 - vu1) * t1_interp
+          sv1 = vv1 + (vv2 - vv1) * t1_interp
+        end
+
+        t2_interp = (y - vy0).to_f / (vy2 - vy0)
+        sx2 = vx0 + (vx2 - vx0) * t2_interp
+        su2 = vu0 + (vu2 - vu0) * t2_interp
+        sv2 = vv0 + (vv2 - vv0) * t2_interp
+
+        if sx1 > sx2
+          sx1, sx2 = sx2, sx1
+          su1, su2 = su2, su1
+          sv1, sv2 = sv2, sv1
+        end
+
+        x_start = [sx1.ceil, @draw_area_left].max
+        x_end = [sx2.floor, @draw_area_right].min
+        x_span = sx2 - sx1
+        inv_span = x_span > 0 ? 1.0 / x_span : 0
+        du = su2 - su1
+        dv = sv2 - sv1
+        row = y * VRAM_WIDTH
+        dither_y = (y & 3) << 2
+
+        t = (x_start - sx1) * inv_span
+        cur_u = ((su1 + du * t) * 65_536).to_i
+        cur_v = ((sv1 + dv * t) * 65_536).to_i
+        step_u = (du * inv_span * 65_536).to_i
+        step_v = (dv * inv_span * 65_536).to_i
+
+        x = x_start - 1
         while (x += 1) <= x_end
           u = (((cur_u >> 16) & 0xFF) & tex_u_mask) | tex_u_offset
           v_coord = (((cur_v >> 16) & 0xFF) & tex_v_mask) | tex_v_offset
-
-          texel = case tex_depth
-                  when 0
-                    word = vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + (u >> 2)) % VRAM_WIDTH)] || 0
-                    clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
-                  when 1
-                    word = vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + (u >> 1)) % VRAM_WIDTH)] || 0
-                    clut_cache[(word >> ((u & 1) << 3)) & 0xFF]
-                  else
-                    vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + u) % VRAM_WIDTH)] || 0
-                  end
+          word = vram[(tex_page_y + v_coord) * VRAM_WIDTH + tex_page_x + (u >> 2)]
+          texel = clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
 
           if texel != 0
-            idx = row + x
-            bg = vram[idx]
-
-            unless cmb && (bg & 0x8000) != 0
-              if raw_texture
-                fr5 = texel & 0x1F
-                fg5 = (texel >> 5) & 0x1F
-                fb5 = (texel >> 10) & 0x1F
-              else
-                br = cur_r >> 16; br = 0 if br < 0; br = 255 if br > 255
-                bg_c = cur_g >> 16; bg_c = 0 if bg_c < 0; bg_c = 255 if bg_c > 255
-                bb = cur_b >> 16; bb = 0 if bb < 0; bb = 255 if bb > 255
-                tr = (texel & 0x001F)
-                tg = (texel & 0x03E0) >> 5
-                tb = (texel & 0x7C00) >> 10
-                offset = use_dither ? DITHER_OFFSETS[dither_y | (x & 3)] : 0
-                fr5 = (((tr * br) >> 4) + offset) >> 3
-                fg5 = (((tg * bg_c) >> 4) + offset) >> 3
-                fb5 = (((tb * bb) >> 4) + offset) >> 3
-                fr5 = 0 if fr5 < 0; fr5 = 0x1F if fr5 > 0x1F
-                fg5 = 0 if fg5 < 0; fg5 = 0x1F if fg5 > 0x1F
-                fb5 = 0 if fb5 < 0; fb5 = 0x1F if fb5 > 0x1F
-              end
-
-              if stp_mode >= 0 && (texel & 0x8000) != 0
-                fr5, fg5, fb5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
-              end
-
-              out = fr5 | (fg5 << 5) | (fb5 << 10)
-              out |= texel & 0x8000
-              out |= 0x8000 if smb
-              vram[idx] = out
-            end
+            table_base = (dither_y | (x & 3)) << 5
+            fr5 = dither_table[table_base | (texel & 0x001F)]
+            fg5 = dither_table[table_base | ((texel & 0x03E0) >> 5)]
+            fb5 = dither_table[table_base | ((texel & 0x7C00) >> 10)]
+            vram[row + x] = fr5 | (fg5 << 5) | (fb5 << 10) | (texel & 0x8000)
           end
 
           cur_u += step_u
           cur_v += step_v
-          cur_r += step_r
-          cur_g += step_g
-          cur_b += step_b
         end
       end
     end
