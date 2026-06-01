@@ -22,8 +22,6 @@ module PSX
     RAGE_STREAM_QUEUE_BASE_PTR = 0x801E_8AAC
     RAGE_STREAM_DMA_INDEX = 0x801E_6C84
     RAGE_STREAM_QUEUE_ENTRY_SIZE = 32
-    RIDGE_ATTRACT_WAIT_LOOP = 0x8004_F2EC
-    RIDGE_ATTRACT_FRAME_COUNTER = 0x8007_E574
 
     attr_reader :pc, :regs, :hi, :lo, :memory, :cop0, :gte, :step_cycles
     attr_accessor :tty_handler
@@ -512,58 +510,7 @@ module PSX
       end
     end
 
-    def step_compiled_block
-      return nil unless @pc == RIDGE_ATTRACT_WAIT_LOOP &&
-                        !@memory.cache_isolated &&
-                        !@next_in_delay_slot &&
-                        @load_delay_reg == 0 &&
-                        @load_delay_commit_reg == 0 &&
-                        @regs[3] == 0xFFFF_FFFF
-
-      step_ridge_attract_wait_iteration
-    end
-
     private
-
-    def step_ridge_attract_wait_iteration
-      sp_slot = (@regs[29] + 16) & 0xFFFF_FFFF
-      return nil if (sp_slot & 3) != 0
-
-      v0 = @memory.read32(sp_slot)
-      v0 = (v0 - 1) & 0xFFFF_FFFF
-      @memory.write32(sp_slot, v0)
-      v0 = @memory.read32(sp_slot)
-
-      if v0 == @regs[3]
-        @regs[2] = v0
-        @pc = 0x8004_F30C
-        @next_pc = 0x8004_F310
-        @branch_target = nil
-        @next_in_delay_slot = false
-        @step_cycles = 8
-        return 8
-      end
-
-      v0 = @memory.read32(RIDGE_ATTRACT_FRAME_COUNTER)
-      a0 = @regs[4]
-      sv0 = v0
-      sv0 -= 0x1_0000_0000 if (sv0 & 0x8000_0000) != 0
-      sa0 = a0
-      sa0 -= 0x1_0000_0000 if (sa0 & 0x8000_0000) != 0
-      @regs[2] = sv0 < sa0 ? 1 : 0
-
-      if @regs[2] != 0
-        @pc = RIDGE_ATTRACT_WAIT_LOOP
-        @next_pc = RIDGE_ATTRACT_WAIT_LOOP + 4
-      else
-        @pc = 0x8004_F350
-        @next_pc = 0x8004_F354
-      end
-      @branch_target = nil
-      @next_in_delay_slot = false
-      @step_cycles = 21
-      14
-    end
 
     def exception_vector_unusable?
       first = @memory.read32(0x8000_0080)

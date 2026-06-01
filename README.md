@@ -132,10 +132,6 @@ This does not replace the emulated PSX GPU rasterizer yet; it only makes the
 host GPU handle the final RGBA frame presentation. If OpenGL is unavailable,
 the front-end falls back to SDL.
 
-For CPU performance experiments, `PSX_CPU_BLOCKS=1` enables narrow
-Ridge Racer hot-loop superinstructions. This is optional and game-specific;
-leave it off for the default interpreter path.
-
 ## Programmatic use
 
 ```ruby

@@ -183,7 +183,6 @@ module PSX
       gpu = @gpu
       spu = @spu
       remaining = steps
-      cpu_blocks = ENV["PSX_CPU_BLOCKS"] == "1"
 
       sio0 = @sio0
       dma = @dma
@@ -191,13 +190,8 @@ module PSX
       while remaining > 0
         batch_cycles = 0
         while batch_cycles < 64 && remaining > 0
-          if cpu_blocks && cpu.pc == CPU::RIDGE_ATTRACT_WAIT_LOOP && (used = cpu.step_compiled_block)
-            remaining -= used
-            batch_cycles += cpu.step_cycles
-          else
-            remaining -= 1
-            batch_cycles += cpu.step
-          end
+          remaining -= 1
+          batch_cycles += cpu.step
         end
 
         cycle_count += batch_cycles
