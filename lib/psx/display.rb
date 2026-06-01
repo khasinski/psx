@@ -51,21 +51,169 @@ module PSX
       "C:/Windows/Fonts/consola.ttf"
     ].compact.freeze
 
-    def initialize(title: "PSX-Ruby", config: nil)
+    GL_PRESENTER_LOAD_ERROR = begin
+      require "ffi"
+
+      class GLPresenter
+        extend FFI::Library
+
+        ffi_lib [
+          "/System/Library/Frameworks/OpenGL.framework/OpenGL",
+          "GL",
+          "libGL.so.1"
+        ]
+
+      GL_COLOR_BUFFER_BIT = 0x0000_4000
+      GL_TEXTURE_2D = 0x0DE1
+      GL_RGBA = 0x1908
+      GL_UNSIGNED_BYTE = 0x1401
+      GL_TEXTURE_MIN_FILTER = 0x2801
+      GL_TEXTURE_MAG_FILTER = 0x2800
+      GL_TEXTURE_ENV = 0x2300
+      GL_TEXTURE_ENV_MODE = 0x2200
+      GL_REPLACE = 0x1E01
+      GL_NEAREST = 0x2600
+      GL_UNPACK_ALIGNMENT = 0x0CF5
+      GL_PROJECTION = 0x1701
+      GL_MODELVIEW = 0x1700
+      GL_QUADS = 0x0007
+      GL_DEPTH_TEST = 0x0B71
+      GL_CULL_FACE = 0x0B44
+
+      attach_function :glViewport, %i[int int int int], :void
+      attach_function :glMatrixMode, %i[uint], :void
+      attach_function :glLoadIdentity, [], :void
+      attach_function :glOrtho, %i[double double double double double double], :void
+      attach_function :glEnable, %i[uint], :void
+      attach_function :glDisable, %i[uint], :void
+      attach_function :glClearColor, %i[float float float float], :void
+      attach_function :glClear, %i[uint], :void
+      attach_function :glGenTextures, %i[int pointer], :void
+      attach_function :glDeleteTextures, %i[int pointer], :void
+      attach_function :glBindTexture, %i[uint uint], :void
+      attach_function :glTexParameteri, %i[uint uint int], :void
+      attach_function :glTexEnvi, %i[uint uint int], :void
+      attach_function :glPixelStorei, %i[uint int], :void
+      attach_function :glTexImage2D, %i[uint int int int int int uint uint pointer], :void
+      attach_function :glTexSubImage2D, %i[uint int int int int int uint uint pointer], :void
+      attach_function :glColor4f, %i[float float float float], :void
+      attach_function :glBegin, %i[uint], :void
+      attach_function :glEnd, [], :void
+      attach_function :glTexCoord2f, %i[float float], :void
+      attach_function :glVertex2f, %i[float float], :void
+
+        def initialize(window, width, height)
+          @window = window
+          @width = width
+          @height = height
+          verbose = $VERBOSE
+          $VERBOSE = nil
+          begin
+            @context = SDL2::GL::Context.create(window)
+          ensure
+            $VERBOSE = verbose
+          end
+          @context.make_current(window)
+          SDL2::GL.swap_interval = 0
+
+          tex_ptr = FFI::MemoryPointer.new(:uint, 1)
+          self.class.glGenTextures(1, tex_ptr)
+          @texture_id = tex_ptr.read_uint
+          self.class.glBindTexture(GL_TEXTURE_2D, @texture_id)
+          self.class.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+          self.class.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+          self.class.glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE)
+          self.class.glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+          self.class.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+        end
+
+        def present(rgba, width, height)
+          resize_texture(width, height) if width != @width || height != @height
+          self.class.glBindTexture(GL_TEXTURE_2D, @texture_id)
+          self.class.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba)
+
+          drawable_w, drawable_h = @window.gl_drawable_size
+          self.class.glViewport(0, 0, drawable_w, drawable_h)
+          self.class.glMatrixMode(GL_PROJECTION)
+          self.class.glLoadIdentity
+          self.class.glOrtho(0.0, 1.0, 1.0, 0.0, -1.0, 1.0)
+          self.class.glMatrixMode(GL_MODELVIEW)
+          self.class.glLoadIdentity
+          self.class.glClearColor(0.0, 0.0, 0.0, 1.0)
+          self.class.glClear(GL_COLOR_BUFFER_BIT)
+          self.class.glDisable(GL_DEPTH_TEST)
+          self.class.glDisable(GL_CULL_FACE)
+          self.class.glEnable(GL_TEXTURE_2D)
+          self.class.glColor4f(1.0, 1.0, 1.0, 1.0)
+
+          self.class.glBegin(GL_QUADS)
+          self.class.glTexCoord2f(0.0, 0.0); self.class.glVertex2f(0.0, 0.0)
+          self.class.glTexCoord2f(1.0, 0.0); self.class.glVertex2f(1.0, 0.0)
+          self.class.glTexCoord2f(1.0, 1.0); self.class.glVertex2f(1.0, 1.0)
+          self.class.glTexCoord2f(0.0, 1.0); self.class.glVertex2f(0.0, 1.0)
+          self.class.glEnd
+
+          @window.gl_swap
+        end
+
+        def destroy
+          if @texture_id
+            tex_ptr = FFI::MemoryPointer.new(:uint, 1)
+            tex_ptr.write_uint(@texture_id)
+            self.class.glDeleteTextures(1, tex_ptr)
+            @texture_id = nil
+          end
+          @context&.destroy
+          @context = nil
+        end
+
+        private
+
+        def resize_texture(width, height)
+          @width = width
+          @height = height
+          self.class.glBindTexture(GL_TEXTURE_2D, @texture_id)
+          self.class.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+        end
+      end
+
+      nil
+    rescue LoadError, FFI::LoadError => e
+      remove_const(:GLPresenter) if const_defined?(:GLPresenter, false)
+      e
+    end
+
+    def initialize(title: "PSX-Ruby", config: nil, renderer: nil)
       SDL2.init(SDL2::INIT_VIDEO)
 
       @config = config
+      @renderer_backend = (renderer || ENV["PSX_DISPLAY_RENDERER"] || "sdl").downcase
+      window_flags = @renderer_backend == "gl" ? SDL2::Window::Flags::OPENGL : 0
       @window = SDL2::Window.create(
         title,
         SDL2::Window::POS_CENTERED,
         SDL2::Window::POS_CENTERED,
         WIDTH * SCALE,
         HEIGHT * SCALE,
-        0
+        window_flags
       )
 
-      @renderer = @window.create_renderer(-1, SDL2::Renderer::Flags::ACCELERATED)
-      @renderer.draw_blend_mode = SDL2::BlendMode::BLEND
+      if @renderer_backend == "gl"
+        if GL_PRESENTER_LOAD_ERROR
+          warn "OpenGL presenter unavailable: #{GL_PRESENTER_LOAD_ERROR.message}; falling back to SDL"
+          @renderer_backend = "sdl"
+        else
+          @gl_presenter = GLPresenter.new(@window, WIDTH, HEIGHT)
+          @renderer = nil
+        end
+      end
+
+      if @renderer_backend == "sdl"
+        @renderer = @window.create_renderer(-1, SDL2::Renderer::Flags::ACCELERATED)
+        @renderer.draw_blend_mode = SDL2::BlendMode::BLEND
+      else
+        @renderer = nil
+      end
 
       # Input state
       @quit_requested = false
@@ -84,7 +232,7 @@ module PSX
 
       # Try to bring up SDL_ttf for the overlay. Failure is non-fatal —
       # we fall back to a single-row window-title overlay.
-      @font = try_open_font
+      @font = @renderer ? try_open_font : nil
 
       # Performance tracking
       @frame_count = 0
@@ -103,13 +251,9 @@ module PSX
 
       rgba = framebuffer[:rgba]
 
-      if rgba && !@has_rendered_content
-        has_content = rgba.getbyte(0) != 0 || rgba.getbyte(rgba.bytesize / 2) != 0
-        @has_rendered_content = true if has_content
-      end
-
-      if rgba && @has_rendered_content
+      if rgba
         @rgba_buffer = rgba
+        @has_rendered_content = true
       else
         buffer_size = width * height * 4
         if @loading_screen_size != buffer_size
@@ -129,25 +273,29 @@ module PSX
         @rgba_buffer = @loading_screen
       end
 
-      surface = SDL2::Surface.from_string(
-        @rgba_buffer,
-        width,
-        height,
-        32,
-        width * 4,
-        0x000000FF,
-        0x0000FF00,
-        0x00FF0000,
-        0xFF000000
-      )
+      if @gl_presenter
+        @gl_presenter.present(@rgba_buffer, width, height)
+      else
+        surface = SDL2::Surface.from_string(
+          @rgba_buffer,
+          width,
+          height,
+          32,
+          width * 4,
+          0x000000FF,
+          0x0000FF00,
+          0x00FF0000,
+          0xFF000000
+        )
 
-      @texture&.destroy
-      @texture = @renderer.create_texture_from(surface)
-      surface.destroy
+        @texture&.destroy
+        @texture = @renderer.create_texture_from(surface)
+        surface.destroy
 
-      @renderer.copy(@texture, nil, nil)
-      draw_overlay if @overlay_mode
-      @renderer.present
+        @renderer.copy(@texture, nil, nil)
+        draw_overlay if @overlay_mode
+        @renderer.present
+      end
 
       @frame_count += 1
       @total_frames = (@total_frames || 0) + 1
@@ -212,8 +360,9 @@ module PSX
 
     def close
       @texture&.destroy
+      @gl_presenter&.destroy
       @font&.destroy
-      @renderer.destroy
+      @renderer&.destroy
       @window.destroy
     end
 

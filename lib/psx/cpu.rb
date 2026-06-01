@@ -92,7 +92,7 @@ module PSX
       next_pc = @next_pc
       @current_pc = pc
 
-      if skip_rage_incomplete_cdrom_dma_callback?(pc)
+      if pc == RAGE_CDROM_DMA_CALLBACK && skip_rage_incomplete_cdrom_dma_callback?
         self.pc = @regs[31]
         return @step_cycles
       end
@@ -428,9 +428,7 @@ module PSX
       end
     end
 
-    def skip_rage_incomplete_cdrom_dma_callback?(pc)
-      return false unless pc == RAGE_CDROM_DMA_CALLBACK
-
+    def skip_rage_incomplete_cdrom_dma_callback?
       cdrom = @memory.cdrom
       return false unless cdrom &&
                           cdrom.instance_variable_get(:@whole_sector) &&

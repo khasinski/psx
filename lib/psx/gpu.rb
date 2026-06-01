@@ -52,6 +52,7 @@ module PSX
       [-3, 1, -4, 0],
       [3, -1, 2, -2]
     ].freeze
+    DITHER_OFFSETS = DITHER_MATRIX.flatten.freeze
 
     attr_reader :vram
 
@@ -468,6 +469,86 @@ module PSX
       raw_texture = (cmd & 0x01) != 0
 
       vertices = quad ? 4 : 3
+
+      if textured
+        idx = 0
+
+        c = @cmd_buffer[idx]
+        r0 = c & 0xFF; g0 = (c >> 8) & 0xFF; b0 = (c >> 16) & 0xFF
+        idx += 1
+        pos = @cmd_buffer[idx]
+        x0 = gpu_vertex_coord(pos) + @draw_offset_x
+        y0 = gpu_vertex_coord(pos >> 16) + @draw_offset_y
+        idx += 1
+        tc = @cmd_buffer[idx]
+        u0 = tc & 0xFF; v0 = (tc >> 8) & 0xFF; clut = (tc >> 16) & 0xFFFF
+        idx += 1
+
+        if gouraud
+          c = @cmd_buffer[idx]
+          r1 = c & 0xFF; g1 = (c >> 8) & 0xFF; b1 = (c >> 16) & 0xFF
+          idx += 1
+        else
+          r1 = r0; g1 = g0; b1 = b0
+        end
+        pos = @cmd_buffer[idx]
+        x1 = gpu_vertex_coord(pos) + @draw_offset_x
+        y1 = gpu_vertex_coord(pos >> 16) + @draw_offset_y
+        idx += 1
+        tc = @cmd_buffer[idx]
+        u1 = tc & 0xFF; v1 = (tc >> 8) & 0xFF; tpage = (tc >> 16) & 0xFFFF
+        idx += 1
+
+        if gouraud
+          c = @cmd_buffer[idx]
+          r2 = c & 0xFF; g2 = (c >> 8) & 0xFF; b2 = (c >> 16) & 0xFF
+          idx += 1
+        else
+          r2 = r0; g2 = g0; b2 = b0
+        end
+        pos = @cmd_buffer[idx]
+        x2 = gpu_vertex_coord(pos) + @draw_offset_x
+        y2 = gpu_vertex_coord(pos >> 16) + @draw_offset_y
+        idx += 1
+        tc = @cmd_buffer[idx]
+        u2 = tc & 0xFF; v2 = (tc >> 8) & 0xFF
+        idx += 1
+
+        tex_page_x = (tpage & 0x0F) * 64
+        tex_page_y = ((tpage >> 4) & 0x01) * 256
+        tex_depth = (tpage >> 7) & 0x03
+        apply_texture_page(tpage, preserve_draw_mode_bits: true)
+
+        draw_textured_triangle(x0, y0, u0, v0, r0, g0, b0,
+                               x1, y1, u1, v1, r1, g1, b1,
+                               x2, y2, u2, v2, r2, g2, b2,
+                               clut, tex_page_x, tex_page_y, tex_depth,
+                               raw_texture, semi_transparent)
+
+        if quad
+          if gouraud
+            c = @cmd_buffer[idx]
+            r3 = c & 0xFF; g3 = (c >> 8) & 0xFF; b3 = (c >> 16) & 0xFF
+            idx += 1
+          else
+            r3 = r0; g3 = g0; b3 = b0
+          end
+          pos = @cmd_buffer[idx]
+          x3 = gpu_vertex_coord(pos) + @draw_offset_x
+          y3 = gpu_vertex_coord(pos >> 16) + @draw_offset_y
+          idx += 1
+          tc = @cmd_buffer[idx]
+          u3 = tc & 0xFF; v3 = (tc >> 8) & 0xFF
+
+          draw_textured_triangle(x1, y1, u1, v1, r1, g1, b1,
+                                 x2, y2, u2, v2, r2, g2, b2,
+                                 x3, y3, u3, v3, r3, g3, b3,
+                                 clut, tex_page_x, tex_page_y, tex_depth,
+                                 raw_texture, semi_transparent)
+        end
+
+        return
+      end
 
       # Parse vertices
       points = []
@@ -1079,17 +1160,32 @@ module PSX
       cmb = @check_mask_bit; smb = @set_mask_bit
       vram = @vram
       stp_mode = semi ? @semi_transparency : -1
+      use_dither = (@status & STAT_DITHER) != 0
+      tex_u_mask = ~(@texture_window_mask_x * 8)
+      tex_v_mask = ~(@texture_window_mask_y * 8)
+      tex_u_offset = (@texture_window_offset_x & @texture_window_mask_x) * 8
+      tex_v_offset = (@texture_window_offset_y & @texture_window_mask_y) * 8
       h.times do |dy|
         py = y + dy
         next if py < at || py > ab || py < 0 || py >= VRAM_HEIGHT
         row = py * VRAM_WIDTH
+        dither_y = (py & 3) << 2
         w.times do |dx|
           px = x + dx
           next if px < al || px > ar || px < 0 || px >= VRAM_WIDTH
 
-          u = (tex_u + dx) & 0xFF
-          v = (tex_v + dy) & 0xFF
-          texel = sample_texture(u, v, clut_x, clut_y, tpx, tpy, tdp, clut_cache)
+          u = (((tex_u + dx) & 0xFF) & tex_u_mask) | tex_u_offset
+          v = (((tex_v + dy) & 0xFF) & tex_v_mask) | tex_v_offset
+          texel = case tdp
+                  when 0
+                    word = vram[((tpy + v) % VRAM_HEIGHT) * VRAM_WIDTH + ((tpx + (u >> 2)) % VRAM_WIDTH)] || 0
+                    clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
+                  when 1
+                    word = vram[((tpy + v) % VRAM_HEIGHT) * VRAM_WIDTH + ((tpx + (u >> 1)) % VRAM_WIDTH)] || 0
+                    clut_cache[(word >> ((u & 1) << 3)) & 0xFF]
+                  else
+                    vram[((tpy + v) % VRAM_HEIGHT) * VRAM_WIDTH + ((tpx + u) % VRAM_WIDTH)] || 0
+                  end
           next if texel == 0
 
           idx = row + px
@@ -1104,9 +1200,13 @@ module PSX
             tr = (texel & 0x001F)
             tg = (texel & 0x03E0) >> 5
             tb = (texel & 0x7C00) >> 10
-            fr5 = modulated_texel_channel(tr, br, px, py)
-            fg5 = modulated_texel_channel(tg, bg_c, px, py)
-            fb5 = modulated_texel_channel(tb, bb, px, py)
+            offset = use_dither ? DITHER_OFFSETS[dither_y | (px & 3)] : 0
+            fr5 = (((tr * br) >> 4) + offset) >> 3
+            fg5 = (((tg * bg_c) >> 4) + offset) >> 3
+            fb5 = (((tb * bb) >> 4) + offset) >> 3
+            fr5 = 0 if fr5 < 0; fr5 = 0x1F if fr5 > 0x1F
+            fg5 = 0 if fg5 < 0; fg5 = 0x1F if fg5 > 0x1F
+            fb5 = 0 if fb5 < 0; fb5 = 0x1F if fb5 > 0x1F
           end
 
           # Texel STP bit (bit 15) gates semi-transparency on a per-pixel
@@ -1427,31 +1527,43 @@ module PSX
     end
 
     # Draw textured triangle with UV interpolation
-    def draw_textured_triangle(p0, p1, p2, t0, t1, t2, c0, c1, c2, gouraud, clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi = false)
+    def draw_textured_triangle(x0, y0, u0, v0_tex, c0r, c0g, c0b,
+                               x1, y1, u1, v1_tex_in, c1r, c1g, c1b,
+                               x2, y2, u2, v2_tex_in, c2r, c2g, c2b,
+                               clut, tex_page_x, tex_page_y, tex_depth, raw_texture, semi = false)
       # Extract CLUT position
       clut_x = (clut & 0x3F) * 16
       clut_y = (clut >> 6) & 0x1FF
       clut_cache = texture_clut_cache(clut_x, clut_y, tex_depth)
 
-      unless gouraud
-        c1 = c0
-        c2 = c0
+      if y0 > y1
+        x0, x1 = x1, x0; y0, y1 = y1, y0
+        u0, u1 = u1, u0; v0_tex, v1_tex_in = v1_tex_in, v0_tex
+        c0r, c1r = c1r, c0r; c0g, c1g = c1g, c0g; c0b, c1b = c1b, c0b
+      end
+      if y1 > y2
+        x1, x2 = x2, x1; y1, y2 = y2, y1
+        u1, u2 = u2, u1; v1_tex_in, v2_tex_in = v2_tex_in, v1_tex_in
+        c1r, c2r = c2r, c1r; c1g, c2g = c2g, c1g; c1b, c2b = c2b, c1b
+      end
+      if y0 > y1
+        x0, x1 = x1, x0; y0, y1 = y1, y0
+        u0, u1 = u1, u0; v0_tex, v1_tex_in = v1_tex_in, v0_tex
+        c0r, c1r = c1r, c0r; c0g, c1g = c1g, c0g; c0b, c1b = c1b, c0b
       end
 
-      # Sort vertices by Y, keeping UVs and colors in sync.
-      verts = [[p0, t0, c0], [p1, t1, c1], [p2, t2, c2]].sort_by { |v, _, _| v[:y] }
-      v0, uv0, col0 = verts[0]
-      v1, uv1, col1 = verts[1]
-      v2, uv2, col2 = verts[2]
+      return if y2 == y0  # Degenerate triangle
 
-      return if v2[:y] == v0[:y]  # Degenerate triangle
+      vx0 = x0; vy0 = y0; vu0 = u0; vv0 = v0_tex
+      vx1 = x1; vy1 = y1; vu1 = u1; vv1 = v1_tex_in
+      vx2 = x2; vy2 = y2; vu2 = u2; vv2 = v2_tex_in
 
       # Rasterize with UV interpolation. y pre-clamped so the per-scanline
       # y bounds check is gone; inner x loop's bounds check is also dead
       # because x_start/x_end are already clamped to [draw_area_left,
       # draw_area_right] which sits inside [0, VRAM_WIDTH).
-      y_lo = v0[:y].to_i
-      y_hi = v2[:y].to_i
+      y_lo = vy0.to_i
+      y_hi = vy2.to_i
       y_lo = @draw_area_top    if y_lo < @draw_area_top
       y_hi = @draw_area_bottom if y_hi > @draw_area_bottom
       y_lo = 0                 if y_lo < 0
@@ -1459,38 +1571,51 @@ module PSX
       cmb = @check_mask_bit; smb = @set_mask_bit
       vram = @vram
       stp_mode = semi ? @semi_transparency : -1
+      use_dither = (@status & STAT_DITHER) != 0
+      tex_u_mask = ~(@texture_window_mask_x * 8)
+      tex_v_mask = ~(@texture_window_mask_y * 8)
+      tex_u_offset = (@texture_window_offset_x & @texture_window_mask_x) * 8
+      tex_v_offset = (@texture_window_offset_y & @texture_window_mask_y) * 8
 
       y = y_lo - 1
       while (y += 1) <= y_hi
         # Find X bounds and interpolate UVs for this scanline
-        if y < v1[:y]
-          next if v1[:y] == v0[:y]
-          t1_interp = (y - v0[:y]).to_f / (v1[:y] - v0[:y])
-          x1 = v0[:x] + (v1[:x] - v0[:x]) * t1_interp
-          u1 = uv0[:u] + (uv1[:u] - uv0[:u]) * t1_interp
-          v1_tex = uv0[:v] + (uv1[:v] - uv0[:v]) * t1_interp
-          c_left = interp_color(col0, col1, t1_interp)
+        if y < vy1
+          next if vy1 == vy0
+          t1_interp = (y - vy0).to_f / (vy1 - vy0)
+          x1 = vx0 + (vx1 - vx0) * t1_interp
+          u1 = vu0 + (vu1 - vu0) * t1_interp
+          v1_tex = vv0 + (vv1 - vv0) * t1_interp
+          lr = (c0r + (c1r - c0r) * t1_interp).to_i; lr = 0 if lr < 0; lr = 255 if lr > 255
+          lg = (c0g + (c1g - c0g) * t1_interp).to_i; lg = 0 if lg < 0; lg = 255 if lg > 255
+          lb = (c0b + (c1b - c0b) * t1_interp).to_i; lb = 0 if lb < 0; lb = 255 if lb > 255
         else
-          next if v2[:y] == v1[:y]
-          t1_interp = (y - v1[:y]).to_f / (v2[:y] - v1[:y])
-          x1 = v1[:x] + (v2[:x] - v1[:x]) * t1_interp
-          u1 = uv1[:u] + (uv2[:u] - uv1[:u]) * t1_interp
-          v1_tex = uv1[:v] + (uv2[:v] - uv1[:v]) * t1_interp
-          c_left = interp_color(col1, col2, t1_interp)
+          next if vy2 == vy1
+          t1_interp = (y - vy1).to_f / (vy2 - vy1)
+          x1 = vx1 + (vx2 - vx1) * t1_interp
+          u1 = vu1 + (vu2 - vu1) * t1_interp
+          v1_tex = vv1 + (vv2 - vv1) * t1_interp
+          lr = (c1r + (c2r - c1r) * t1_interp).to_i; lr = 0 if lr < 0; lr = 255 if lr > 255
+          lg = (c1g + (c2g - c1g) * t1_interp).to_i; lg = 0 if lg < 0; lg = 255 if lg > 255
+          lb = (c1b + (c2b - c1b) * t1_interp).to_i; lb = 0 if lb < 0; lb = 255 if lb > 255
         end
 
-        t2_interp = (y - v0[:y]).to_f / (v2[:y] - v0[:y])
-        x2 = v0[:x] + (v2[:x] - v0[:x]) * t2_interp
-        u2 = uv0[:u] + (uv2[:u] - uv0[:u]) * t2_interp
-        v2_tex = uv0[:v] + (uv2[:v] - uv0[:v]) * t2_interp
-        c_right = interp_color(col0, col2, t2_interp)
+        t2_interp = (y - vy0).to_f / (vy2 - vy0)
+        x2 = vx0 + (vx2 - vx0) * t2_interp
+        u2 = vu0 + (vu2 - vu0) * t2_interp
+        v2_tex = vv0 + (vv2 - vv0) * t2_interp
+        rr = (c0r + (c2r - c0r) * t2_interp).to_i; rr = 0 if rr < 0; rr = 255 if rr > 255
+        rg = (c0g + (c2g - c0g) * t2_interp).to_i; rg = 0 if rg < 0; rg = 255 if rg > 255
+        rb = (c0b + (c2b - c0b) * t2_interp).to_i; rb = 0 if rb < 0; rb = 255 if rb > 255
 
         # Ensure x1 < x2
         if x1 > x2
           x1, x2 = x2, x1
           u1, u2 = u2, u1
           v1_tex, v2_tex = v2_tex, v1_tex
-          c_left, c_right = c_right, c_left
+          lr, rr = rr, lr
+          lg, rg = rg, lg
+          lb, rb = rb, lb
         end
 
         # Draw scanline with texture sampling
@@ -1501,48 +1626,79 @@ module PSX
         inv_span = x_span > 0 ? 1.0 / x_span : 0
         du = u2 - u1
         dv = v2_tex - v1_tex
-        lr = c_left[:r]; lg = c_left[:g]; lb = c_left[:b]
-        rr = c_right[:r]; rg = c_right[:g]; rb = c_right[:b]
         dr = rr - lr; dg = rg - lg; db = rb - lb
         row = y * VRAM_WIDTH
+        dither_y = (y & 3) << 2
+
+        t = (x_start - x1) * inv_span
+        cur_u = ((u1 + du * t) * 65_536).to_i
+        cur_v = ((v1_tex + dv * t) * 65_536).to_i
+        cur_r = ((lr + dr * t) * 65_536).to_i
+        cur_g = ((lg + dg * t) * 65_536).to_i
+        cur_b = ((lb + db * t) * 65_536).to_i
+        step_u = (du * inv_span * 65_536).to_i
+        step_v = (dv * inv_span * 65_536).to_i
+        step_r = (dr * inv_span * 65_536).to_i
+        step_g = (dg * inv_span * 65_536).to_i
+        step_b = (db * inv_span * 65_536).to_i
 
         x = x_start - 1
         while (x += 1) <= x_end
-          t = (x - x1) * inv_span
-          u = (u1 + du * t).to_i & 0xFF
-          v_coord = (v1_tex + dv * t).to_i & 0xFF
+          u = (((cur_u >> 16) & 0xFF) & tex_u_mask) | tex_u_offset
+          v_coord = (((cur_v >> 16) & 0xFF) & tex_v_mask) | tex_v_offset
 
-          texel = sample_texture(u, v_coord, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth, clut_cache)
-          next if texel == 0
+          texel = case tex_depth
+                  when 0
+                    word = vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + (u >> 2)) % VRAM_WIDTH)] || 0
+                    clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
+                  when 1
+                    word = vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + (u >> 1)) % VRAM_WIDTH)] || 0
+                    clut_cache[(word >> ((u & 1) << 3)) & 0xFF]
+                  else
+                    vram[((tex_page_y + v_coord) % VRAM_HEIGHT) * VRAM_WIDTH + ((tex_page_x + u) % VRAM_WIDTH)] || 0
+                  end
 
-          idx = row + x
-          bg = vram[idx]
-          next if cmb && (bg & 0x8000) != 0
+          if texel != 0
+            idx = row + x
+            bg = vram[idx]
 
-          if raw_texture
-            fr5 = texel & 0x1F
-            fg5 = (texel >> 5) & 0x1F
-            fb5 = (texel >> 10) & 0x1F
-          else
-            br = (lr + dr * t).to_i; br = 0 if br < 0; br = 255 if br > 255
-            bg_c = (lg + dg * t).to_i; bg_c = 0 if bg_c < 0; bg_c = 255 if bg_c > 255
-            bb = (lb + db * t).to_i; bb = 0 if bb < 0; bb = 255 if bb > 255
-            tr = (texel & 0x001F)
-            tg = (texel & 0x03E0) >> 5
-            tb = (texel & 0x7C00) >> 10
-            fr5 = modulated_texel_channel(tr, br, x, y)
-            fg5 = modulated_texel_channel(tg, bg_c, x, y)
-            fb5 = modulated_texel_channel(tb, bb, x, y)
+            unless cmb && (bg & 0x8000) != 0
+              if raw_texture
+                fr5 = texel & 0x1F
+                fg5 = (texel >> 5) & 0x1F
+                fb5 = (texel >> 10) & 0x1F
+              else
+                br = cur_r >> 16; br = 0 if br < 0; br = 255 if br > 255
+                bg_c = cur_g >> 16; bg_c = 0 if bg_c < 0; bg_c = 255 if bg_c > 255
+                bb = cur_b >> 16; bb = 0 if bb < 0; bb = 255 if bb > 255
+                tr = (texel & 0x001F)
+                tg = (texel & 0x03E0) >> 5
+                tb = (texel & 0x7C00) >> 10
+                offset = use_dither ? DITHER_OFFSETS[dither_y | (x & 3)] : 0
+                fr5 = (((tr * br) >> 4) + offset) >> 3
+                fg5 = (((tg * bg_c) >> 4) + offset) >> 3
+                fb5 = (((tb * bb) >> 4) + offset) >> 3
+                fr5 = 0 if fr5 < 0; fr5 = 0x1F if fr5 > 0x1F
+                fg5 = 0 if fg5 < 0; fg5 = 0x1F if fg5 > 0x1F
+                fb5 = 0 if fb5 < 0; fb5 = 0x1F if fb5 > 0x1F
+              end
+
+              if stp_mode >= 0 && (texel & 0x8000) != 0
+                fr5, fg5, fb5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
+              end
+
+              out = fr5 | (fg5 << 5) | (fb5 << 10)
+              out |= texel & 0x8000
+              out |= 0x8000 if smb
+              vram[idx] = out
+            end
           end
 
-          if stp_mode >= 0 && (texel & 0x8000) != 0
-            fr5, fg5, fb5 = stp_blend5(bg, fr5, fg5, fb5, stp_mode)
-          end
-
-          out = fr5 | (fg5 << 5) | (fb5 << 10)
-          out |= texel & 0x8000
-          out |= 0x8000 if smb
-          vram[idx] = out
+          cur_u += step_u
+          cur_v += step_v
+          cur_r += step_r
+          cur_g += step_g
+          cur_b += step_b
         end
       end
     end

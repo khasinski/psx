@@ -120,6 +120,18 @@ sdl2_ttf` is enough. Override the font with `PSX_FONT=/path/to/font.ttf`.
 `PSX_QUICKSAVE` and `PSX_DEBUG_SNAPSHOT` env vars still override the
 config's path defaults for F5 / F6 / F8 in a single run.
 
+The SDL front-end defaults to the portable SDL texture presenter. For
+experiments, `PSX_DISPLAY_RENDERER=gl` uses an OpenGL presenter for the final
+frame upload and scaling:
+
+```sh
+PSX_DISPLAY_RENDERER=gl psx path/to/SCPH1001.BIN game.cue
+```
+
+This does not replace the emulated PSX GPU rasterizer yet; it only makes the
+host GPU handle the final RGBA frame presentation. If OpenGL is unavailable,
+the front-end falls back to SDL.
+
 ## Programmatic use
 
 ```ruby
