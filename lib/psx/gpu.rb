@@ -191,45 +191,45 @@ module PSX
 
       cmd = (value >> 24) & 0xFF
       @current_cmd = cmd
-      @cmd_buffer = [value]
+      @cmd_buffer.clear
+      @cmd_buffer << value
 
-      case cmd
-      when CMD_NOP
+      if cmd == CMD_NOP
         # Do nothing
-      when CMD_CLEAR_CACHE
+      elsif cmd == CMD_CLEAR_CACHE
         # Clear texture cache - no software cache is modeled yet
-      when CMD_FILL_RECT
+      elsif cmd == CMD_FILL_RECT
         @cmd_remaining = 2
-      when 0x20..0x3F
+      elsif cmd >= 0x20 && cmd <= 0x3F
         # Polygons
         @cmd_remaining = polygon_word_count(cmd) - 1
-      when 0x40..0x5F
+      elsif cmd >= 0x40 && cmd <= 0x5F
         # Lines
         if (cmd & 0x08) != 0
           @polyline_active = true
         else
           @cmd_remaining = line_word_count(cmd) - 1
         end
-      when 0x60..0x7F
+      elsif cmd >= 0x60 && cmd <= 0x7F
         # Rectangles
         @cmd_remaining = rectangle_word_count(cmd) - 1
-      when CMD_COPY_VRAM_VRAM
+      elsif cmd == CMD_COPY_VRAM_VRAM
         @cmd_remaining = 3
-      when CMD_COPY_CPU_VRAM
+      elsif cmd == CMD_COPY_CPU_VRAM
         @cmd_remaining = 2
-      when CMD_COPY_VRAM_CPU
+      elsif cmd == CMD_COPY_VRAM_CPU
         @cmd_remaining = 2
-      when 0xE1
+      elsif cmd == 0xE1
         gp0_draw_mode(value)
-      when 0xE2
+      elsif cmd == 0xE2
         gp0_texture_window(value)
-      when 0xE3
+      elsif cmd == 0xE3
         gp0_draw_area_top_left(value)
-      when 0xE4
+      elsif cmd == 0xE4
         gp0_draw_area_bottom_right(value)
-      when 0xE5
+      elsif cmd == 0xE5
         gp0_draw_offset(value)
-      when 0xE6
+      elsif cmd == 0xE6
         gp0_mask_settings(value)
       else
         # Unknown command - ignore
@@ -242,28 +242,27 @@ module PSX
     def gp1(value)
       cmd = (value >> 24) & 0xFF
 
-      case cmd
-      when 0x00
+      if cmd == 0x00
         gp1_reset
-      when 0x01
+      elsif cmd == 0x01
         gp1_reset_command_buffer
-      when 0x02
+      elsif cmd == 0x02
         gp1_acknowledge_irq
-      when 0x03
+      elsif cmd == 0x03
         gp1_display_enable(value)
-      when 0x04
+      elsif cmd == 0x04
         gp1_dma_direction(value)
-      when 0x05
+      elsif cmd == 0x05
         gp1_display_start(value)
-      when 0x06
+      elsif cmd == 0x06
         gp1_horizontal_range(value)
-      when 0x07
+      elsif cmd == 0x07
         gp1_vertical_range(value)
-      when 0x08
+      elsif cmd == 0x08
         gp1_display_mode(value)
-      when 0x09
+      elsif cmd == 0x09
         gp1_texture_disable(value)
-      when 0x10..0x1F
+      elsif cmd >= 0x10 && cmd <= 0x1F
         gp1_gpu_info(value)
       end
     end
@@ -282,7 +281,8 @@ module PSX
          @framebuffer_cache[:height] == @vertical_res &&
          @framebuffer_cache[:display_start_x] == @display_start_x &&
          @framebuffer_cache[:display_start_y] == @display_start_y &&
-         @framebuffer_cache[:color_depth_24] == @color_depth_24
+         @framebuffer_cache[:color_depth_24] == @color_depth_24 &&
+         @framebuffer_cache[:display_enabled] == @display_enabled
         return @framebuffer_cache
       end
 
@@ -294,30 +294,40 @@ module PSX
       rgba_arr = Array.new(num_pixels * 4)
       dst_i = 0
 
-      height.times do |y|
-        if @color_depth_24
-          base_byte = ((@display_start_y + y) * VRAM_WIDTH + @display_start_x) * 2
-          width.times do |x|
-            r = vram_byte(base_byte + x * 3)
-            g = vram_byte(base_byte + x * 3 + 1)
-            b = vram_byte(base_byte + x * 3 + 2)
-            rgba_arr[dst_i] = r
-            rgba_arr[dst_i + 1] = g
-            rgba_arr[dst_i + 2] = b
-            rgba_arr[dst_i + 3] = 255
-            dst_i += 4
-          end
-        else
-          vram_row = (@display_start_y + y) * VRAM_WIDTH + @display_start_x
-          width.times do |x|
-            color16 = @vram[vram_row + x] || 0
+      if !@display_enabled
+        num_pixels.times do
+          rgba_arr[dst_i] = 0
+          rgba_arr[dst_i + 1] = 0
+          rgba_arr[dst_i + 2] = 0
+          rgba_arr[dst_i + 3] = 255
+          dst_i += 4
+        end
+      else
+        height.times do |y|
+          if @color_depth_24
+            base_byte = ((@display_start_y + y) * VRAM_WIDTH + @display_start_x) * 2
+            width.times do |x|
+              r = vram_byte(base_byte + x * 3)
+              g = vram_byte(base_byte + x * 3 + 1)
+              b = vram_byte(base_byte + x * 3 + 2)
+              rgba_arr[dst_i] = r
+              rgba_arr[dst_i + 1] = g
+              rgba_arr[dst_i + 2] = b
+              rgba_arr[dst_i + 3] = 255
+              dst_i += 4
+            end
+          else
+            vram_row = (@display_start_y + y) * VRAM_WIDTH + @display_start_x
+            width.times do |x|
+              color16 = @vram[vram_row + x] || 0
 
-            # Convert 15-bit to 24-bit RGB
-            rgba_arr[dst_i] = (color16 & 0x001F) << 3      # R
-            rgba_arr[dst_i + 1] = (color16 & 0x03E0) >> 2  # G
-            rgba_arr[dst_i + 2] = (color16 & 0x7C00) >> 7  # B
-            rgba_arr[dst_i + 3] = 255                       # A
-            dst_i += 4
+              # Convert 15-bit to 24-bit RGB
+              rgba_arr[dst_i] = (color16 & 0x001F) << 3      # R
+              rgba_arr[dst_i + 1] = (color16 & 0x03E0) >> 2  # G
+              rgba_arr[dst_i + 2] = (color16 & 0x7C00) >> 7  # B
+              rgba_arr[dst_i + 3] = 255                       # A
+              dst_i += 4
+            end
           end
         end
       end
@@ -329,6 +339,7 @@ module PSX
         display_start_x: @display_start_x,
         display_start_y: @display_start_y,
         color_depth_24: @color_depth_24,
+        display_enabled: @display_enabled,
         rgba: rgba_arr.pack("C*")
       }
     end
@@ -352,30 +363,30 @@ module PSX
 
     # GP0 command execution
     def execute_gp0_command
-      case @current_cmd
-      when CMD_FILL_RECT
+      cmd = @current_cmd
+      if cmd == CMD_FILL_RECT
         mark_dirty
         gp0_fill_rect
-      when 0x20..0x3F
+      elsif cmd >= 0x20 && cmd <= 0x3F
         mark_dirty
         gp0_polygon
-      when 0x40..0x5F
+      elsif cmd >= 0x40 && cmd <= 0x5F
         mark_dirty
         gp0_line
-      when 0x60..0x7F
+      elsif cmd >= 0x60 && cmd <= 0x7F
         mark_dirty
         gp0_rectangle
-      when CMD_COPY_VRAM_VRAM
+      elsif cmd == CMD_COPY_VRAM_VRAM
         mark_dirty
         gp0_copy_vram_vram
-      when CMD_COPY_CPU_VRAM
+      elsif cmd == CMD_COPY_CPU_VRAM
         mark_dirty
         gp0_copy_cpu_vram
-      when CMD_COPY_VRAM_CPU
+      elsif cmd == CMD_COPY_VRAM_CPU
         gp0_copy_vram_cpu  # Reading from VRAM doesn't modify it
       end
 
-      @cmd_buffer = []
+      @cmd_buffer.clear
       @current_cmd = 0
     end
 
@@ -383,7 +394,7 @@ module PSX
       if value == 0x5555_5555 || value == 0x5000_5000
         mark_dirty
         gp0_polyline
-        @cmd_buffer = []
+        @cmd_buffer.clear
         @current_cmd = 0
         @polyline_active = false
       else
@@ -984,7 +995,7 @@ module PSX
       @texture_disable_allow = false
       @set_mask_bit = false
       @check_mask_bit = false
-      @cmd_buffer = []
+      @cmd_buffer.clear
       @cmd_remaining = 0
       @vram_transfer_mode = nil
       @polyline_active = false
@@ -992,7 +1003,7 @@ module PSX
     end
 
     def gp1_reset_command_buffer
-      @cmd_buffer = []
+      @cmd_buffer.clear
       @cmd_remaining = 0
       @vram_transfer_mode = nil
       @polyline_active = false
@@ -1004,7 +1015,11 @@ module PSX
     end
 
     def gp1_display_enable(value)
-      @display_enabled = (value & 0x01) == 0
+      enabled = (value & 0x01) == 0
+      if @display_enabled != enabled
+        @display_enabled = enabled
+        mark_dirty
+      end
     end
 
     def gp1_dma_direction(value)
@@ -1328,8 +1343,8 @@ module PSX
         # Draw scanline — inline draw_pixel to skip method-call overhead.
         # x_start/x_end clamp to [draw_area_left, draw_area_right], which
         # are themselves in [0, VRAM_WIDTH); no per-pixel bounds check.
-        x_start = [x1.to_i, @draw_area_left].max
-        x_end = [x2.to_i, @draw_area_right].min
+        x_start = [x1.ceil, @draw_area_left].max
+        x_end = [x2.floor, @draw_area_right].min
         row = y * VRAM_WIDTH
 
         if gouraud && x2 != x1
@@ -1432,8 +1447,8 @@ module PSX
     end
 
     def dither_channel_to_5bit(value, x, y)
-      dithered = (value + DITHER_MATRIX[y & 3][x & 3]) >> 3
-      return 0 if dithered.negative?
+      dithered = (value + DITHER_OFFSETS[((y & 3) << 2) | (x & 3)]) >> 3
+      return 0 if dithered < 0
       return 0x1F if dithered > 0x1F
 
       dithered
@@ -1637,8 +1652,8 @@ module PSX
         end
 
         # Draw scanline with texture sampling
-        x_start = [x1.to_i, @draw_area_left].max
-        x_end = [x2.to_i, @draw_area_right].min
+        x_start = [x1.ceil, @draw_area_left].max
+        x_end = [x2.floor, @draw_area_right].min
         x_span = x2 - x1
 
         inv_span = x_span > 0 ? 1.0 / x_span : 0

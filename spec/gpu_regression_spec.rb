@@ -55,6 +55,7 @@ class GPURegressionSpec < Minitest::Test
   end
 
   def test_framebuffer_cache_tracks_display_format
+    @gpu.gp1(0x03_00_00_00) # display enable
     @gpu.gp1(0x08_00_00_10) # 24-bit display mode
     @gpu.vram[0] = 0x001F
     fb24 = @gpu.framebuffer
@@ -64,6 +65,18 @@ class GPURegressionSpec < Minitest::Test
 
     refute_equal fb24[:rgba].byteslice(0, 4), fb15[:rgba].byteslice(0, 4)
     assert_equal 248, fb15[:rgba].getbyte(0), "15-bit cached frame should be regenerated after mode switch"
+  end
+
+  def test_framebuffer_blanks_and_invalidates_when_display_is_disabled
+    @gpu.gp1(0x03_00_00_00) # display enable
+    @gpu.vram[0] = 0x001F
+    visible = @gpu.framebuffer
+    assert_equal 248, visible[:rgba].getbyte(0), "precondition: visible frame should read VRAM"
+
+    @gpu.gp1(0x03_00_00_01) # display disable
+    blank = @gpu.framebuffer
+
+    assert_equal [0, 0, 0, 255], blank[:rgba].byteslice(0, 4).bytes
   end
 
   def test_textured_gouraud_triangle_modulates_with_interpolated_vertex_color

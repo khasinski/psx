@@ -183,6 +183,8 @@ class GPUSpec < Minitest::Test
   end
 
   def test_framebuffer_converts_colors_correctly
+    @gpu.gp1(0x03_00_00_00) # display enable
+
     # Write a known color to VRAM at display position
     # RGB555: R=31, G=0, B=0 = 0x001F (red)
     @gpu.vram[0] = 0x001F
@@ -196,6 +198,7 @@ class GPUSpec < Minitest::Test
   end
 
   def test_framebuffer_reads_24bit_display_pixels
+    @gpu.gp1(0x03_00_00_00) # display enable
     @gpu.gp1(0x08_00_00_10) # 24-bit display mode
     @gpu.vram[0] = 0x2211
     @gpu.vram[1] = 0x4433

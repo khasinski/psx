@@ -281,30 +281,30 @@ module PSX
     # each GTE command so timer-sensitive code (and amidog's psxtest_gte
     # OFFICIAL.TIMING column) sees realistic GTE durations. Unimplemented
     # opcodes default to 1 cycle.
-    OPCODE_CYCLES = {
-      0x01 => 15,  # RTPS
-      0x06 => 8,   # NCLIP
-      0x0C => 6,   # OP
-      0x10 => 8,   # DPCS
-      0x11 => 8,   # INTPL
-      0x12 => 8,   # MVMVA
-      0x13 => 19,  # NCDS
-      0x14 => 13,  # CDP
-      0x16 => 44,  # NCDT
-      0x1B => 17,  # NCCS
-      0x1C => 11,  # CC
-      0x1E => 14,  # NCS
-      0x20 => 30,  # NCT
-      0x28 => 5,   # SQR
-      0x29 => 8,   # DCPL
-      0x2A => 17,  # DPCT
-      0x2D => 5,   # AVSZ3
-      0x2E => 6,   # AVSZ4
-      0x30 => 23,  # RTPT
-      0x3D => 5,   # GPF
-      0x3E => 5,   # GPL
-      0x3F => 39   # NCCT
-    }.freeze
+    OPCODE_CYCLES = Array.new(64, 1).tap do |cycles|
+      cycles[0x01] = 15  # RTPS
+      cycles[0x06] = 8   # NCLIP
+      cycles[0x0C] = 6   # OP
+      cycles[0x10] = 8   # DPCS
+      cycles[0x11] = 8   # INTPL
+      cycles[0x12] = 8   # MVMVA
+      cycles[0x13] = 19  # NCDS
+      cycles[0x14] = 13  # CDP
+      cycles[0x16] = 44  # NCDT
+      cycles[0x1B] = 17  # NCCS
+      cycles[0x1C] = 11  # CC
+      cycles[0x1E] = 14  # NCS
+      cycles[0x20] = 30  # NCT
+      cycles[0x28] = 5   # SQR
+      cycles[0x29] = 8   # DCPL
+      cycles[0x2A] = 17  # DPCT
+      cycles[0x2D] = 5   # AVSZ3
+      cycles[0x2E] = 6   # AVSZ4
+      cycles[0x30] = 23  # RTPT
+      cycles[0x3D] = 5   # GPF
+      cycles[0x3E] = 5   # GPL
+      cycles[0x3F] = 39  # NCCT
+    end.freeze
 
     attr_reader :op_cycles
 
@@ -349,7 +349,7 @@ module PSX
       # Auto-set bit 31 (error flag)
       @flag |= (1 << 31) if (@flag & FLAG_ERROR_MASK) != 0
 
-      @op_cycles = OPCODE_CYCLES[opcode] || 1
+      @op_cycles = OPCODE_CYCLES[opcode]
     end
 
     # --- Helpers: bit-width conversion --------------------------------------

@@ -264,6 +264,14 @@ module PSX
         return
       end
 
+      # Hot I/O path: DMA channel registers. Ridge streams GP0 lists through
+      # GPU linked-list DMA, so avoid the full I/O decoder on every CHCR write.
+      if phys >= 0x1F80_1080 && phys < 0x1F80_10F0
+        @dma&.write(phys - 0x1F80_1080, value)
+        tick_dma
+        return
+      end
+
       # I/O
       if phys >= 0x1F80_1000 && phys < 0x1F80_3000
         io_write32(phys - IO_START, value)
@@ -324,47 +332,46 @@ module PSX
     end
 
     def io_read32(offset)
-      case offset
-      when 0x0000...0x0024
+      if offset >= 0x0000 && offset < 0x0024
         # Memory control 1
         0
-      when 0x0040..0x004F
+      elsif offset >= 0x0040 && offset <= 0x004F
         @sio0 ? @sio0.read32(offset) : 0
-      when 0x0060
+      elsif offset == 0x0060
         # RAM size register
         0x0000_0B88
-      when 0x0070
+      elsif offset == 0x0070
         # I_STAT - Interrupt status
         @interrupts&.read_stat || 0
-      when 0x0074
+      elsif offset == 0x0074
         # I_MASK - Interrupt mask
         @interrupts&.read_mask || 0
-      when 0x0080...0x00F0
+      elsif offset >= 0x0080 && offset < 0x00F0
         # DMA channel registers
         @dma&.read(offset - 0x0080) || 0
-      when 0x00F0
+      elsif offset == 0x00F0
         # DMA DPCR - control
         @dma&.dpcr || 0x0765_4321
-      when 0x00F4
+      elsif offset == 0x00F4
         # DMA DICR - interrupt control
         @dma&.dicr || 0
-      when 0x0100...0x0130
+      elsif offset >= 0x0100 && offset < 0x0130
         # Timers
         @timers&.read(offset - 0x0100) || 0
-      when 0x0810
+      elsif offset == 0x0810
         # GPU GPUREAD
         @gpu&.read_data || 0
-      when 0x0814
+      elsif offset == 0x0814
         # GPU GPUSTAT - return ready, display enabled
         @gpu&.status || 0x1C00_0000
-      when 0x0820
+      elsif offset == 0x0820
         # MDEC0: decoded output data (FIFO drain)
         @mdec&.read32_data || 0
-      when 0x0824
+      elsif offset == 0x0824
         # MDEC1: status word. Nil-MDEC fallback returns "output FIFO
         # empty" — any reasonable poll loop sees "no data" and gives up.
         @mdec&.read32_status || 0x8000_0000
-      when 0x0C00...0x1000
+      elsif offset >= 0x0C00 && offset < 0x1000
         # SPU register window. Real hardware reads back the most recent
         # 32-bit value; our SPU stub keeps a shadow so writes survive.
         # ps1-tests cpu/code-in-io's testCodeInSPU relies on this so the
@@ -421,46 +428,45 @@ module PSX
     end
 
     def io_write32(offset, value)
-      case offset
-      when 0x0000...0x0024
+      if offset >= 0x0000 && offset < 0x0024
         # Memory control 1 - ignore for now
-      when 0x0040..0x004F
+      elsif offset >= 0x0040 && offset <= 0x004F
         @sio0&.write32(offset, value)
-      when 0x0060
+      elsif offset == 0x0060
         # RAM size config - ignore
-      when 0x0070
+      elsif offset == 0x0070
         # I_STAT - Interrupt status (write acknowledges)
         @interrupts&.write_stat(value)
-      when 0x0074
+      elsif offset == 0x0074
         # I_MASK - Interrupt mask
         @interrupts&.write_mask(value)
-      when 0x0080...0x00F0
+      elsif offset >= 0x0080 && offset < 0x00F0
         # DMA channel registers
         @dma&.write(offset - 0x0080, value)
         # Check if this triggered a DMA transfer
         tick_dma
-      when 0x00F0
+      elsif offset == 0x00F0
         # DMA DPCR
         @dma&.write(0x70, value)
-      when 0x00F4
+      elsif offset == 0x00F4
         # DMA DICR
         @dma&.write(0x74, value)
-      when 0x0100...0x0130
+      elsif offset >= 0x0100 && offset < 0x0130
         # Timers
         @timers&.write(offset - 0x0100, value)
-      when 0x0810
+      elsif offset == 0x0810
         # GPU GP0
         @gpu&.gp0(value)
-      when 0x0814
+      elsif offset == 0x0814
         # GPU GP1
         @gpu&.gp1(value)
-      when 0x0820
+      elsif offset == 0x0820
         # MDEC0: command / RLE data
         @mdec&.write32_data(value)
-      when 0x0824
+      elsif offset == 0x0824
         # MDEC1: control / reset
         @mdec&.write32_control(value)
-      when 0x0C00...0x1000
+      elsif offset >= 0x0C00 && offset < 0x1000
         # SPU register window. Treat 32-bit writes as two halfword writes
         # so the SPU stub's shadow stays in sync (see io_read32 for SPU).
         @spu&.write16(offset, value & 0xFFFF)

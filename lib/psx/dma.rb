@@ -351,16 +351,22 @@ module PSX
       #   header word: bits 0..23 = next pointer, bit 23 = end-of-list,
       #                bits 24..31 = word count
       #   followed by `word_count` data words forwarded to GP0.
+      ram_words = memory.ram_words
       addr = channel.base_addr & 0x1F_FFFC
       reached_end = false
+      nodes = 0
 
-      MAX_CHAIN_NODES.times do
-        header = memory.read32(addr)
+      while nodes < MAX_CHAIN_NODES
+        header = ram_words[addr >> 2]
         word_count = header >> 24
 
-        word_count.times do |i|
-          word = memory.read32((addr + 4 + i * 4) & 0x1F_FFFC)
-          gpu&.gp0(word)
+        word_addr = (addr + 4) & 0x1F_FFFC
+        if gpu
+          while word_count > 0
+            gpu.gp0(ram_words[word_addr >> 2])
+            word_addr = (word_addr + 4) & 0x1F_FFFC
+            word_count -= 1
+          end
         end
 
         # Bit 23 of the next-address field marks end-of-chain (any addr
@@ -371,6 +377,7 @@ module PSX
         end
 
         addr = header & 0x1F_FFFC
+        nodes += 1
       end
 
       if reached_end

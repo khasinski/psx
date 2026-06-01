@@ -129,7 +129,7 @@ module PSX
       instruction = if phys < 0x0080_0000
                       index = (phys & 0x001F_FFFF) >> 2
                       ram_word = @ram_words[index]
-                      if ram_word.zero? && !@isolated_cache_words.empty?
+                      if ram_word == 0 && !@isolated_cache_words.empty?
                         @isolated_cache_words.fetch(index) { ram_word }
                       else
                         ram_word

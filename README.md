@@ -18,7 +18,7 @@ There's no PGXP, ADSR isn't conformance-grade, DMA timing is still
 approximate in places, and many retail games hit content-specific
 blockers (FMV codec init, timing-sensitive CD paths), so don't expect
 every disc to play yet. Think of it as an executable spec for the PS1.
-462/462 unit tests pass, plus 18/21 of the
+472/472 unit tests pass, plus 18/21 of the
 [JaCzekanski/ps1-tests](https://github.com/JaCzekanski/ps1-tests) cases
 with a `psx.log` reference and the CD-ROM ps1-tests baseline at 3/3.
 
@@ -279,7 +279,7 @@ What works:
 - Bus-error on instruction fetch from forbidden regions (scratchpad,
   IRQ, MDEC, timers, JOY/SIO); fetch from DMA / SPU / GPU register
   space goes through (matches real hardware)
-- 462/462 unit tests pass.
+- 472/472 unit tests pass.
 - JaCzekanski/ps1-tests baseline passes for the checked non-CD-ROM
   cases (`TOTAL 18  OK 18  FAIL 0`). CD-ROM ps1-tests are run
   separately with a disc image via `PSX_TEST_DISC` and currently pass

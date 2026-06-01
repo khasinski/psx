@@ -505,6 +505,10 @@ module PSX
     BIOS_PAD2_BUFFER_PTR = 0x8000_74CC
     BIOS_PAD1_BUFFER_LEN = 0x8000_74D8
     BIOS_PAD2_BUFFER_LEN = 0x8000_74DC
+    BIOS_PAD1_BUFFER_PTR_WORD = (BIOS_PAD1_BUFFER_PTR & Memory::RAM_MIRROR_MASK) >> 2
+    BIOS_PAD2_BUFFER_PTR_WORD = (BIOS_PAD2_BUFFER_PTR & Memory::RAM_MIRROR_MASK) >> 2
+    BIOS_PAD1_BUFFER_LEN_WORD = (BIOS_PAD1_BUFFER_LEN & Memory::RAM_MIRROR_MASK) >> 2
+    BIOS_PAD2_BUFFER_LEN_WORD = (BIOS_PAD2_BUFFER_LEN & Memory::RAM_MIRROR_MASK) >> 2
 
     def refresh_bios_pad_buffers
       refresh_bios_pad1_buffer
@@ -512,35 +516,49 @@ module PSX
     end
 
     def refresh_bios_pad1_buffer
-      addr = @memory.read32(BIOS_PAD1_BUFFER_PTR)
-      length = @memory.read32(BIOS_PAD1_BUFFER_LEN)
+      ram_words = @memory.ram_words
+      addr = ram_words[BIOS_PAD1_BUFFER_PTR_WORD]
+      length = ram_words[BIOS_PAD1_BUFFER_LEN_WORD]
       return unless bios_pad_buffer?(addr, length)
 
       state = @controller_state_proc.call & 0xFFFF
-      @memory.write8(addr, 0x00)
-      @memory.write8(addr + 1, SIO0::DIGITAL_PAD_IDHI)
-      @memory.write8(addr + 2, state & 0xFF)
-      @memory.write8(addr + 3, (state >> 8) & 0xFF)
+      write_ram4(ram_words, addr, 0x00, SIO0::DIGITAL_PAD_IDHI, state & 0xFF, (state >> 8) & 0xFF)
     rescue StandardError
       # Treat host input failures as no pad state change.
     end
 
     def refresh_bios_pad2_buffer
-      addr = @memory.read32(BIOS_PAD2_BUFFER_PTR)
-      length = @memory.read32(BIOS_PAD2_BUFFER_LEN)
+      ram_words = @memory.ram_words
+      addr = ram_words[BIOS_PAD2_BUFFER_PTR_WORD]
+      length = ram_words[BIOS_PAD2_BUFFER_LEN_WORD]
       return unless bios_pad_buffer?(addr, length)
 
-      @memory.write8(addr, 0xFF)
-      @memory.write8(addr + 1, 0x00)
-      @memory.write8(addr + 2, 0x00)
-      @memory.write8(addr + 3, 0x00)
+      write_ram4(ram_words, addr, 0xFF, 0x00, 0x00, 0x00)
     end
 
     def bios_pad_buffer?(addr, length)
-      return false if addr.zero? || length < 4
+      return false if addr == 0 || length < 4
 
       phys = addr & Memory::REGION_MASK[(addr >> 29) & 0x7]
       phys < Memory::RAM_SIZE && phys + 3 < Memory::RAM_SIZE
+    end
+
+    def write_ram4(ram_words, addr, b0, b1, b2, b3)
+      phys = addr & Memory::REGION_MASK[(addr >> 29) & 0x7]
+      offset = phys & Memory::RAM_MIRROR_MASK
+      idx = offset >> 2
+      byte = offset & 3
+      word = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+      if byte == 0
+        ram_words[idx] = word
+      else
+        shift = byte * 8
+        low_mask = 0xFFFF_FFFF << shift
+        ram_words[idx] = (ram_words[idx] & ~low_mask) | ((word << shift) & 0xFFFF_FFFF)
+        high_mask = (1 << shift) - 1
+        ram_words[idx + 1] = (ram_words[idx + 1] & ~high_mask) | (word >> (32 - shift))
+      end
     end
 
     def tick_devices
