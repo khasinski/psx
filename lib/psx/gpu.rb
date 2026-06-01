@@ -124,6 +124,7 @@ module PSX
       # Framebuffer caching
       @framebuffer_dirty = true
       @framebuffer_cache = nil
+      @texture_clut_cache_store = {}
       @gpu_info_latch = 0
 
       # DMA direction
@@ -437,6 +438,7 @@ module PSX
 
     # GP0 Drawing commands
     def gp0_fill_rect
+      clear_texture_clut_cache
       color = @cmd_buffer[0] & 0x00FF_FFFF
       pos = @cmd_buffer[1]
       size = @cmd_buffer[2]
@@ -754,6 +756,7 @@ module PSX
     end
 
     def gp0_copy_vram_vram
+      clear_texture_clut_cache
       src = @cmd_buffer[1]
       dst = @cmd_buffer[2]
       size = @cmd_buffer[3]
@@ -872,6 +875,7 @@ module PSX
     end
 
     def vram_write_pixel(pixel)
+      clear_texture_clut_cache unless @texture_clut_cache_store.empty?
       idx = @vram_transfer_y * VRAM_WIDTH + (@vram_transfer_x % VRAM_WIDTH)
 
       # Mask bit settings apply to CPU-to-VRAM blits (verified by
@@ -946,6 +950,7 @@ module PSX
 
     # GP1 commands
     def gp1_reset
+      clear_texture_clut_cache
       @status = STAT_CMD_READY | STAT_DMA_READY | STAT_VRAM_TO_CPU_READY | STAT_DISPLAY_ENABLE
       @display_enabled = false
       @dma_direction = 0
@@ -1467,8 +1472,21 @@ module PSX
         else return nil
         end
 
+      key = (tex_depth << 19) | ((clut_y % VRAM_HEIGHT) << 10) | (clut_x % VRAM_WIDTH)
+      cached = @texture_clut_cache_store[key]
+      return cached if cached
+
       row = (clut_y % VRAM_HEIGHT) * VRAM_WIDTH
-      entries.times.map { |i| @vram[row + ((clut_x + i) % VRAM_WIDTH)] || 0 }
+      cache = Array.new(entries, 0)
+      i = -1
+      while (i += 1) < entries
+        cache[i] = @vram[row + ((clut_x + i) % VRAM_WIDTH)] || 0
+      end
+      @texture_clut_cache_store[key] = cache
+    end
+
+    def clear_texture_clut_cache
+      @texture_clut_cache_store.clear
     end
 
     def sample_texture(u, v, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth, clut_cache = nil)
