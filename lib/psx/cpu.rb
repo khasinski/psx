@@ -129,7 +129,11 @@ module PSX
       instruction = if phys < 0x0080_0000
                       index = (phys & 0x001F_FFFF) >> 2
                       ram_word = @ram_words[index]
-                      ram_word.zero? ? @isolated_cache_words.fetch(index) { ram_word } : ram_word
+                      if ram_word.zero? && !@isolated_cache_words.empty?
+                        @isolated_cache_words.fetch(index) { ram_word }
+                      else
+                        ram_word
+                      end
                     elsif phys >= 0x1FC0_0000 && phys < 0x1FC8_0000
                       @bios_words[(phys - 0x1FC0_0000) >> 2]
                     else
@@ -262,40 +266,183 @@ module PSX
             b = @regs[rt]; b -= 0x1_0000_0000 if (b & 0x8000_0000) != 0
             cancel_load_delay_for(rd)
             @regs[rd] = (a < b ? 1 : 0) if rd != 0
+          when 0x25  # OR
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            cancel_load_delay_for(rd)
+            @regs[rd] = (@regs[rs] | @regs[rt]) & 0xFFFF_FFFF if rd != 0
+          when 0x02  # SRL
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            shamt = (instruction >> 6) & 0x1F
+            cancel_load_delay_for(rd)
+            @regs[rd] = (@regs[rt] >> shamt) & 0xFFFF_FFFF if rd != 0
+          when 0x08  # JR
+            rs = (instruction >> 21) & 0x1F
+            @branch_target = @regs[rs] & 0xFFFF_FFFF
+          when 0x03  # SRA
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            shamt = (instruction >> 6) & 0x1F
+            val = @regs[rt]
+            val -= 0x1_0000_0000 if (val & 0x8000_0000) != 0
+            cancel_load_delay_for(rd)
+            @regs[rd] = (val >> shamt) & 0xFFFF_FFFF if rd != 0
+          when 0x24  # AND
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            cancel_load_delay_for(rd)
+            @regs[rd] = (@regs[rs] & @regs[rt]) & 0xFFFF_FFFF if rd != 0
+          when 0x04  # SLLV
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            cancel_load_delay_for(rd)
+            @regs[rd] = (@regs[rt] << (@regs[rs] & 0x1F)) & 0xFFFF_FFFF if rd != 0
+          when 0x07  # SRAV
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            val = @regs[rt]
+            val -= 0x1_0000_0000 if (val & 0x8000_0000) != 0
+            cancel_load_delay_for(rd)
+            @regs[rd] = (val >> (@regs[rs] & 0x1F)) & 0xFFFF_FFFF if rd != 0
           else
             execute_special(instruction)
           end
-        when 0x01 then execute_bcondz(instruction)
+        when 0x01  # BCONDZ
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          val = @regs[rs]
+          negative = (val & 0x8000_0000) != 0
+          bgez = (rt & 0x01) != 0
+          if bgez ? !negative : negative
+            imm = instruction & 0xFFFF
+            imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+            @branch_target = (@pc + (imm << 2)) & 0xFFFF_FFFF
+          end
+          if (rt & 0x10) != 0
+            cancel_load_delay_for(31)
+            @regs[31] = @next_pc
+          end
         when 0x02 then op_j(instruction)
-        when 0x03 then op_jal(instruction)
+        when 0x03  # JAL
+          target = instruction & 0x03FF_FFFF
+          cancel_load_delay_for(31)
+          @regs[31] = @next_pc
+          @branch_target = ((@pc & 0xF000_0000) | (target << 2)) & 0xFFFF_FFFF
         when 0x06 then op_blez(instruction)
         when 0x07 then op_bgtz(instruction)
         when 0x08 then op_addi(instruction)
         when 0x0A then op_slti(instruction)
         when 0x0B then op_sltiu(instruction)
-        when 0x0C then op_andi(instruction)
+        when 0x0C  # ANDI
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          cancel_load_delay_for(rt)
+          @regs[rt] = (@regs[rs] & (instruction & 0xFFFF)) if rt != 0
         when 0x0E then op_xori(instruction)
         when 0x10 then execute_cop0(instruction)
         when 0x11 then execute_cop1(instruction)
-        when 0x12 then execute_cop2(instruction)
+        when 0x12  # COP2
+          if (@cop0.sr & COP0::SR_CU2) == 0
+            exception(COP0::EXC_CPU, coprocessor: 2)
+          elsif (instruction & (1 << 25)) != 0
+            @gte.execute(instruction)
+            @step_cycles += @gte.op_cycles - 1
+          else
+            cop_op = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            rd = (instruction >> 11) & 0x1F
+            case cop_op
+            when 0x00
+              @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
+              @load_delay_reg = rt
+              @load_delay_value = @gte.read_data(rd) & 0xFFFF_FFFF
+            when 0x02
+              @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
+              @load_delay_reg = rt
+              @load_delay_value = @gte.read_control(rd) & 0xFFFF_FFFF
+            when 0x04 then @gte.write_data(rd, @regs[rt])
+            when 0x06 then @gte.write_control(rd, @regs[rt])
+            end
+          end
         when 0x13 then execute_cop3(instruction)
         when 0x20 then op_lb(instruction)
-        when 0x21 then op_lh(instruction)
+        when 0x21  # LH
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          imm = instruction & 0xFFFF
+          imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+          addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+          if (addr & 1) != 0
+            exception(COP0::EXC_ADEL, bad_addr: addr)
+          else
+            val = @memory.read16(addr)
+            val |= 0xFFFF_0000 if (val & 0x8000) != 0
+            @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
+            @load_delay_reg = rt
+            @load_delay_value = val & 0xFFFF_FFFF
+            @step_cycles += 1
+          end
         when 0x22 then op_lwl(instruction)
         when 0x24 then op_lbu(instruction)
-        when 0x25 then op_lhu(instruction)
+        when 0x25  # LHU
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          imm = instruction & 0xFFFF
+          imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+          addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+          if (addr & 1) != 0
+            exception(COP0::EXC_ADEL, bad_addr: addr)
+          else
+            @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
+            @load_delay_reg = rt
+            @load_delay_value = @memory.read16(addr)
+            @step_cycles += 1
+          end
         when 0x26 then op_lwr(instruction)
         when 0x28 then op_sb(instruction)
-        when 0x29 then op_sh(instruction)
+        when 0x29  # SH
+          rs = (instruction >> 21) & 0x1F
+          rt = (instruction >> 16) & 0x1F
+          imm = instruction & 0xFFFF
+          imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+          addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+          if (addr & 1) != 0
+            exception(COP0::EXC_ADES, bad_addr: addr)
+          else
+            @memory.write16(addr, @regs[rt])
+          end
         when 0x2A then op_swl(instruction)
         when 0x2E then op_swr(instruction)
         when 0x30 then op_lwcN(instruction, 0)
         when 0x31 then op_lwcN(instruction, 1)
-        when 0x32 then op_lwcN(instruction, 2)
+        when 0x32  # LWC2
+          if (@cop0.sr & COP0::SR_CU2) == 0
+            exception(COP0::EXC_CPU, coprocessor: 2)
+          else
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            imm = instruction & 0xFFFF
+            imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+            @gte.write_data(rt, @memory.read32((@regs[rs] + imm) & 0xFFFF_FFFF))
+          end
         when 0x33 then op_lwcN(instruction, 3)
         when 0x38 then op_swcN(instruction, 0)
         when 0x39 then op_swcN(instruction, 1)
-        when 0x3A then op_swcN(instruction, 2)
+        when 0x3A  # SWC2
+          if (@cop0.sr & COP0::SR_CU2) == 0
+            exception(COP0::EXC_CPU, coprocessor: 2)
+          else
+            rs = (instruction >> 21) & 0x1F
+            rt = (instruction >> 16) & 0x1F
+            imm = instruction & 0xFFFF
+            imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
+            @memory.write32((@regs[rs] + imm) & 0xFFFF_FFFF, @gte.read_data(rt))
+          end
         when 0x3B then op_swcN(instruction, 3)
         else
           exception(COP0::EXC_RI)
