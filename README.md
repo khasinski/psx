@@ -134,7 +134,8 @@ the front-end falls back to SDL.
 
 For CPU performance experiments, `PSX_CPU_BLOCKS=1` enables narrow
 Ridge Racer hot-loop superinstructions. This is optional and game-specific;
-leave it off for the default interpreter path.
+leave it off for the default interpreter path. `PSX_CPU_GENERATED_BLOCKS=1`
+switches that fast path to the experimental generated Ruby block backend.
 
 ## Programmatic use
 

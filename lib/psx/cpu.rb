@@ -44,6 +44,7 @@ module PSX
       @bios_words = memory.bios_words
       @isolated_cache_words = memory.isolated_cache_words
       @region_mask = Memory::REGION_MASK
+      @generated_cpu_blocks = ENV["PSX_CPU_GENERATED_BLOCKS"] == "1"
       @interrupts = interrupts
       @regs = Array.new(32, 0)  # R0 is always 0
       @pc = RESET_VECTOR
@@ -513,6 +514,9 @@ module PSX
     end
 
     def step_compiled_block
+      return nil unless @pc == RIDGE_ATTRACT_WAIT_LOOP
+      return step_generated_block if @generated_cpu_blocks
+
       return nil unless @pc == RIDGE_ATTRACT_WAIT_LOOP &&
                         !@memory.cache_isolated &&
                         !@next_in_delay_slot &&
@@ -521,6 +525,14 @@ module PSX
                         @regs[3] == 0xFFFF_FFFF
 
       step_ridge_attract_wait_iteration
+    end
+
+    def step_generated_block
+      return nil unless @pc == RIDGE_ATTRACT_WAIT_LOOP
+
+      return nil unless compile_ridge_attract_wait_loop
+
+      __psx_block_8004f2ec
     end
 
     private
@@ -563,6 +575,74 @@ module PSX
       @next_in_delay_slot = false
       @step_cycles = 21
       14
+    end
+
+    def compile_ridge_attract_wait_loop
+      return nil unless @memory.read32(0x8004_F2EC) == 0x8FA2_0010 &&
+                        @memory.read32(0x8004_F2F0) == 0x0000_0000 &&
+                        @memory.read32(0x8004_F2F4) == 0x2442_FFFF &&
+                        @memory.read32(0x8004_F2F8) == 0xAFA2_0010 &&
+                        @memory.read32(0x8004_F2FC) == 0x8FA2_0010 &&
+                        @memory.read32(0x8004_F300) == 0x0000_0000 &&
+                        @memory.read32(0x8004_F304) == 0x1443_000C &&
+                        @memory.read32(0x8004_F308) == 0x0000_0000 &&
+                        @memory.read32(0x8004_F338) == 0x3C02_8008 &&
+                        @memory.read32(0x8004_F33C) == 0x8C42_E574 &&
+                        @memory.read32(0x8004_F340) == 0x0000_0000 &&
+                        @memory.read32(0x8004_F344) == 0x0044_102A &&
+                        @memory.read32(0x8004_F348) == 0x1440_FFE8 &&
+                        @memory.read32(0x8004_F34C) == 0x0000_0000
+
+      source = <<~RUBY
+        def __psx_block_8004f2ec
+          return nil unless @pc == RIDGE_ATTRACT_WAIT_LOOP &&
+                            !@memory.cache_isolated &&
+                            !@next_in_delay_slot &&
+                            @load_delay_reg == 0 &&
+                            @load_delay_commit_reg == 0 &&
+                            @regs[3] == 0xFFFF_FFFF
+
+          sp_slot = (@regs[29] + 16) & 0xFFFF_FFFF
+          return nil if (sp_slot & 3) != 0
+
+          v0 = @memory.read32(sp_slot)
+          v0 = (v0 - 1) & 0xFFFF_FFFF
+          @memory.write32(sp_slot, v0)
+          v0 = @memory.read32(sp_slot)
+
+          if v0 == @regs[3]
+            @regs[2] = v0
+            @pc = 0x8004_F30C
+            @next_pc = 0x8004_F310
+            @branch_target = nil
+            @next_in_delay_slot = false
+            @step_cycles = 8
+            return 8
+          end
+
+          v0 = @memory.read32(RIDGE_ATTRACT_FRAME_COUNTER)
+          a0 = @regs[4]
+          sv0 = v0
+          sv0 -= 0x1_0000_0000 if (sv0 & 0x8000_0000) != 0
+          sa0 = a0
+          sa0 -= 0x1_0000_0000 if (sa0 & 0x8000_0000) != 0
+          @regs[2] = sv0 < sa0 ? 1 : 0
+
+          if @regs[2] != 0
+            @pc = RIDGE_ATTRACT_WAIT_LOOP
+            @next_pc = RIDGE_ATTRACT_WAIT_LOOP + 4
+          else
+            @pc = 0x8004_F350
+            @next_pc = 0x8004_F354
+          end
+          @branch_target = nil
+          @next_in_delay_slot = false
+          @step_cycles = 21
+          14
+        end
+      RUBY
+      self.class.class_eval(source, __FILE__, __LINE__) unless self.class.method_defined?(:__psx_block_8004f2ec)
+      true
     end
 
     def exception_vector_unusable?
