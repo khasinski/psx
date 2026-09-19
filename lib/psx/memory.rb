@@ -25,7 +25,7 @@ module PSX
     ].freeze
 
     attr_accessor :cache_isolated, :dma, :gpu, :cdrom, :sio0, :spu, :mdec
-    attr_reader :ram_words, :bios_words, :isolated_cache_words  # exposed so CPU can inline read32/fetch32 fast paths
+    attr_reader :ram_words, :bios_words, :isolated_cache_words, :scratchpad, :timers  # exposed so CPU can inline hot paths
 
     def initialize(bios:, ram:, interrupts: nil, dma: nil, timers: nil, cdrom: nil, sio0: nil, spu: nil, mdec: nil)
       @bios = bios
@@ -292,6 +292,8 @@ module PSX
     # I/O register stubs - will be expanded later
     def io_read8(offset)
       case offset
+      when 0x0080...0x0100
+        ((@dma&.read((offset - 0x0080) & ~3) || 0) >> ((offset & 3) * 8)) & 0xFF
       when 0x0040..0x004F
         @sio0 ? @sio0.read8(offset) : 0xFF
       when 0x0800..0x0803
@@ -307,6 +309,8 @@ module PSX
 
     def io_read16(offset)
       case offset
+      when 0x0080...0x0100
+        ((@dma&.read((offset - 0x0080) & ~3) || 0) >> ((offset & 3) * 8)) & 0xFFFF
       when 0x0040..0x004F
         @sio0 ? @sio0.read16(offset) : 0
       when 0x005A
@@ -391,6 +395,9 @@ module PSX
 
     def io_write8(offset, value)
       case offset
+      when 0x0080...0x0100
+        @dma&.write_partial(offset - 0x0080, value, 8)
+        @dma&.tick(self, gpu: @gpu)
       when 0x0040..0x004F
         @sio0&.write8(offset, value)
       when 0x0800..0x0803
@@ -404,6 +411,9 @@ module PSX
 
     def io_write16(offset, value)
       case offset
+      when 0x0080...0x0100
+        @dma&.write_partial(offset - 0x0080, value, 16)
+        @dma&.tick(self, gpu: @gpu)
       when 0x0040..0x004F
         @sio0&.write16(offset, value)
       when 0x0070

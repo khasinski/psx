@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 module PSX
+  FMV_DUMP_DIR = ENV["PSX_FMV_DUMP"]
+
   # MDEC — Motion DECoder.
   #
   # JPEG-style fixed-function decoder. Accepts a stream of RLE'd DCT
@@ -75,11 +77,14 @@ module PSX
       # phase-1 stub it stays empty so the game sees "FIFO empty" on reads.
       @output_fifo      = []
       @output_empty_status_delay_cycles = 0
-      # Quant tables (luma + chroma) and IDCT scale table. Stored when the
-      # game loads them; consumed by the decoder in phase 3.
-      @quant_luma       = Array.new(64, 0)
-      @quant_chroma     = Array.new(64, 0)
-      @idct_table       = Array.new(64, 0)
+      # Quant + IDCT tables persist across reset (nocash MDEC docs: reset
+      # reinitializes decoder state but does NOT clear loaded tables). FF7's
+      # FMV loader uploads tables once at game start, then issues reset + decode
+      # before each movie — if reset wiped the tables the bitstream would decode
+      # to all zeroes.
+      @quant_luma       ||= Array.new(64, 0)
+      @quant_chroma     ||= Array.new(64, 0)
+      @idct_table       ||= Array.new(64, 0)
       # Buffer of decode-command parameter words (RLE + scale headers).
       # Phase 3 will consume this and produce pixel data.
       @decode_buffer    = []
@@ -142,6 +147,14 @@ module PSX
       @output_words_remaining.positive?
     end
 
+    # True only when no decode is in flight AND the output FIFO is empty —
+    # i.e. a previously submitted decode finished and the game has not yet
+    # queued the next one. DMA1 uses this to decide it's safe to soft-complete
+    # an under-fed request (see DMA#transfer_mdec_out).
+    def decode_idle?
+      @params_remaining.zero? && @output_words_remaining.zero?
+    end
+
     def tick(cycles)
       return if @output_empty_status_delay_cycles <= 0
       @output_empty_status_delay_cycles -= cycles
@@ -152,11 +165,27 @@ module PSX
     def write32_data(word)
       word &= 0xFFFF_FFFF
       if @params_remaining.zero?
+        if PSX::FMV_DEBUG
+          cmd   = (word >> 29) & 0x7
+          depth = (word >> 27) & 0x3
+          signed = ((word >> 26) & 1)
+          bit15 = ((word >> 25) & 1)
+          plen  = word & 0xFFFF
+          $stderr.puts format("[mdec] cmd=%d depth=%d signed=%d bit15=%d params=%d (word=%08X)",
+                              cmd, depth, signed, bit15, plen, word)
+        end
         start_command(word)
       else
         consume_payload(word)
         @params_remaining -= 1
-        finish_decode if @params_remaining.zero? && @load_target == :decode_data
+        if @params_remaining.zero? && @load_target == :decode_data
+          finish_decode
+          if PSX::FMV_DEBUG
+            sample = @output_fifo.first(4).map { |w| format('%08X', w) }.join(' ')
+            $stderr.puts format("[mdec] finish_decode: %d output words ready (depth=%d) sample=%s",
+                                @output_words_remaining, @output_depth, sample)
+          end
+        end
       end
     end
 
@@ -165,9 +194,14 @@ module PSX
       word &= 0xFFFF_FFFF
       if (word & CTRL_RESET) != 0
         reset
+        $stderr.puts "[mdec] reset" if PSX::FMV_DEBUG
       end
       @dma_in_enabled  = (word & CTRL_ENABLE_DMA_IN)  != 0
       @dma_out_enabled = (word & CTRL_ENABLE_DMA_OUT) != 0
+      if PSX::FMV_DEBUG
+        $stderr.puts format("[mdec] control: dma_in=%d dma_out=%d (word=%08X)",
+                            @dma_in_enabled ? 1 : 0, @dma_out_enabled ? 1 : 0, word)
+      end
     end
 
     private
@@ -260,9 +294,14 @@ module PSX
       blocks_per_mb = (@output_depth <= 1) ? 1 : 6
       output_bytes  = []
       pos           = 0
+      mbs_emitted   = 0
+      drop_pos      = nil
 
+      block_consumption = [] if PSX::FMV_DEBUG
       while pos < halfwords.size
         blocks = []
+        block_start_pos = pos
+        any_real = false
         blocks_per_mb.times do |bi|
           # Block index decides which quant table to use: 0/1 = chroma
           # (Cr, Cb), 2..5 = luma. 4-bit/8-bit modes only ever have a
@@ -272,17 +311,103 @@ module PSX
                    else
                      @quant_chroma
                    end
+          b_start = pos
           block, pos = decode_block(halfwords, pos, qtable)
-          break if block.nil?
-          blocks << block
+          block_consumption << (pos - b_start) if PSX::FMV_DEBUG
+          if block.nil?
+            # Bitstream ran out mid-macroblock. FF7 expects MDEC to keep
+            # emitting until the game's DMA1 count is satisfied, so fill the
+            # remainder with all-zero (gray) blocks rather than dropping the
+            # whole MB. Drop dropping a partial MB used to make the FMV
+            # decoder produce 1+ fewer MBs than the game expected, causing
+            # DMA1 to stall.
+            blocks << Array.new(64, 0)
+          else
+            blocks << block
+            any_real = true
+          end
         end
-        break if blocks.size < blocks_per_mb
+        unless any_real
+          drop_pos = [block_start_pos, pos]
+          break
+        end
 
         case @output_depth
         when 0 then pack_4bit_into(output_bytes, blocks[0])
         when 1 then pack_8bit_into(output_bytes, blocks[0])
         when 2 then pack_24bit_into(output_bytes, blocks)
         when 3 then pack_15bit_into(output_bytes, blocks)
+        end
+        mbs_emitted += 1
+      end
+
+      if PSX::FMV_DEBUG
+        tail = halfwords[(drop_pos&.first || pos), 12]&.map { |h| format('%04X', h) }&.join(' ')
+        $stderr.puts format("[mdec] decode: hw_size=%d final_pos=%d mbs=%d drop=%s tail=%s",
+                            halfwords.size, pos, mbs_emitted, drop_pos.inspect, tail)
+      end
+
+      if PSX::FMV_DUMP_DIR
+        require "fileutils"
+        FileUtils.mkdir_p(PSX::FMV_DUMP_DIR)
+        @dump_seq ||= 0
+        @dump_seq += 1
+        base = format("%s/frame_%04d_depth%d", PSX::FMV_DUMP_DIR, @dump_seq, @output_depth)
+
+        File.binwrite("#{base}.bitstream",
+                      @decode_buffer.pack("V*"))
+        File.binwrite("#{base}.tables",
+                      @quant_luma.pack("C64") + @quant_chroma.pack("C64") + @idct_table.pack("s<64"))
+
+        # Render the decoded bytes as a PPM image so we can eyeball each
+        # frame without launching the emulator. For 24-bit/15-bit modes the
+        # output is laid out as 16x16 macroblocks in column-major order, 14 MB
+        # rows per column (FF7's intro is 320x224 = 20 columns of 14 MBs).
+        if @output_depth == 2 && mbs_emitted >= 14
+          mb_cols = mbs_emitted / 14
+          File.open("#{base}.ppm", "wb") do |f|
+            f.write("P6\n#{mb_cols * 16} 224\n255\n")
+            224.times do |y|
+              row = +""
+              (mb_cols * 16).times do |x|
+                mb_col = x / 16
+                mb_row = y / 16
+                mb_index = mb_col * 14 + mb_row
+                x_in_mb = x % 16
+                y_in_mb = y % 16
+                byte_offset = mb_index * 768 + (y_in_mb * 16 + x_in_mb) * 3
+                row << (output_bytes[byte_offset] || 0).chr
+                row << (output_bytes[byte_offset + 1] || 0).chr
+                row << (output_bytes[byte_offset + 2] || 0).chr
+              end
+              f.write(row)
+            end
+          end
+        elsif @output_depth == 3 && mbs_emitted >= 14
+          # 15-bit mode: each MB = 256 16-bit pixels = 512 bytes. We treat
+          # the same column-major MB layout.
+          mb_cols = mbs_emitted / 14
+          File.open("#{base}.ppm", "wb") do |f|
+            f.write("P6\n#{mb_cols * 16} 224\n255\n")
+            224.times do |y|
+              row = +""
+              (mb_cols * 16).times do |x|
+                mb_col = x / 16
+                mb_row = y / 16
+                mb_index = mb_col * 14 + mb_row
+                x_in_mb = x % 16
+                y_in_mb = y % 16
+                byte_offset = mb_index * 512 + (y_in_mb * 16 + x_in_mb) * 2
+                lo = output_bytes[byte_offset] || 0
+                hi = output_bytes[byte_offset + 1] || 0
+                pix = lo | (hi << 8)
+                row << (((pix & 0x001F) << 3) & 0xFF).chr
+                row << (((pix & 0x03E0) >> 2) & 0xFF).chr
+                row << (((pix & 0x7C00) >> 7) & 0xFF).chr
+              end
+              f.write(row)
+            end
+          end
         end
       end
 
@@ -334,27 +459,35 @@ module PSX
       idx = 0
       while pos < halfwords.size
         hw = halfwords[pos]
-        pos += 1
         break if hw == RLC_EOB
 
         run = (hw >> 10) & 0x3F
         val = hw & 0x3FF
         val -= 0x400 if val >= 0x200    # sign-extend 10-bit
 
-        idx += run + 1
-        if idx < 64
-          coef = if q_scale.zero?
-                   val << 5
-                 else
-                   scq = q_scale * qtable[idx]
-                   ((val * scq) >> 3) << 4
-                 end
-          coef += val.positive? ? -8 : 8 if !q_scale.zero? && val != 0
-          coef = clamp_signed_15(coef)
-          coeffs[ZIGZAG[idx]] = coef
-        end
+        next_idx = idx + run + 1
+        # Real MDEC: a run that would push the coefficient index past 63 does
+        # NOT consume the halfword — the block ends, and the halfword is the
+        # next block's header. Consuming it (as the old code did) silently ate
+        # one input halfword per saturating block; over ~1600 blocks in a
+        # dense FF7 frame that lost ~6 macroblocks worth of data, producing
+        # blocky glitches along the right/bottom edge.
+        break if next_idx >= 64
+
+        pos += 1
+        idx = next_idx
+        coef = if q_scale.zero?
+                 val << 5
+               else
+                 scq = q_scale * qtable[idx]
+                 ((val * scq) >> 3) << 4
+               end
+        coef += val.positive? ? -8 : 8 if !q_scale.zero? && val != 0
+        coef = clamp_signed_15(coef)
+        coeffs[ZIGZAG[idx]] = coef
         break if idx >= 63
       end
+      pos += 1 if pos < halfwords.size && halfwords[pos] == RLC_EOB
       # End-of-stream without an explicit EOB = implicit EOB; emit the
       # partial block we built up. (Some encoders, including the one
       # used for .tests/mdec/4bit/heart.mdec, omit the trailing EOB.)

@@ -25,6 +25,17 @@ class DMASpec < Minitest::Test
     assert_equal 0x0010_0001, @dma.read(0x24)
   end
 
+  def test_control_write_resumes_a_suspended_channel
+    channel = @dma.channels[2]
+    channel.suspend!
+    assert channel.suspended
+    @dma.write(0x20, 0x1000)
+    assert channel.suspended
+    @dma.write(0x28, PSX::DMA::CTRL_START_BUSY)
+    refute channel.suspended
+    assert channel.active?
+  end
+
   def test_dicr_acknowledge_flags
     # Set some flags
     @dma.instance_variable_set(:@dicr, 0x0700_0000)  # Flags for channels 0-2

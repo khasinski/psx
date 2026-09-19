@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-09-19
+
+### Compatibility and fixes
+
+- Fix byte and halfword DMA register accesses, including interrupt-enable
+  updates and write-one-to-clear flags. This fixes premature sector-group
+  completion during Parasite Eve FMV playback.
+- Avoid suppressing Rage Racer's CD-ROM callback before its stream queue
+  has been installed.
+- Preserve MDEC quantization and IDCT tables across decoder resets; improve
+  incomplete-block handling and avoid stalled output DMA on short frames.
+- Restore the CPU's cached scratchpad reference when loading a save state.
+- Include GPU rendering fixes for textured primitives and BIOS boot graphics.
+
+### Performance
+
+- Inline common RAM, scratchpad, GPU-status and timer reads in CPU hot paths.
+- Cache dithered 4-bit texture palettes and optimize common textured triangles.
+- This release uses the regular Ruby/SDL2 frontend. Experimental Spinel
+  backends are not included.
 
 ### Front-end
 

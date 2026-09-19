@@ -41,6 +41,9 @@ module PSX
       @ram_words = memory.ram_words
       @bios_words = memory.bios_words
       @isolated_cache_words = memory.isolated_cache_words
+      @scratchpad = memory.scratchpad
+      @gpu = memory.gpu
+      @timer_units = memory.timers.instance_variable_get(:@timers)
       @region_mask = Memory::REGION_MASK
       @interrupts = interrupts
       @regs = Array.new(32, 0)  # R0 is always 0
@@ -182,6 +185,16 @@ module PSX
             ph = addr & @region_mask[(addr >> 29) & 0x7]
             val = if ph < 0x0080_0000
                     @ram_words[(ph & 0x001F_FFFF) >> 2]
+                  elsif ph >= 0x1F80_0000 && ph < 0x1F80_0400
+                    offset = ph - 0x1F80_0000
+                    @scratchpad.getbyte(offset) |
+                      (@scratchpad.getbyte(offset + 1) << 8) |
+                      (@scratchpad.getbyte(offset + 2) << 16) |
+                      (@scratchpad.getbyte(offset + 3) << 24)
+                  elsif ph == 0x1F80_1814
+                    @gpu.status
+                  elsif ph == 0x1F80_1110
+                    @timer_units[1].counter
                   else
                     @memory.read32(addr) & 0xFFFF_FFFF
                   end
@@ -208,6 +221,13 @@ module PSX
               # so every store within the 8 MB region commits to the same
               # 2 MB cell (symmetric mirror, matches real hardware).
               @ram_words[(ph & 0x001F_FFFF) >> 2] = @regs[rt] & 0xFFFF_FFFF
+            elsif ph >= 0x1F80_0000 && ph < 0x1F80_0400
+              offset = ph - 0x1F80_0000
+              value = @regs[rt]
+              @scratchpad.setbyte(offset, value & 0xFF)
+              @scratchpad.setbyte(offset + 1, (value >> 8) & 0xFF)
+              @scratchpad.setbyte(offset + 2, (value >> 16) & 0xFF)
+              @scratchpad.setbyte(offset + 3, (value >> 24) & 0xFF)
             else
               @memory.write32(addr, @regs[rt])
             end
@@ -380,7 +400,17 @@ module PSX
           if (addr & 1) != 0
             exception(COP0::EXC_ADEL, bad_addr: addr)
           else
-            val = @memory.read16(addr)
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            val = if ph < 0x0080_0000
+              offset = ph & 0x001F_FFFF
+              word = @ram_words[offset >> 2]
+              (word >> ((offset & 2) * 8)) & 0xFFFF
+            elsif ph >= 0x1F80_0000 && ph < 0x1F80_0400
+              offset = ph - 0x1F80_0000
+              @scratchpad.getbyte(offset) | (@scratchpad.getbyte(offset + 1) << 8)
+            else
+              @memory.read16(addr)
+            end
             val |= 0xFFFF_0000 if (val & 0x8000) != 0
             @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
             @load_delay_reg = rt
@@ -400,7 +430,17 @@ module PSX
           else
             @load_delay_commit_reg = 0 if @load_delay_commit_reg == rt
             @load_delay_reg = rt
-            @load_delay_value = @memory.read16(addr)
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            @load_delay_value = if ph < 0x0080_0000
+              offset = ph & 0x001F_FFFF
+              word = @ram_words[offset >> 2]
+              (word >> ((offset & 2) * 8)) & 0xFFFF
+            elsif ph >= 0x1F80_0000 && ph < 0x1F80_0400
+              offset = ph - 0x1F80_0000
+              @scratchpad.getbyte(offset) | (@scratchpad.getbyte(offset + 1) << 8)
+            else
+              @memory.read16(addr)
+            end
             @step_cycles += 1
           end
         when 0x26 then op_lwr(instruction)
@@ -414,7 +454,21 @@ module PSX
           if (addr & 1) != 0
             exception(COP0::EXC_ADES, bad_addr: addr)
           else
-            @memory.write16(addr, @regs[rt])
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            if ph < 0x0080_0000
+              offset = ph & 0x001F_FFFF
+              idx = offset >> 2
+              shift = (offset & 2) * 8
+              mask = 0xFFFF << shift
+              @ram_words[idx] = ((@ram_words[idx] & ~mask) | ((@regs[rt] & 0xFFFF) << shift)) & 0xFFFF_FFFF
+            elsif ph >= 0x1F80_0000 && ph < 0x1F80_0400
+              offset = ph - 0x1F80_0000
+              value = @regs[rt]
+              @scratchpad.setbyte(offset, value & 0xFF)
+              @scratchpad.setbyte(offset + 1, (value >> 8) & 0xFF)
+            else
+              @memory.write16(addr, @regs[rt])
+            end
           end
         when 0x2A then op_swl(instruction)
         when 0x2E then op_swr(instruction)
@@ -428,7 +482,18 @@ module PSX
             rt = (instruction >> 16) & 0x1F
             imm = instruction & 0xFFFF
             imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
-            @gte.write_data(rt, @memory.read32((@regs[rs] + imm) & 0xFFFF_FFFF))
+            addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            value = if ph >= 0x1F80_0000 && ph < 0x1F80_0400
+              offset = ph - 0x1F80_0000
+              @scratchpad.getbyte(offset) |
+                (@scratchpad.getbyte(offset + 1) << 8) |
+                (@scratchpad.getbyte(offset + 2) << 16) |
+                (@scratchpad.getbyte(offset + 3) << 24)
+            else
+              @memory.read32(addr)
+            end
+            @gte.write_data(rt, value)
           end
         when 0x33 then op_lwcN(instruction, 3)
         when 0x38 then op_swcN(instruction, 0)
@@ -441,7 +506,18 @@ module PSX
             rt = (instruction >> 16) & 0x1F
             imm = instruction & 0xFFFF
             imm = imm | 0xFFFF_0000 if (imm & 0x8000) != 0
-            @memory.write32((@regs[rs] + imm) & 0xFFFF_FFFF, @gte.read_data(rt))
+            addr = (@regs[rs] + imm) & 0xFFFF_FFFF
+            ph = addr & @region_mask[(addr >> 29) & 0x7]
+            value = @gte.read_data(rt)
+            if ph >= 0x1F80_0000 && ph < 0x1F80_0400
+              offset = ph - 0x1F80_0000
+              @scratchpad.setbyte(offset, value & 0xFF)
+              @scratchpad.setbyte(offset + 1, (value >> 8) & 0xFF)
+              @scratchpad.setbyte(offset + 2, (value >> 16) & 0xFF)
+              @scratchpad.setbyte(offset + 3, (value >> 24) & 0xFF)
+            else
+              @memory.write32(addr, value)
+            end
           end
         when 0x3B then op_swcN(instruction, 3)
         else
@@ -581,6 +657,7 @@ module PSX
                           cdrom.instance_variable_get(:@whole_sector) &&
                           cdrom.instance_variable_get(:@reading) &&
                           cdrom.instance_variable_get(:@seek_lba) == 304
+      return false if @memory.read32(RAGE_STREAM_QUEUE_BASE_PTR).zero?
 
       !rage_stream_dma_group_complete?
     end

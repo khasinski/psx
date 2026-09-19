@@ -623,7 +623,7 @@ module PSX
       @pending_command_code = cmd
       @pending_command_snapshot = snapshot_command_state
 
-      if ENV["PSX_TRACE_CDROM"]
+      if ENV["PSX_TRACE_CDROM"] || PSX::FMV_DEBUG
         $stderr.puts format("[cdrom] cmd=%02X params=[%s] stat=%02X",
                             cmd, params.map { |p| "%02X" % p }.join(" "), @stat)
       end
@@ -665,7 +665,7 @@ module PSX
       when 0x1B then cmd_read
       when 0x1E then cmd_read_toc
       else
-        if ENV["PSX_TRACE_CDROM"]
+        if ENV["PSX_TRACE_CDROM"] || PSX::FMV_DEBUG
           $stderr.puts format("[cdrom] UNHANDLED cmd=%02X — sending invalid-command error", cmd)
         end
         queue_response(0, 5, [SF_ERROR | @stat, ERROR_REASON_INVALID_COMMAND])

@@ -23,6 +23,8 @@ require_relative "psx/savestate"
 require_relative "psx/config"
 
 module PSX
+  FMV_DEBUG = !ENV["PSX_FMV_DEBUG"].nil?
+
   class Emulator
     attr_reader :bios, :cpu, :memory, :interrupts, :dma, :gpu, :timers, :cdrom, :sio0, :spu, :mdec
     attr_accessor :controller_state_proc

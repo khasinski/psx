@@ -73,6 +73,10 @@ module PSX
         @suspended = true
       end
 
+      def resume!
+        @suspended = false
+      end
+
       def direction
         (@channel_ctrl & CTRL_DIRECTION) != 0 ? :from_ram : :to_ram
       end
@@ -172,13 +176,23 @@ module PSX
           end
           # Any new CHCR write clears a prior runaway-chain suspension
           # (software has either re-armed the channel or aborted it).
-          channel.instance_variable_set(:@suspended, false)
+          channel.resume!
         end
       elsif offset == 0x70
         @dpcr = value
       elsif offset == 0x74
         write_dicr(value)
       end
+    end
+
+    def write_partial(offset, value, bits)
+      aligned = offset & ~3
+      shift = (offset & 3) * 8
+      mask = ((1 << bits) - 1) << shift
+      merged = (read(aligned) & ~mask) | ((value << shift) & mask)
+      # Unwritten W1C flags must not be acknowledged by the read/merge.
+      merged &= ~(DICR_IRQ_FLAGS & ~mask) if aligned == 0x74
+      write(aligned, merged)
     end
 
     def write_dicr(value)
@@ -411,6 +425,12 @@ module PSX
 
       addr = channel.base_addr
       step = channel.step
+
+      if PSX::FMV_DEBUG
+        $stderr.puts format("[dma3] cdrom: addr=%08X size=%d count=%d total_words=%d",
+                            addr, size, count, total)
+      end
+
       total.times do
         word = @cdrom.dma_read_word
         memory.write32(addr & 0x1F_FFFC, word)
@@ -503,6 +523,11 @@ module PSX
       addr  = channel.base_addr
       step  = channel.step
 
+      if PSX::FMV_DEBUG
+        $stderr.puts format("[dma0] mdec_in: addr=%08X size=%d count=%d total=%d sync=%d",
+                            addr, size, count, total, channel.sync_mode)
+      end
+
       total.times do
         word = memory.read32(addr & 0x1F_FFFC)
         @mdec&.write32_data(word)
@@ -526,6 +551,12 @@ module PSX
       addr  = channel.base_addr
       step  = channel.step
 
+      if PSX::FMV_DEBUG
+        $stderr.puts format("[dma1] mdec_out: addr=%08X size=%d count=%d sync=%d avail=%d",
+                            addr, size, count, channel.sync_mode,
+                            @mdec.instance_variable_get(:@output_words_remaining).to_i)
+      end
+
       case channel.sync_mode
       when SYNC_REQUEST
         blocks_remaining = count
@@ -545,9 +576,23 @@ module PSX
         end
 
         if blocks_remaining.positive?
-          channel.base_addr = addr & 0x00FF_FFFC
-          channel.block_ctrl = (blocks_remaining << 16) | size
-          return true
+          # Soft-complete the channel when MDEC has truly finished a decode
+          # with nothing else in flight. Real hardware would still hang, but
+          # games normally match DMA1 count to the decoded frame size — and
+          # our decoder occasionally produces a slightly short frame for
+          # certain FF7 bitstreams (last MB(s) absorbed into EOB padding).
+          # Without this escape the FMV pipeline deadlocks; with it the game
+          # moves on to the next frame.
+          if @mdec.respond_to?(:decode_idle?) && @mdec.decode_idle?
+            if PSX::FMV_DEBUG
+              $stderr.puts format("[dma1] soft-complete: %d blocks unfinished, MDEC idle",
+                                  blocks_remaining)
+            end
+          else
+            channel.base_addr = addr & 0x00FF_FFFC
+            channel.block_ctrl = (blocks_remaining << 16) | size
+            return true
+          end
         end
       else
         total = size * count

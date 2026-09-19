@@ -145,7 +145,7 @@ module PSX
 
     def initialize(tracks)
       @tracks = tracks
-      @total_sectors = tracks.map(&:lba_end).max
+      @total_sectors = tracks.map { |track| track.lba_end }.max
       @region_code = nil
       @file_positions = {}
     end

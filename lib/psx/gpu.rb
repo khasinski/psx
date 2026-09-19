@@ -138,6 +138,7 @@ module PSX
       @framebuffer_dirty = true
       @framebuffer_cache = nil
       @texture_clut_cache_store = {}
+      @texture_clut_dither_cache_store = {}
       @gpu_info_latch = 0
 
       # DMA direction
@@ -838,6 +839,10 @@ module PSX
       @vram_transfer_start_x = @vram_transfer_x  # Remember starting X for line wrap
       w = (((size & 0xFFFF) - 1) & 0x3FF) + 1
       h = ((((size >> 16) & 0xFFFF) - 1) & 0x1FF) + 1
+      if PSX::FMV_DEBUG
+        $stderr.puts format("[gpu] cpu->vram: (%d,%d) %dx%d",
+                            @vram_transfer_x, @vram_transfer_y, w, h)
+      end
       @vram_transfer_width = w
       @vram_transfer_height = h
       @vram_transfer_pixels_remaining = w * h
@@ -1042,6 +1047,9 @@ module PSX
     def gp1_display_start(value)
       @display_start_x = value & 0x3FE  # 10 bits, even
       @display_start_y = (value >> 10) & 0x1FF
+      if PSX::FMV_DEBUG
+        $stderr.puts format("[gpu] display_start: (%d,%d)", @display_start_x, @display_start_y)
+      end
       mark_dirty
     end
 
@@ -1513,8 +1521,35 @@ module PSX
       @texture_clut_cache_store[key] = cache
     end
 
+    def texture_clut_4bit_128_dither_cache(clut_x, clut_y)
+      key = ((clut_y % VRAM_HEIGHT) << 10) | (clut_x % VRAM_WIDTH)
+      cached = @texture_clut_dither_cache_store[key]
+      return cached if cached
+
+      clut_cache = texture_clut_cache(clut_x, clut_y, 0)
+      dither_table = DITHER_128_TO_5BIT
+      cache = Array.new(16 * 16, -1)
+      dither_idx = -1
+      while (dither_idx += 1) < 16
+        table_base = dither_idx << 5
+        cache_base = dither_idx << 4
+        clut_idx = -1
+        while (clut_idx += 1) < 16
+          texel = clut_cache[clut_idx]
+          next if texel == 0
+
+          fr5 = dither_table[table_base | (texel & 0x001F)]
+          fg5 = dither_table[table_base | ((texel & 0x03E0) >> 5)]
+          fb5 = dither_table[table_base | ((texel & 0x7C00) >> 10)]
+          cache[cache_base | clut_idx] = fr5 | (fg5 << 5) | (fb5 << 10) | (texel & 0x8000)
+        end
+      end
+      @texture_clut_dither_cache_store[key] = cache
+    end
+
     def clear_texture_clut_cache
       @texture_clut_cache_store.clear
+      @texture_clut_dither_cache_store.clear
     end
 
     def sample_texture(u, v, clut_x, clut_y, tex_page_x, tex_page_y, tex_depth, clut_cache = nil)
@@ -1587,11 +1622,12 @@ module PSX
          c0r == 128 && c0g == 128 && c0b == 128 &&
          c1r == 128 && c1g == 128 && c1b == 128 &&
          c2r == 128 && c2g == 128 && c2b == 128
+        dither_clut_cache = texture_clut_4bit_128_dither_cache(clut_x, clut_y)
         draw_textured_triangle_4bit_128_dithered(
           x0, y0, u0, v0_tex,
           x1, y1, u1, v1_tex_in,
           x2, y2, u2, v2_tex_in,
-          clut_cache, tex_page_x, tex_page_y
+          dither_clut_cache, tex_page_x, tex_page_y
         )
         return
       end
@@ -1799,7 +1835,7 @@ module PSX
     def draw_textured_triangle_4bit_128_dithered(x0, y0, u0, v0_tex,
                                                  x1, y1, u1, v1_tex_in,
                                                  x2, y2, u2, v2_tex_in,
-                                                 clut_cache, tex_page_x, tex_page_y)
+                                                 dither_clut_cache, tex_page_x, tex_page_y)
       if y0 > y1
         x0, x1 = x1, x0; y0, y1 = y1, y0
         u0, u1 = u1, u0; v0_tex, v1_tex_in = v1_tex_in, v0_tex
@@ -1827,7 +1863,6 @@ module PSX
       y_hi = VRAM_HEIGHT - 1   if y_hi > VRAM_HEIGHT - 1
 
       vram = @vram
-      dither_table = DITHER_128_TO_5BIT
       tex_u_mask = ~(@texture_window_mask_x * 8)
       tex_v_mask = ~(@texture_window_mask_y * 8)
       tex_u_offset = (@texture_window_offset_x & @texture_window_mask_x) * 8
@@ -1880,14 +1915,10 @@ module PSX
           u = (((cur_u >> 16) & 0xFF) & tex_u_mask) | tex_u_offset
           v_coord = (((cur_v >> 16) & 0xFF) & tex_v_mask) | tex_v_offset
           word = vram[(tex_page_y + v_coord) * VRAM_WIDTH + tex_page_x + (u >> 2)]
-          texel = clut_cache[(word >> ((u & 3) << 2)) & 0x0F]
+          texel = dither_clut_cache[((dither_y | (x & 3)) << 4) | ((word >> ((u & 3) << 2)) & 0x0F)]
 
-          if texel != 0
-            table_base = (dither_y | (x & 3)) << 5
-            fr5 = dither_table[table_base | (texel & 0x001F)]
-            fg5 = dither_table[table_base | ((texel & 0x03E0) >> 5)]
-            fb5 = dither_table[table_base | ((texel & 0x7C00) >> 10)]
-            vram[row + x] = fr5 | (fg5 << 5) | (fb5 << 10) | (texel & 0x8000)
+          if texel >= 0
+            vram[row + x] = texel
           end
 
           cur_u += step_u

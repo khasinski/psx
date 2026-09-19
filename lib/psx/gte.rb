@@ -715,7 +715,6 @@ module PSX
 
     def cmd_dpcs(shift, lm, color)
       r, g, b, _cd = color
-      a1 = (r << 16) + (((@fc[0] << 12) - (r << 16)) >> shift) * 0  # simplified
       # MAC = COLOR<<16; then interpolate toward FC by IR0.
       mac1_in = r << 16
       mac2_in = g << 16

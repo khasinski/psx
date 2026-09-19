@@ -232,6 +232,19 @@ class CPUSpec < Minitest::Test
     assert_equal 0, get_reg(2), "incomplete group must not run Rage's DMA callback"
   end
 
+  def test_rage_cdrom_dma_callback_runs_when_stream_queue_is_not_installed
+    setup_rage_intro_cdrom_stream
+    @memory.write32(PSX::CPU::RAGE_STREAM_QUEUE_BASE_PTR, 0)
+    set_reg(31, 0x8000_1234)
+
+    @memory.write32(PSX::CPU::RAGE_CDROM_DMA_CALLBACK, 0x2402_0007) # addiu $v0, $zero, 7
+    @cpu.pc = PSX::CPU::RAGE_CDROM_DMA_CALLBACK
+    @cpu.step
+
+    assert_equal 0x8006_CE7C, @cpu.pc
+    assert_equal 7, get_reg(2)
+  end
+
   def test_rage_cdrom_dma_callback_runs_after_sector_group_is_complete
     setup_rage_intro_cdrom_stream
     setup_rage_stream_queue((0...6).map { |i| [3, 0x0006_0000 | i] })

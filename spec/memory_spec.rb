@@ -13,6 +13,45 @@ class MemorySpec < Minitest::Test
 
   # === Instruction-fetch permission ===
 
+  def test_dma_interrupt_enable_byte_controls_sector_completion
+    dma = PSX::DMA.new
+    @memory.dma = dma
+    dicr = 0x1F80_10F4
+    @memory.write32(dicr, 0x009A_0000)
+    assert_equal 0x9A, @memory.read8(dicr + 2)
+
+    # Streaming code disables DMA3 IRQ for intermediate sectors and enables
+    # it for the last sector, publishing the frame only after that transfer.
+    @memory.write8(dicr + 2, @memory.read8(dicr + 2) & ~8)
+    dma.set_irq_flag(PSX::DMA::CDROM)
+    assert_equal 0x0092_0000, @memory.read32(dicr)
+    @memory.write8(dicr + 2, @memory.read8(dicr + 2) | 8)
+    dma.set_irq_flag(PSX::DMA::CDROM)
+    assert_equal 0x889A_0000, @memory.read32(dicr)
+
+    @memory.write8(dicr + 2, 0x92)
+    assert_equal 0x0892_0000, @memory.read32(dicr), "enable writes must preserve pending flags"
+    @memory.write8(dicr + 3, 8)
+    assert_equal 0x0092_0000, @memory.read32(dicr)
+  end
+
+  def test_dma_halfword_access_preserves_other_lanes_and_w1c_flags
+    dma = PSX::DMA.new
+    @memory.dma = dma
+    dicr = 0x1F80_10F4
+    @memory.write32(dicr, 0x009A_0000)
+    dma.set_irq_flag(PSX::DMA::CDROM)
+    dma.set_irq_flag(PSX::DMA::MDEC_OUT)
+    @memory.write16(dicr, 0)
+    assert_equal 0x8A9A, @memory.read16(dicr + 2)
+    @memory.write16(dicr + 2, 0x089A)
+    assert_equal 0x829A_0000, @memory.read32(dicr)
+
+    @memory.write32(0x1F80_10B4, 0x1234_5678)
+    @memory.write16(0x1F80_10B6, 0xABCD)
+    assert_equal 0xABCD_5678, dma.channels[3].block_ctrl
+  end
+
   def test_fetchable_allows_ram
     assert @memory.fetchable?(0x0000_0000)
     assert @memory.fetchable?(0x0010_0000)

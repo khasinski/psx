@@ -544,9 +544,10 @@ module PSX
       @timers.restore_state(data[:timers])
       @sio0.restore_state(data[:sio0])
 
-      # CPU's @ram_words mirror was rebound by Memory#restore_state; reattach
-      # so its op_lw/op_sw fast paths read the restored RAM, not the original.
+      # CPU's cached memory mirrors were rebound by Memory#restore_state; reattach
+      # so its fast paths read the restored state, not the original buffers.
       @cpu.instance_variable_set(:@ram_words, @memory.ram_words)
+      @cpu.instance_variable_set(:@scratchpad, @memory.scratchpad)
 
       self
     end
